@@ -11,9 +11,12 @@
    becomes the primary "teal"; the warm orange secondary is fixed.
    ============================================================ */
 
-/* The Enterprise ground is a cool grey; Friendly Bold stands on white. */
+/* The Enterprise ground is a cool grey; Friendly Bold stands on white.
+   The flow owns the viewport: the page itself never scrolls. */
 body.fb-body {
   background: #ffffff;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .fb {
@@ -54,9 +57,10 @@ body.fb-body {
   --r-btn: 18px;
   --r-card: 22px;
   --depth: 2px;
-  /* Total sticky height of the brand bar, its 2px rule included: the question
-     bar sticks directly beneath it. */
-  --fb-bar-h: 74px;
+
+  /* The compression dials the short-screen tiers turn down. */
+  --fb-pad-y: clamp(16px, 3vh, 44px);
+  --fb-rate-max: 92px;
 
   /* Shared Enterprise token names, remapped for this subtree only, so the
      primitives in base.css (.card, .control, .pill, .banner) come out
@@ -87,6 +91,19 @@ body.fb-body {
   color: var(--ink);
   font-size: 16px;
   line-height: 1.55;
+  /* A long email address or organisation name breaks rather than pushing the
+     layout sideways: nothing in the flow may scroll horizontally. */
+  overflow-wrap: break-word;
+
+  /* ---------- the flow owns exactly one viewport ----------
+     A column of: brand bar (fixed) + one screen (everything left over).
+     Nothing here scrolls; where a screen genuinely cannot fit, the scroll is
+     handed to a marked region inside it and the primary action stays pinned. */
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .fb :focus-visible {
@@ -99,12 +116,14 @@ body.fb-body {
    HEADER — one row at every width, never wraps into a second bar
    ============================================================ */
 .fb .topbar {
+  position: static;
+  flex: 0 0 auto;
   background: var(--white);
   border-bottom: 2px solid var(--line);
 }
 .fb .topbar-inner {
   height: auto;
-  min-height: calc(var(--fb-bar-h) - 2px);
+  min-height: 0;
   max-width: 1120px;
   padding: 12px 20px;
   gap: 14px;
@@ -138,14 +157,41 @@ body.fb-body {
    SHELL
    ============================================================ */
 .fb .wrap {
+  flex: 1 1 auto;
+  min-height: 0;
   max-width: 100%;
   padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* Whatever screen is mounted takes the whole of what is left. */
+.fb .wrap > * {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .fb .stage {
   width: 100%;
   max-width: 760px;
   margin: 0 auto;
-  padding: 48px 20px 80px;
+  padding: var(--fb-pad-y) 20px;
+  justify-content: center;
+}
+.fb .stage > * {
+  min-height: 0;
+}
+
+/* The only two scroll behaviours in the flow: a region that may scroll when a
+   screen genuinely cannot fit, and a footer that never moves off-screen. */
+.fb .stage-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.fb .stage-pin {
+  flex: 0 0 auto;
 }
 
 /* ============================================================
@@ -325,9 +371,14 @@ body.fb-body {
    WELCOME
    ============================================================ */
 .fb .welcome {
+  width: 100%;
   max-width: 720px;
   margin: 0 auto;
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
 }
 .fb .welcome .display {
   margin: 20px 0 14px;
@@ -379,17 +430,17 @@ body.fb-body {
   flex-direction: column;
   gap: 12px;
   align-items: stretch;
-  margin: 34px auto 0;
+  margin: clamp(16px, 3vh, 34px) auto 0;
   max-width: 400px;
 }
 .fb .fineprint {
   font-size: 13.5px;
   color: var(--ink-3);
-  margin-top: 18px;
+  margin-top: 14px;
   font-weight: 600;
 }
 .fb .rulecard {
-  margin: 40px auto 0;
+  margin: clamp(18px, 4vh, 40px) auto 0;
   max-width: 640px;
   text-align: left;
   background: var(--soft);
@@ -436,14 +487,36 @@ body.fb-body {
    DETAILS FORM
    ============================================================ */
 .fb .formcard {
+  width: 100%;
   max-width: 660px;
   margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
+}
+/* The fields are the part that gives: the header and the actions stay put. */
+.fb .formcard .card-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.fb .formcard .display {
+  font-size: clamp(22px, 4.4vw, 30px);
+  margin: 14px 0 8px;
 }
 .fb .form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-top: 22px;
+  gap: clamp(10px, 1.8vh, 16px);
+  margin-top: clamp(14px, 2.4vh, 22px);
+}
+/* One column on a phone held upright, where there is height to spend. A short
+   screen keeps the two-column grid instead: narrower fields beat a scroll. */
+@media (max-width: 640px) and (min-height: 601px) {
+  .fb .form-grid {
+    grid-template-columns: 1fr;
+  }
 }
 .fb .field {
   display: flex;
@@ -504,12 +577,13 @@ body.fb-body {
   margin-top: 0;
 }
 .fb .form-foot {
+  flex: 0 0 auto;
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
-  margin-top: 26px;
-  padding-top: 0;
-  border-top: 0;
+  margin-top: 0;
+  padding: 16px 24px 20px;
+  border-top: 2px solid var(--line);
 }
 .fb .form-foot .btn {
   flex: 1 1 170px;
@@ -519,12 +593,10 @@ body.fb-body {
    QUESTIONS — one at a time
    ============================================================ */
 .fb .qbar {
-  position: sticky;
-  top: var(--fb-bar-h);
-  z-index: 40;
+  flex: 0 0 auto;
   background: var(--white);
   border-bottom: 2px solid var(--line);
-  padding: 14px 0 15px;
+  padding: 12px 0 13px;
 }
 .fb .qbar-in {
   display: flex;
@@ -570,7 +642,7 @@ body.fb-body {
 }
 .fb .qbar-meta {
   max-width: 760px;
-  margin: 10px auto 0;
+  margin: 8px auto 0;
   padding: 0 20px;
   display: flex;
   align-items: center;
@@ -594,23 +666,39 @@ body.fb-body {
   font-weight: 800;
 }
 
+/* The question fills what the bars leave and centres itself in it. */
+.fb .qscreen {
+  overflow: hidden;
+}
 .fb .qstage {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
   max-width: 760px;
   margin: 0 auto;
-  padding: 40px 20px 96px;
+  padding: var(--fb-pad-y) 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+}
+.fb .qcard {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .fb .qhead {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 18px;
+  margin-bottom: clamp(10px, 2vh, 18px);
   flex-wrap: wrap;
 }
 .fb .qnum {
   display: inline-grid;
   place-items: center;
   min-width: 44px;
-  height: 44px;
+  height: clamp(36px, 5.5vh, 44px);
   padding: 0 12px;
   background: var(--ink);
   color: var(--white);
@@ -625,12 +713,17 @@ body.fb-body {
   letter-spacing: 0.03em;
 }
 .fb .qtext {
-  font-size: clamp(23px, 4.4vw, 32px);
+  font-size: clamp(19px, min(4.4vw, 3.6vh), 32px);
   line-height: 1.24;
   font-weight: 900;
   letter-spacing: -0.028em;
   color: var(--ink);
-  margin-bottom: 26px;
+  margin-bottom: clamp(14px, 3vh, 26px);
+  /* The statement is the one thing allowed to scroll inside itself, and only
+     on a screen too short for even a compressed three-line statement. */
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .fb .scale-hint {
   display: flex;
@@ -644,16 +737,20 @@ body.fb-body {
   margin-bottom: 10px;
 }
 .fb .rating {
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: repeat(6, 1fr);
-  gap: 10px;
+  gap: clamp(6px, 1.4vh, 10px);
 }
 .fb .rate {
   appearance: none;
   cursor: pointer;
   position: relative;
+  /* Square where there is room, capped by the height budget where there is
+     not. Never below the 48px tap-target floor. */
   aspect-ratio: 1 / 1;
-  min-height: 56px;
+  min-height: 48px;
+  max-height: var(--fb-rate-max);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -670,7 +767,7 @@ body.fb-body {
     opacity 150ms ease-out;
 }
 .fb .rate .v {
-  font-size: clamp(20px, 4vw, 26px);
+  font-size: clamp(18px, min(4vw, 3vh), 26px);
   line-height: 1;
 }
 .fb .rate .k {
@@ -728,10 +825,11 @@ body.fb-body {
   color: var(--orange-ink);
 }
 .fb .qfoot {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 26px;
+  margin-top: clamp(14px, 3vh, 26px);
   flex-wrap: wrap;
 }
 .fb .keyhint {
@@ -761,16 +859,26 @@ body.fb-body {
    COMPLETION + CONFETTI
    ============================================================ */
 .fb .done {
+  width: 100%;
   max-width: 600px;
   margin: 0 auto;
   text-align: center;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
+}
+.fb .done .display {
+  font-size: clamp(24px, 5vw, 36px);
+  margin: 16px 0 12px;
 }
 .fb .seal {
-  width: 104px;
-  height: 104px;
-  margin: 0 auto 24px;
-  border-radius: 34px;
+  flex: 0 0 auto;
+  width: clamp(64px, 12vh, 104px);
+  height: clamp(64px, 12vh, 104px);
+  margin: 0 auto clamp(12px, 2.4vh, 24px);
+  border-radius: clamp(20px, 4vh, 34px);
   background: var(--green);
   color: var(--white);
   display: grid;
@@ -796,8 +904,8 @@ body.fb-body {
   background: var(--soft);
   border: 2px solid var(--line);
   border-radius: var(--r-card);
-  padding: 18px 20px;
-  margin: 28px 0 0;
+  padding: clamp(13px, 2vh, 18px) 20px;
+  margin: clamp(14px, 2.6vh, 28px) 0 0;
 }
 .fb .mailrow .icon {
   width: 40px;
@@ -820,7 +928,7 @@ body.fb-body {
   margin-top: 3px;
 }
 .fb .done-receipt {
-  margin: 22px 0 0;
+  margin: clamp(14px, 2.4vh, 22px) 0 0;
   text-align: left;
   border: 2px solid var(--line);
   border-radius: var(--r-card);
@@ -879,20 +987,20 @@ body.fb-body {
 }
 
 /* ============================================================
-   RESPONSIVE — 360px upwards, no horizontal scroll
+   RESPONSIVE — width: 360px upwards, never a horizontal scrollbar
    ============================================================ */
 @media (max-width: 720px) {
   .fb .card-body {
-    padding: 22px 18px 24px;
+    padding: 20px 18px 22px;
+  }
+  .fb .form-foot {
+    padding: 14px 18px 18px;
   }
   .fb .stage {
-    padding: 32px 16px 64px;
+    padding: var(--fb-pad-y) 16px;
   }
 }
 @media (max-width: 640px) {
-  .fb {
-    --fb-bar-h: 70px;
-  }
   .fb .topbar-inner {
     padding: 10px 16px;
   }
@@ -901,18 +1009,15 @@ body.fb-body {
     padding: 0 16px;
   }
   .fb .qstage {
-    padding: 28px 16px 72px;
+    padding: var(--fb-pad-y) 16px;
   }
-  .fb .form-grid {
-    grid-template-columns: 1fr;
-  }
+  /* Two rows of three: six squares still fit above the fold on a phone. */
   .fb .rating {
     grid-template-columns: repeat(3, 1fr);
-    gap: 9px;
   }
   .fb .rate {
     aspect-ratio: auto;
-    min-height: 74px;
+    height: clamp(48px, 10vh, 74px);
   }
   .fb .keyhint {
     display: none;
@@ -928,6 +1033,180 @@ body.fb-body {
   }
   .fb .rate .k {
     font-size: 9.5px;
+  }
+}
+
+/* ============================================================
+   HEIGHT — the zero-scroll budget
+
+   Each tier gives up decoration before it gives up content, and the primary
+   action is never what moves. Tier 1 (≤700px: 360×640, 375×667 portrait) drops
+   the supporting cards. Tier 2 (≤600px) drops the remaining ornament. Tier 3
+   (≤460px: phones in landscape) flattens the question to a single row of six.
+   ============================================================ */
+@media (max-height: 700px) {
+  .fb {
+    --fb-pad-y: clamp(12px, 2vh, 20px);
+    --fb-rate-max: 68px;
+  }
+  .fb .topbar-inner {
+    padding: 8px 16px;
+  }
+  .fb .welcome .display,
+  .fb .formcard .display,
+  .fb .done .display {
+    font-size: clamp(23px, 4.8vw, 30px);
+    margin: 12px 0 10px;
+  }
+  .fb .welcome .lede,
+  .fb .done .lede {
+    font-size: 15px;
+  }
+  .fb .badges {
+    margin-top: 16px;
+  }
+  /* Supporting cards go first — the instructions they carry are repeated in
+     the lede and on every question. */
+  .fb .rulecard,
+  .fb .formcard .lede,
+  .fb .done-receipt {
+    display: none;
+  }
+  .fb .card-body {
+    padding: 16px 18px 18px;
+  }
+  .fb .control {
+    min-height: 48px;
+    padding: 10px 14px;
+    font-size: 15.5px;
+  }
+  .fb .field {
+    gap: 5px;
+  }
+  .fb .field label {
+    font-size: 12.5px;
+  }
+  .fb .btn {
+    min-height: 48px;
+    padding: 11px 20px;
+    font-size: 15px;
+  }
+  .fb .btn-lg {
+    min-height: 52px;
+    padding: 13px 24px;
+    font-size: 16px;
+  }
+}
+
+@media (max-height: 600px) {
+  .fb {
+    --fb-pad-y: 10px;
+    --fb-rate-max: 56px;
+  }
+  .fb .topbar-inner {
+    padding: 6px 16px;
+  }
+  .fb .brand-sub {
+    display: none;
+  }
+  .fb .qbar {
+    padding: 8px 0 9px;
+  }
+  .fb .qbar-meta {
+    margin-top: 6px;
+  }
+  .fb .milestone {
+    display: none;
+  }
+  /* Ornament only: the heading and the mail row carry the message. */
+  .fb .badges,
+  .fb .seal,
+  .fb .fineprint,
+  .fb .done-receipt {
+    display: none;
+  }
+  .fb .welcome .display,
+  .fb .formcard .display,
+  .fb .done .display {
+    font-size: clamp(20px, 4.2vw, 26px);
+    margin: 8px 0;
+  }
+  .fb .welcome .lede,
+  .fb .done .lede {
+    font-size: 14.5px;
+  }
+  .fb .eyebrow {
+    padding: 5px 11px;
+    font-size: 11px;
+  }
+}
+
+/* Phones in landscape. Six squares in one row, numbers only — the words stay
+   in the accessible name, and the anchors stay on the scale hint. */
+@media (max-height: 460px) {
+  /* The brand mark is sized inline by the Shell so the <img> case has real
+     dimensions; !important is the one way a media query can reach it. */
+  .fb .logo-slot,
+  .fb .logo-img {
+    width: 36px !important;
+    height: 36px !important;
+    font-size: 14px !important;
+  }
+  .fb .topbar-inner {
+    padding: 5px 16px;
+  }
+  .fb .qbar {
+    padding: 6px 0;
+  }
+  .fb .qbar-meta {
+    margin-top: 4px;
+    min-height: 0;
+  }
+  .fb .qcount {
+    font-size: 12px;
+  }
+  .fb .pill {
+    min-height: 24px;
+    padding: 2px 9px;
+    font-size: 11.5px;
+  }
+  .fb .qtag {
+    display: none;
+  }
+  .fb .qnum {
+    height: 32px;
+    min-width: 38px;
+    font-size: 14px;
+  }
+  .fb .qstage {
+    padding: 8px 16px;
+  }
+  .fb .rating {
+    grid-template-columns: repeat(6, 1fr);
+    gap: 6px;
+  }
+  .fb .rate {
+    aspect-ratio: auto;
+    height: 48px;
+    min-height: 48px;
+    max-height: 48px;
+    border-radius: 14px;
+  }
+  .fb .rate .k {
+    display: none;
+  }
+  .fb .qhead {
+    margin-bottom: 8px;
+  }
+  .fb .qtext {
+    font-size: clamp(17px, 2.6vw, 21px);
+    margin-bottom: 10px;
+  }
+  .fb .scale-hint {
+    margin-bottom: 7px;
+  }
+  .fb .qfoot {
+    margin-top: 12px;
   }
 }
 

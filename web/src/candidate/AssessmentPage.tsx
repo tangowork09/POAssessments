@@ -265,72 +265,77 @@ function Welcome({
   return (
     <div className="stage">
       <div className="welcome rise">
-        <span className="eyebrow">
-          {total} statements · about {minutes} minutes
-        </span>
-
-        <h1 className="display">
-          {resuming ? 'Welcome back — pick up where you left off.' : 'How do you influence people?'}
-        </h1>
-
-        <p className="lede">
-          {resuming
-            ? `You have answered ${answered} of ${total} statements. Everything you did last time is saved, so carry straight on.`
-            : 'Rate each statement from 0 to 5 — one at a time, no right or wrong answers. At the end you get a plain-language report on the ten ways you influence others.'}
-        </p>
-
-        <div className="badges">
-          <span className="badge">
-            <span className="dot o" aria-hidden="true" />5 Push styles
+        <div className="stage-scroll">
+          <span className="eyebrow">
+            {total} statements · about {minutes} minutes
           </span>
-          <span className="badge">
-            <span className="dot t" aria-hidden="true" />5 Pull styles
-          </span>
-          <span className="badge">
-            <span className="dot g" aria-hidden="true" />
-            Report emailed as a PDF
-          </span>
+
+          <h1 className="display">
+            {resuming ? 'Welcome back — pick up where you left off.' : 'How do you influence people?'}
+          </h1>
+
+          <p className="lede">
+            {resuming
+              ? `You have answered ${answered} of ${total} statements. Everything you did last time is saved, so carry straight on.`
+              : 'Rate each statement from 0 to 5 — one at a time, no right or wrong answers. At the end you get a plain-language report on the ten ways you influence others.'}
+          </p>
+
+          <div className="badges">
+            <span className="badge">
+              <span className="dot o" aria-hidden="true" />5 Push styles
+            </span>
+            <span className="badge">
+              <span className="dot t" aria-hidden="true" />5 Pull styles
+            </span>
+            <span className="badge">
+              <span className="dot g" aria-hidden="true" />
+              Report emailed as a PDF
+            </span>
+          </div>
+
+          <div className="rulecard">
+            <h3>Three things before you begin</h3>
+            <ul className="rulelist">
+              <li>
+                <span className="tick" aria-hidden="true">
+                  1
+                </span>
+                <span>
+                  There are no right or wrong answers — answer as you are, not as you would like to
+                  be.
+                </span>
+              </li>
+              <li>
+                <span className="tick" aria-hidden="true">
+                  2
+                </span>
+                <span>
+                  Rate every statement from 0 (never like me) to 5 (always like me). Your first
+                  instinct is usually the honest one.
+                </span>
+              </li>
+              <li>
+                <span className="tick" aria-hidden="true">
+                  3
+                </span>
+                <span>
+                  Stop whenever you like. This link does not expire and it brings you back to exactly
+                  this spot.
+                </span>
+              </li>
+            </ul>
+          </div>
         </div>
 
-        <div className="cta-row">
-          <button className="btn btn-primary btn-lg btn-block" onClick={onStart}>
-            {resuming ? 'Continue where I left off' : "Let's begin"}
-          </button>
-        </div>
-        <p className="fineprint">
-          Takes about {minutes} minutes. Your answers save themselves as you go.
-        </p>
-
-        <div className="rulecard">
-          <h3>Three things before you begin</h3>
-          <ul className="rulelist">
-            <li>
-              <span className="tick" aria-hidden="true">
-                1
-              </span>
-              <span>
-                There are no right or wrong answers — answer as you are, not as you would like to be.
-              </span>
-            </li>
-            <li>
-              <span className="tick" aria-hidden="true">
-                2
-              </span>
-              <span>
-                Rate every statement from 0 (never like me) to 5 (always like me). Your first instinct
-                is usually the honest one.
-              </span>
-            </li>
-            <li>
-              <span className="tick" aria-hidden="true">
-                3
-              </span>
-              <span>
-                Stop whenever you like. This link does not expire and it brings you back to exactly
-                this spot.
-              </span>
-            </li>
-          </ul>
+        <div className="stage-pin">
+          <div className="cta-row">
+            <button className="btn btn-primary btn-lg btn-block" onClick={onStart}>
+              {resuming ? 'Continue where I left off' : "Let's begin"}
+            </button>
+          </div>
+          <p className="fineprint">
+            Takes about {minutes} minutes. Your answers save themselves as you go.
+          </p>
         </div>
       </div>
     </div>

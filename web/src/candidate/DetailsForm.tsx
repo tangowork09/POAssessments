@@ -92,9 +92,7 @@ export function DetailsForm({
       <form className="card formcard rise" onSubmit={handleSubmit} noValidate>
         <div className="card-body">
           <span className="eyebrow">Step 1 of 2</span>
-          <h2 className="display" style={{ fontSize: 30, margin: '14px 0 8px' }}>
-            A few details first
-          </h2>
+          <h2 className="display">A few details first</h2>
           <p className="lede" style={{ fontSize: 16 }}>
             This is what appears on the front of your report and where we send it. Nothing is shared
             outside the organisation that invited you.
@@ -178,15 +176,17 @@ export function DetailsForm({
               <span>{formError}</span>
             </div>
           ) : null}
+        </div>
 
-          <div className="form-foot">
-            <button type="button" className="btn btn-ghost" onClick={onBack}>
-              Back
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={busy}>
-              {busy ? 'Saving…' : 'Start question 1'}
-            </button>
-          </div>
+        {/* Outside the scrolling field area: on a short screen the fields give,
+            never the way forward. */}
+        <div className="form-foot">
+          <button type="button" className="btn btn-ghost" onClick={onBack}>
+            Back
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={busy}>
+            {busy ? 'Saving…' : 'Start question 1'}
+          </button>
         </div>
       </form>
     </div>

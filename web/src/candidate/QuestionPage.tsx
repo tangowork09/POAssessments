@@ -205,7 +205,7 @@ export function QuestionPage({
   const milestone = milestoneFor(answeredTotal, total);
 
   return (
-    <div>
+    <div className="qscreen">
       <div className="qbar">
         <div className="qbar-in">
           <span className="pctchip num">{pct}%</span>
@@ -253,7 +253,7 @@ export function QuestionPage({
           </div>
         ) : null}
 
-        <div key={current.no} className="rise">
+        <div key={current.no} className="qcard rise">
           <div className="qhead">
             <span className="qnum num">{current.no}</span>
             <span className="qtag">Rate how true this is of you</span>

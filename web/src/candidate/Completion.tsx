@@ -84,92 +84,97 @@ export function Completion({
           </svg>
         </div>
 
-        <span className="eyebrow">All {session.questions.length} answered</span>
-        <h2 className="display" style={{ fontSize: 'clamp(28px, 5vw, 38px)', margin: '16px 0 12px' }}>
-          Nice work{firstName ? `, ${firstName}` : ''}.
-        </h2>
-        <p className="lede">
-          That is everything we needed. Your answers are in, and your influencing profile is being put
-          together right now — written in plain language, with nothing to decode.
-        </p>
+        <div className="stage-scroll">
+          <span className="eyebrow">All {session.questions.length} answered</span>
+          <h2 className="display">Nice work{firstName ? `, ${firstName}` : ''}.</h2>
+          <p className="lede">
+            That is everything we needed. Your answers are in, and your influencing profile is being
+            put together right now — written in plain language, with nothing to decode.
+          </p>
 
-        <div className="mailrow">
-          <div className="icon" aria-hidden="true">
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.6"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M3 6h18v12H3z" />
-              <path d="M3 7l9 6 9-6" />
-            </svg>
-          </div>
-          <div>
-            <h3>Your PDF report is on its way</h3>
-            <p>
-              {email ? (
-                <>
-                  It lands at <b>{email}</b> in the next few minutes.
-                </>
-              ) : (
-                'It will arrive by email in the next few minutes.'
-              )}{' '}
-              Nothing else is needed from you.
-            </p>
-          </div>
-        </div>
-
-        <dl className="done-receipt">
-          <div>
-            <dt>Assessment</dt>
-            <dd>{session.assessment.name}</dd>
-          </div>
-          {details ? (
+          <div className="mailrow">
+            <div className="icon" aria-hidden="true">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M3 6h18v12H3z" />
+                <path d="M3 7l9 6 9-6" />
+              </svg>
+            </div>
             <div>
-              <dt>Completed by</dt>
-              <dd>
-                {details.firstName} {details.lastName}
+              <h3>Your PDF report is on its way</h3>
+              <p>
+                {email ? (
+                  <>
+                    It lands at <b>{email}</b> in the next few minutes.
+                  </>
+                ) : (
+                  'It will arrive by email in the next few minutes.'
+                )}{' '}
+                Nothing else is needed from you.
+              </p>
+            </div>
+          </div>
+
+          <dl className="done-receipt">
+            <div>
+              <dt>Assessment</dt>
+              <dd>{session.assessment.name}</dd>
+            </div>
+            {details ? (
+              <div>
+                <dt>Completed by</dt>
+                <dd>
+                  {details.firstName} {details.lastName}
+                </dd>
+              </div>
+            ) : null}
+            <div>
+              <dt>Statements answered</dt>
+              <dd className="num">
+                {session.questions.length} of {session.questions.length}
               </dd>
             </div>
-          ) : null}
-          <div>
-            <dt>Statements answered</dt>
-            <dd className="num">
-              {session.questions.length} of {session.questions.length}
-            </dd>
-          </div>
-          {completedAt ? (
-            <div>
-              <dt>Submitted</dt>
-              <dd>{formatDate(completedAt)}</dd>
-            </div>
-          ) : null}
-        </dl>
-
-        <div className="cta-row">
-          {reportReady ? (
-            <a className="btn btn-primary btn-lg btn-block" href={`/t/${encodeURIComponent(token)}/report`}>
-              View my report now
-            </a>
-          ) : (
-            <button
-              className="btn btn-ghost btn-lg btn-block"
-              onClick={() => window.location.reload()}
-            >
-              Check whether my report is ready
-            </button>
-          )}
+            {completedAt ? (
+              <div>
+                <dt>Submitted</dt>
+                <dd>{formatDate(completedAt)}</dd>
+              </div>
+            ) : null}
+          </dl>
         </div>
 
-        <p className="fineprint">
-          You can close this page. Coming back to your link brings you right back here — it never
-          expires.
-        </p>
+        <div className="stage-pin">
+          <div className="cta-row">
+            {reportReady ? (
+              <a
+                className="btn btn-primary btn-lg btn-block"
+                href={`/t/${encodeURIComponent(token)}/report`}
+              >
+                View my report now
+              </a>
+            ) : (
+              <button
+                className="btn btn-ghost btn-lg btn-block"
+                onClick={() => window.location.reload()}
+              >
+                Check whether my report is ready
+              </button>
+            )}
+          </div>
+
+          <p className="fineprint">
+            You can close this page. Coming back to your link brings you right back here — it never
+            expires.
+          </p>
+        </div>
       </div>
     </div>
   );
