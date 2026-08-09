@@ -160,6 +160,13 @@ body.fb-body {
   flex: 1 1 auto;
   min-height: 0;
   max-width: 100%;
+  /* base.css centres the Enterprise well with `margin: 0 auto`. An auto margin
+     on the cross axis of a column flex container cancels the stretch, so the
+     well would shrink to fit its own content — and the statement screen would
+     change width from one question to the next. The width is claimed back
+     explicitly; the screens inside do their own centring. */
+  width: 100%;
+  margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -172,6 +179,10 @@ body.fb-body {
   display: flex;
   flex-direction: column;
 }
+/* `width: 100%` before `margin: 0 auto` is load-bearing on every one of these
+   boxes: they are all items of a column flex container, where an auto inline
+   margin cancels the stretch and leaves the box sized to its own content. With
+   a definite width the auto margins go back to being plain centring. */
 .fb .stage {
   width: 100%;
   max-width: 760px;
@@ -189,6 +200,21 @@ body.fb-body {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* A clear strip at the foot of the region, so the cue below has somewhere to
+     paint that no child can cover. */
+  padding-bottom: 12px;
+  /* The cue itself: a shadow fixed to the bottom edge with a white cap that
+     travels with the content and covers it once the last line is reached. It
+     therefore shows exactly when there is more to read and never otherwise —
+     the only signal that an instruction list continues past the fold. */
+  /* The cap must be opaque over the whole of the shadow it covers, or a hairline
+     of it survives on a region that does not scroll at all. */
+  background-image: linear-gradient(rgba(255, 255, 255, 0), var(--white) 40%),
+    radial-gradient(farthest-side at 50% 100%, rgba(21, 36, 46, 0.16), rgba(21, 36, 46, 0));
+  background-position: 0 100%, 0 100%;
+  background-repeat: no-repeat;
+  background-size: 100% 20px, 100% 10px;
+  background-attachment: local, scroll;
 }
 .fb .stage-pin {
   flex: 0 0 auto;
@@ -374,6 +400,10 @@ body.fb-body {
   width: 100%;
   max-width: 720px;
   margin: 0 auto;
+  /* candidate.css gives the Enterprise landing page's `.welcome` a 48px top
+     pad. Nothing in a viewport-sized flow can afford that, and the class name
+     is shared, so it is cleared here. */
+  padding: 0;
   text-align: center;
   display: flex;
   flex-direction: column;
@@ -516,11 +546,20 @@ body.fb-body {
   min-height: 0;
   max-height: 100%;
 }
-/* The fields are the part that gives: the header and the actions stay put. */
+/* The fields are the part that gives: the header and the actions stay put.
+   The card's own bottom padding is the clear strip the overflow cue needs. */
 .fb .formcard .card-body {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* The cap must be opaque over the whole of the shadow it covers, or a hairline
+     of it survives on a region that does not scroll at all. */
+  background-image: linear-gradient(rgba(255, 255, 255, 0), var(--white) 40%),
+    radial-gradient(farthest-side at 50% 100%, rgba(21, 36, 46, 0.16), rgba(21, 36, 46, 0));
+  background-position: 0 100%, 0 100%;
+  background-repeat: no-repeat;
+  background-size: 100% 20px, 100% 10px;
+  background-attachment: local, scroll;
 }
 .fb .formcard .display {
   font-size: clamp(22px, 4.4vw, 30px);
@@ -694,6 +733,7 @@ body.fb-body {
 .fb .qstage {
   flex: 1 1 auto;
   min-height: 0;
+  /* See `.stage` — definite width first, then the auto margins centre. */
   width: 100%;
   max-width: 760px;
   margin: 0 auto;
@@ -707,6 +747,17 @@ body.fb-body {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+/* The submit and unanswered-statement notices. They share the stage with the
+   card, so they are given a high shrink factor: when height runs out they give
+   up their own space — and scroll inside themselves — long before the
+   statement does, and the scale and the Back/Next row never move at all. */
+.fb .qbanner {
+  flex: 0 8 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin-bottom: clamp(10px, 2vh, 20px);
 }
 .fb .qhead {
   display: flex;
@@ -763,7 +814,11 @@ body.fb-body {
 .fb .rating {
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: repeat(var(--scale-n, 5), 1fr);
+  /* `minmax(0, …)` rather than a bare `1fr`: the automatic minimum of a grid
+     item is its min-content width, so the square carrying the longest anchor
+     ("Sometimes") would otherwise take width from its neighbours and push them
+     under the 48px tap floor on a narrow phone. Every square is equal. */
+  grid-template-columns: repeat(var(--scale-n, 5), minmax(0, 1fr));
   gap: clamp(6px, 1.4vh, 10px);
 }
 .fb .rate {
@@ -803,6 +858,9 @@ body.fb-body {
   text-align: center;
   line-height: 1.15;
   padding: 0 2px;
+  /* The square is sized by the grid, never by this word. */
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .fb .rate:hover {
   background: var(--soft);
@@ -1035,9 +1093,10 @@ body.fb-body {
   .fb .qstage {
     padding: var(--fb-pad-y) 16px;
   }
-  /* On a phone a short scale stays on one row; a long one wraps to two. */
+  /* On a phone a short scale stays on one row; a long one wraps to two —
+     five squares stay 5-across, seven become 4 + 3. */
   .fb .rating {
-    grid-template-columns: repeat(var(--scale-n-sm, 3), 1fr);
+    grid-template-columns: repeat(var(--scale-n-sm, 3), minmax(0, 1fr));
   }
   .fb .rate {
     aspect-ratio: auto;
@@ -1050,6 +1109,41 @@ body.fb-body {
   .fb .form-foot .btn {
     flex: 1 1 100%;
   }
+
+  /* The begin screen's height is set by the instruction card, which is the
+     instrument's own words and cannot be shortened. On a narrow screen
+     everything around it tightens first so that more of the card fits. */
+  .fb .welcome .intro-mark {
+    /* The same tenant mark is already in the bar two rows above. */
+    display: none;
+  }
+  .fb .welcome .display {
+    margin: 10px 0 8px;
+  }
+  .fb .rulecard {
+    margin-top: 16px;
+    padding: 16px 16px;
+  }
+  .fb .rulelist {
+    gap: 8px;
+  }
+  .fb .rulelist li {
+    font-size: 14.5px;
+    line-height: 1.45;
+    gap: 10px;
+  }
+  .fb .tick {
+    width: 22px;
+    height: 22px;
+    flex-basis: 22px;
+    border-radius: 7px;
+    font-size: 12px;
+  }
+  .fb .ruleemph {
+    margin-top: 11px;
+    padding-top: 10px;
+    font-size: 13.5px;
+  }
 }
 @media (max-width: 380px) {
   .fb .badges {
@@ -1057,6 +1151,64 @@ body.fb-body {
   }
   .fb .rate .k {
     font-size: 9.5px;
+  }
+}
+
+/* ============================================================
+   WIDE — spend width so height does not have to be spent
+
+   The begin-test screen is the tallest in the flow: an instrument's rating
+   instructions are its own words and cannot be shortened. Stacked in one
+   column they overflow even a 1280×800 desktop, where two thirds of the
+   width is empty. From 900px the intro and the instruction card sit side by
+   side, which halves the height and lets both instruments fit whole.
+
+   A phone in landscape is the same trade in miniature — plenty of width, no
+   height at all — so it takes the two-column layout from 620px.
+   ============================================================ */
+@media (min-width: 900px), (min-width: 620px) and (max-height: 560px) {
+  .fb .stage {
+    max-width: 1040px;
+  }
+  .fb .welcome {
+    max-width: 1000px;
+  }
+  .fb .welcome > .stage-scroll {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+    column-gap: 44px;
+    align-items: center;
+    align-content: center;
+    text-align: left;
+  }
+  .fb .intro-copy .intro-mark {
+    justify-content: flex-start;
+  }
+  .fb .intro-copy .lede {
+    max-width: none;
+    margin: 0;
+  }
+  .fb .welcome > .stage-scroll > .rulecard {
+    max-width: none;
+    margin: 0;
+  }
+
+  /* The completion screen splits the same way: the message on the left, the
+     mail note and the receipt on the right. Without it the receipt hangs
+     below the fold on a 1280×800 desktop. */
+  .fb .done {
+    max-width: 900px;
+  }
+  .fb .done > .stage-scroll {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 40px;
+    align-items: center;
+    align-content: center;
+    text-align: left;
+  }
+  .fb .done-detail > .mailrow:first-child {
+    margin-top: 0;
   }
 }
 
@@ -1209,10 +1361,18 @@ body.fb-body {
     padding: 5px 11px;
     font-size: 11px;
   }
+  .fb .qbanner {
+    padding: 8px 12px;
+    border-radius: 12px;
+    font-size: 13px;
+  }
 }
 
-/* Phones in landscape. Six squares in one row, numbers only — the words stay
-   in the accessible name, and the anchors stay on the scale hint. */
+/* Phones in landscape. The whole scale on one row, numbers only — the words
+   stay in the accessible name, and the anchors stay on the scale hint.
+   Two things that are right in portrait are wrong here and are undone: the
+   progress bar's second line, and the stacked footer buttons. Together they
+   cost about 100px of a 360px-tall viewport. */
 @media (max-height: 460px) {
   /* The brand mark is sized inline by the Shell so the <img> case has real
      dimensions; !important is the one way a media query can reach it. */
@@ -1225,15 +1385,51 @@ body.fb-body {
   .fb .topbar-inner {
     padding: 5px 16px;
   }
+  /* The progress bar and its meta line become one row. The 760px well is held
+     by padding rather than by `margin: 0 auto`, because .qbar is an item of a
+     column flex container and an auto inline margin there would stop it
+     stretching. */
   .fb .qbar {
-    padding: 6px 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 5px max(16px, calc((100% - 760px) / 2));
+  }
+  .fb .qbar-in {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    gap: 10px;
   }
   .fb .qbar-meta {
-    margin-top: 4px;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: none;
+    margin: 0;
+    padding: 0;
     min-height: 0;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+  }
+  .fb .qbar-meta .qbar-meta-end {
+    margin-left: 0;
+    min-width: 0;
+  }
+  .fb .track {
+    height: 12px;
+  }
+  .fb .pctchip {
+    min-width: 54px;
+    padding: 3px 9px;
+    font-size: 12.5px;
   }
   .fb .qcount {
     font-size: 12px;
+    /* The count is the first thing to go if the offline pill is long. */
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .fb .pill {
     min-height: 24px;
@@ -1253,7 +1449,7 @@ body.fb-body {
   }
   /* Landscape: back to a single row whatever the scale length. */
   .fb .rating {
-    grid-template-columns: repeat(var(--scale-n, 5), 1fr);
+    grid-template-columns: repeat(var(--scale-n, 5), minmax(0, 1fr));
     gap: 6px;
   }
   .fb .rate {
@@ -1278,6 +1474,28 @@ body.fb-body {
   }
   .fb .qfoot {
     margin-top: 12px;
+  }
+  /* A landscape phone is wide: the ≤640px rule that stacks the buttons one per
+     row costs a whole button's height for nothing. */
+  .fb .qfoot .btn,
+  .fb .form-foot .btn {
+    flex: 0 1 auto;
+  }
+  .fb .form-foot {
+    padding: 10px 18px 12px;
+  }
+  .fb .card-body {
+    padding: 12px 18px 14px;
+  }
+}
+
+/* A landscape viewport too narrow to seat the whole scale at the 48px tap
+   floor: seven squares need 7×48 + 6×6 + 32 = 404px. Below that the scale
+   wraps as it does in portrait, which the reclaimed bar and footer height
+   now leaves room for. */
+@media (max-height: 460px) and (max-width: 420px) {
+  .fb .rating {
+    grid-template-columns: repeat(var(--scale-n-sm, 5), minmax(0, 1fr));
   }
 }
 

@@ -280,19 +280,24 @@ function BeginTest({
     <div className="stage">
       <div className="welcome rise">
         <div className="stage-scroll">
-          <div className="intro-mark">
-            <LogoSlot branding={session.branding} size={54} />
+          {/* Two boxes, not seven: from 900px wide the orientation and the
+              instruction card sit side by side, and a single wrapper is what
+              keeps the left-hand column one grid cell. */}
+          <div className="intro-copy">
+            <div className="intro-mark">
+              <LogoSlot branding={session.branding} size={54} />
+            </div>
+
+            <span className="eyebrow">{intro.eyebrow}</span>
+
+            <h1 className="display">{resuming ? 'Welcome back' : intro.title}</h1>
+
+            <p className="lede">
+              {resuming
+                ? `You have answered ${answered} of ${total} statements. Everything from last time is saved, so carry straight on.`
+                : intro.lede}
+            </p>
           </div>
-
-          <span className="eyebrow">{intro.eyebrow}</span>
-
-          <h1 className="display">{resuming ? 'Welcome back' : intro.title}</h1>
-
-          <p className="lede">
-            {resuming
-              ? `You have answered ${answered} of ${total} statements. Everything from last time is saved, so carry straight on.`
-              : intro.lede}
-          </p>
 
           <div className="rulecard">
             <h3>{intro.instructionsTitle}</h3>

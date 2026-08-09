@@ -250,8 +250,11 @@ export function QuestionPage({
       </div>
 
       <div className="qstage">
+        {/* `qbanner` marks these as the part of the statement screen that gives:
+            an interruption must never push the scale or the way forward off a
+            short viewport. The spacing is in the stylesheet for that reason. */}
         {missingNotice > 0 ? (
-          <div className="banner is-shown" role="alert" style={{ marginBottom: 20 }}>
+          <div className="banner is-shown qbanner" role="alert">
             <span>
               {missingNotice === 1
                 ? 'One statement still needs a rating — here it is.'
@@ -261,7 +264,7 @@ export function QuestionPage({
         ) : null}
 
         {submitError ? (
-          <div className="banner is-shown" role="alert" style={{ marginBottom: 20 }}>
+          <div className="banner is-shown qbanner" role="alert">
             <span>{submitError}</span>
           </div>
         ) : null}
