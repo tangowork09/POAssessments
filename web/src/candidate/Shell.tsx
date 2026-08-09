@@ -3,27 +3,59 @@
  * a candidate has exactly one place to be at any moment.
  */
 
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { BRAND_ACCENT, BRAND_COMPANY_NAME } from '../../../src/shared/brand.js';
 import type { Branding } from '../../../src/shared/types.js';
 
+/**
+ * What the shell paints before the session — and with it the tenant branding —
+ * has loaded. The logo is referenced as a static asset rather than as the
+ * embedded data URI the Worker uses, so 45 KB of base64 stays out of both
+ * frontend bundles; the API sends the real one a moment later.
+ */
 export const DEFAULT_BRANDING: Branding = {
-  companyName: 'Assessment',
-  accentColor: '#1A4FD6',
-  logoDataUrl: '',
+  companyName: BRAND_COMPANY_NAME,
+  accentColor: BRAND_ACCENT,
+  logoDataUrl: '/logo-po-motivation.png',
   supportEmail: '',
 };
 
 /** The Friendly Bold primary, used when no tenant accent has been set. */
 const FRIENDLY_PRIMARY = '#0BA5C8';
 
-export function LogoSlot({ branding, size = 32 }: { branding: Branding; size?: number }) {
+/**
+ * A logo wider than this contains its own wordmark — the PO Motivation mark
+ * does — so repeating the company name beside it would say the same thing
+ * twice. Narrower marks are icons and keep the name.
+ */
+const LOCKUP_RATIO = 1.8;
+
+/**
+ * `size` is the rendered HEIGHT. The width follows the image's own aspect
+ * ratio, because a tenant logo is rarely square and letterboxing one into a
+ * square box wastes most of it.
+ */
+export function LogoSlot({
+  branding,
+  size = 32,
+  onRatio,
+}: {
+  branding: Branding;
+  size?: number;
+  /** Reports the natural aspect ratio once the image has loaded. */
+  onRatio?: (ratio: number) => void;
+}) {
   if (branding.logoDataUrl) {
     return (
       <img
         className="logo-img"
         src={branding.logoDataUrl}
         alt={branding.companyName}
-        style={{ width: size, height: size, objectFit: 'contain', borderRadius: 6 }}
+        style={{ height: size, width: 'auto', maxWidth: size * 5, objectFit: 'contain' }}
+        onLoad={(e) => {
+          const img = e.currentTarget;
+          if (img.naturalHeight > 0) onRatio?.(img.naturalWidth / img.naturalHeight);
+        }}
       />
     );
   }
@@ -52,6 +84,9 @@ export function Shell({
    */
   friendly?: boolean;
 }) {
+  const [logoRatio, setLogoRatio] = useState(0);
+  const isLockup = logoRatio >= LOCKUP_RATIO;
+
   // The Enterprise ground is grey; Friendly Bold stands on white. The body sits
   // outside the React root, so it is painted for as long as the flow is mounted.
   useEffect(() => {
@@ -65,11 +100,14 @@ export function Shell({
       <header className="topbar">
         <div className="topbar-inner">
           <div className="brand">
-            <LogoSlot branding={branding} size={friendly ? 48 : 32} />
-            <div className="brand-text">
-              <span className="brand-name">{branding.companyName}</span>
-              {subtitle ? <span className="brand-sub">{subtitle}</span> : null}
-            </div>
+            <LogoSlot branding={branding} size={friendly ? 40 : 30} onRatio={setLogoRatio} />
+            {isLockup && !subtitle ? null : (
+              <div className="brand-text">
+                {/* A wordmark logo already says the company name. */}
+                {isLockup ? null : <span className="brand-name">{branding.companyName}</span>}
+                {subtitle ? <span className="brand-sub">{subtitle}</span> : null}
+              </div>
+            )}
           </div>
           <div className="topbar-spacer" />
         </div>
@@ -85,9 +123,13 @@ export function Shell({
  * Applies the tenant accent so branding reaches every accented surface.
  *
  * `--accent`/`--pull` drive the Enterprise surfaces (the report). The
- * `--brand-*` set drives the Friendly Bold primary in the assessment flow: a
- * configured accent replaces the default teal, and its pressed edge, soft fill
- * and ink are derived from it so the chunky button edges stay in the family.
+ * `--brand-*` set drives the Friendly Bold primary in the assessment flow, and
+ * its pressed edge, soft fill and ink are derived from it so the chunky button
+ * edges stay in the family.
+ *
+ * The house accent is itself a deliberate brand colour now, so it is applied
+ * like any other rather than being treated as "unset" — the teal below is only
+ * a fallback for a branding record that fails to parse.
  */
 export function useAccent(branding: Branding): void {
   if (typeof document === 'undefined') return;
@@ -98,14 +140,7 @@ export function useAccent(branding: Branding): void {
     root.style.setProperty('--pull', branding.accentColor);
   }
 
-  // An untouched Branding panel still reports the Enterprise default, which is
-  // not a deliberate choice — the flow keeps its own teal in that case.
-  const chosen =
-    branding.accentColor &&
-    branding.accentColor.toUpperCase() !== DEFAULT_BRANDING.accentColor.toUpperCase()
-      ? branding.accentColor
-      : FRIENDLY_PRIMARY;
-  const primary = parseHex(chosen) ? chosen : FRIENDLY_PRIMARY;
+  const primary = parseHex(branding.accentColor) ? branding.accentColor : FRIENDLY_PRIMARY;
 
   root.style.setProperty('--brand-accent', primary);
   root.style.setProperty('--brand-accent-edge', shade(primary, -0.26));

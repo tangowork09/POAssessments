@@ -13,6 +13,10 @@ const here = import.meta.dirname;
 export default defineConfig({
   root: 'web',
   plugins: [react()],
+  // The brand assets live at the repository root, next to the script that
+  // generates the embedded copy the Worker uses, rather than being duplicated
+  // under web/.
+  publicDir: resolve(here, 'public'),
   build: {
     outDir: '../dist/client',
     emptyOutDir: true,

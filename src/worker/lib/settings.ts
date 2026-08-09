@@ -1,11 +1,13 @@
 /** Key/value platform settings: branding, mail policy, active theme. */
 
+import { BRAND_ACCENT, BRAND_COMPANY_NAME, BRAND_LOGO_DATA_URL } from '../../shared/brand.js';
 import type { Branding } from '../../shared/types.js';
 import type { Env } from '../env.js';
 
 export const DEFAULTS: Record<string, string> = {
-  'branding.company_name': 'Assessment Platform',
-  'branding.accent_color': '#1A4FD6',
+  'branding.company_name': BRAND_COMPANY_NAME,
+  'branding.accent_color': BRAND_ACCENT,
+  // Empty means "no upload", which resolves to the house logo in brandingFrom.
   'branding.logo_data_url': '',
   'branding.support_email': '',
   'mail.daily_send_cap': '50',
@@ -32,13 +34,27 @@ export async function setSetting(env: Env, key: string, value: string): Promise<
     .run();
 }
 
+/**
+ * Resolves the stored settings into the Branding every surface renders.
+ *
+ * An empty `branding.logo_data_url` is not "no logo" — it is "no upload", and
+ * falls back to the PO Motivation house mark that ships in the bundle. That is
+ * what makes clearing an uploaded logo restore the default rather than leaving
+ * the product unbranded, and it means the header, report, PDF and emails all
+ * carry a mark out of the box.
+ */
 export function brandingFrom(settings: Record<string, string>): Branding {
   return {
     companyName: settings['branding.company_name'] || DEFAULTS['branding.company_name']!,
     accentColor: normaliseHex(settings['branding.accent_color']) ?? DEFAULTS['branding.accent_color']!,
-    logoDataUrl: settings['branding.logo_data_url'] ?? '',
+    logoDataUrl: settings['branding.logo_data_url'] || BRAND_LOGO_DATA_URL,
     supportEmail: settings['branding.support_email'] ?? '',
   };
+}
+
+/** True when the current logo is the house mark rather than a tenant upload. */
+export function isDefaultLogo(settings: Record<string, string>): boolean {
+  return !settings['branding.logo_data_url'];
 }
 
 export async function getBranding(env: Env): Promise<Branding> {
