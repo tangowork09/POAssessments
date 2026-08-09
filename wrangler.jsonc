@@ -1,0 +1,52 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "assessment-platform",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "observability": { "enabled": true },
+
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "assessment_platform",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "queues": {
+    "producers": [
+      { "binding": "PIPELINE", "queue": "assessment-pipeline" }
+    ],
+    "consumers": [
+      {
+        "queue": "assessment-pipeline",
+        "max_batch_size": 5,
+        "max_batch_timeout": 10,
+        "max_retries": 3,
+        "dead_letter_queue": "assessment-pipeline-dlq"
+      }
+    ]
+  },
+
+  "vars": {
+    "APP_NAME": "Assessment Platform",
+    "APP_ENV": "development",
+    "PUBLIC_BASE_URL": "http://localhost:8787",
+    "MAIL_FROM": "",
+    "MAIL_REPLY_TO": "",
+    "ADMIN_EMAIL": "admin@example.com",
+    "ADMIN_PASSWORD": "ChangeMe!2026",
+    "LINK_TOKEN_SECRET": "dev-only-link-secret-change-me",
+    "JWT_SECRET": "dev-only-jwt-secret-change-me"
+  }
+}

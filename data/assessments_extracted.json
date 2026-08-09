@@ -1,0 +1,1609 @@
+{
+ "ta_ego_states": {
+  "title": "EGO STATES SCALE",
+  "instructions": [
+   "Instructions: For each statement choose a number from zero to six that describes how true or untrue it is for you in your experience of yourself. \n1. For example, the number 0 means ‘never true’ and the number 6 means ‘always true’. \n2. If your response is somewhere between these 2 extremes, that is ‘sometimes true’ or ‘sometimes not true’ your choice will be number 3. \n3. If your response is between ‘never true’ and ‘sometimes true’, then choose between numbers ‘1’ or ‘2’ depending upon your experiences. \n4. Similarly, if your response is between ‘sometimes true’ and ‘always true’, choose between the numbers ‘4’ and ‘5’. ",
+   "In responding to each statement, read it first and once you have understood it, respond intuitively rather than rationally."
+  ],
+  "questions": [
+   {
+    "no": 1,
+    "text": "I am strict with myself as well as others."
+   },
+   {
+    "no": 2,
+    "text": "I express my concern with gentleness."
+   },
+   {
+    "no": 3,
+    "text": "I easily notice changes in the expression on people’s faces."
+   },
+   {
+    "no": 4,
+    "text": "I guess at the hidden meanings in what people say."
+   },
+   {
+    "no": 5,
+    "text": "I express my feelings spontaneously."
+   },
+   {
+    "no": 6,
+    "text": "I rebel against injustice."
+   },
+   {
+    "no": 7,
+    "text": "Children should do what they are told to without asking reasons."
+   },
+   {
+    "no": 8,
+    "text": "I have a healing influence."
+   },
+   {
+    "no": 9,
+    "text": "I can remember previous conversations and events in detail."
+   },
+   {
+    "no": 10,
+    "text": "I keep past experiences clearly in mind when making current decisions."
+   },
+   {
+    "no": 11,
+    "text": "I have warm loving relationships."
+   },
+   {
+    "no": 12,
+    "text": "I am openly or silently defiant."
+   },
+   {
+    "no": 13,
+    "text": "I decide on the basis of principles."
+   },
+   {
+    "no": 14,
+    "text": "I give my body the nourishment it requires."
+   },
+   {
+    "no": 15,
+    "text": "I have an effective listening power."
+   },
+   {
+    "no": 16,
+    "text": "I like organizing and reorganizing data into schemes."
+   },
+   {
+    "no": 17,
+    "text": "I often hear or tell funny jokes."
+   },
+   {
+    "no": 18,
+    "text": "I dislike taking orders."
+   },
+   {
+    "no": 19,
+    "text": "I get upset with those who do not follow my instructions."
+   },
+   {
+    "no": 20,
+    "text": "I am affectionate in giving attention to others."
+   },
+   {
+    "no": 21,
+    "text": "I pay attention to the way people respond to me."
+   },
+   {
+    "no": 22,
+    "text": "I think of various possible solutions to a problem."
+   },
+   {
+    "no": 23,
+    "text": "I am satisfied with myself."
+   },
+   {
+    "no": 24,
+    "text": "The way I survive is by being independent."
+   },
+   {
+    "no": 25,
+    "text": "I criticize my own behaviour."
+   },
+   {
+    "no": 26,
+    "text": "I have a talent of comforting those in distress."
+   },
+   {
+    "no": 27,
+    "text": "I take time to collect information."
+   },
+   {
+    "no": 28,
+    "text": "I make intellectual correlations easily."
+   },
+   {
+    "no": 29,
+    "text": "I have a good share of pleasure of life."
+   },
+   {
+    "no": 30,
+    "text": "I challenge those who are dominating."
+   },
+   {
+    "no": 31,
+    "text": "I think I am right in an argument."
+   },
+   {
+    "no": 32,
+    "text": "Others feel I support them."
+   },
+   {
+    "no": 33,
+    "text": "I take decisions smoothly"
+   },
+   {
+    "no": 34,
+    "text": "In a crisis I have several options."
+   },
+   {
+    "no": 35,
+    "text": "I have a full tank of positive strokes."
+   },
+   {
+    "no": 36,
+    "text": "I get hurt easily."
+   },
+   {
+    "no": 37,
+    "text": "I know best what is good for others."
+   },
+   {
+    "no": 38,
+    "text": "I help others to enjoy themselves."
+   },
+   {
+    "no": 39,
+    "text": "I do not forget instructions."
+   },
+   {
+    "no": 40,
+    "text": "I feel a sense of integration in my being."
+   },
+   {
+    "no": 41,
+    "text": "I often go to parties, picnics or movies."
+   },
+   {
+    "no": 42,
+    "text": "I feel inadequate."
+   },
+   {
+    "no": 43,
+    "text": "Others do not come up to my expectations."
+   },
+   {
+    "no": 44,
+    "text": "I give warm caring hugs."
+   },
+   {
+    "no": 45,
+    "text": "I keep my commitments."
+   },
+   {
+    "no": 46,
+    "text": "I make intuitive assessments."
+   },
+   {
+    "no": 47,
+    "text": "I make sure my own needs are met first."
+   },
+   {
+    "no": 48,
+    "text": "I please others rather than myself."
+   },
+   {
+    "no": 49,
+    "text": "People should take life more seriously."
+   },
+   {
+    "no": 50,
+    "text": "I nurture children warmly."
+   },
+   {
+    "no": 51,
+    "text": "I am aware of my own body sensations."
+   },
+   {
+    "no": 52,
+    "text": "I do several jobs at the same time"
+   },
+   {
+    "no": 53,
+    "text": "I enjoy spending time on imaginative fantasies."
+   },
+   {
+    "no": 54,
+    "text": "I try hard to meet expectations of others."
+   },
+   {
+    "no": 55,
+    "text": "I should have achieved more than I have."
+   },
+   {
+    "no": 56,
+    "text": "People turn to me for help in their time of need."
+   },
+   {
+    "no": 57,
+    "text": "I can repeat back to people what they have said to me."
+   },
+   {
+    "no": 58,
+    "text": "I like analyzing wholes in to parts."
+   },
+   {
+    "no": 59,
+    "text": "I bounce with fun and laughter."
+   },
+   {
+    "no": 60,
+    "text": "I postpone taking decisions even when I am clear about them."
+   },
+   {
+    "no": 61,
+    "text": "I prefer to be the one in control."
+   },
+   {
+    "no": 62,
+    "text": "I care for my own growth and fulfillment."
+   },
+   {
+    "no": 63,
+    "text": "I can detect differences in the quality of goods."
+   },
+   {
+    "no": 64,
+    "text": "I experiment with alternative ways of achieving goals."
+   },
+   {
+    "no": 65,
+    "text": "I spend time in rest and relaxation."
+   },
+   {
+    "no": 66,
+    "text": "I wait till I am told to do things."
+   }
+  ],
+  "scoring_raw": [
+   [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+   ],
+   [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+   ],
+   [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+   ],
+   [
+    "",
+    "",
+    "St no",
+    "score",
+    "St no",
+    "score",
+    "St no",
+    "score",
+    "St no",
+    "score",
+    "St no",
+    "score",
+    "St no",
+    "score"
+   ],
+   [
+    "",
+    "",
+    1,
+    6,
+    2,
+    5,
+    3,
+    5,
+    4,
+    4,
+    5,
+    5,
+    6,
+    4
+   ],
+   [
+    "",
+    "",
+    7,
+    4,
+    8,
+    6,
+    9,
+    4,
+    10,
+    5,
+    11,
+    5,
+    12,
+    5
+   ],
+   [
+    "",
+    "",
+    13,
+    5,
+    14,
+    4,
+    15,
+    6,
+    16,
+    5,
+    17,
+    4,
+    18,
+    4
+   ],
+   [
+    "",
+    "",
+    19,
+    5,
+    20,
+    5,
+    21,
+    5,
+    22,
+    5,
+    23,
+    5,
+    24,
+    6
+   ],
+   [
+    "",
+    "",
+    25,
+    6,
+    26,
+    5,
+    27,
+    5,
+    28,
+    5,
+    29,
+    5,
+    30,
+    5
+   ],
+   [
+    "",
+    "",
+    31,
+    5,
+    32,
+    6,
+    33,
+    5,
+    34,
+    5,
+    35,
+    5,
+    36,
+    5
+   ],
+   [
+    "",
+    "",
+    37,
+    4,
+    38,
+    5,
+    39,
+    5,
+    40,
+    5,
+    41,
+    4,
+    42,
+    4
+   ],
+   [
+    "",
+    "",
+    43,
+    5,
+    44,
+    6,
+    45,
+    6,
+    46,
+    5,
+    47,
+    4,
+    48,
+    5
+   ],
+   [
+    "",
+    "",
+    49,
+    5,
+    50,
+    6,
+    51,
+    6,
+    52,
+    3,
+    53,
+    3,
+    54,
+    4
+   ],
+   [
+    "",
+    "",
+    55,
+    4,
+    56,
+    6,
+    57,
+    3,
+    58,
+    5,
+    59,
+    5,
+    60,
+    4
+   ],
+   [
+    "",
+    "",
+    61,
+    5,
+    62,
+    5,
+    63,
+    5,
+    64,
+    5,
+    65,
+    4,
+    66,
+    5
+   ],
+   [
+    "",
+    "",
+    "Total =",
+    54,
+    "Total = ",
+    59,
+    "Total = ",
+    55,
+    "Total = ",
+    52,
+    "Total = ",
+    49,
+    "Total = ",
+    51
+   ],
+   [
+    "",
+    "",
+    "%",
+    81.81818181818181,
+    "% ",
+    89.39393939393939,
+    "% ",
+    83.33333333333333,
+    "% ",
+    78.78787878787878,
+    "% ",
+    74.24242424242425,
+    "% ",
+    77.27272727272727
+   ],
+   [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+   ],
+   [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+   ],
+   [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+   ],
+   [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "groups seems to be low on NP",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    ""
+   ]
+  ]
+ },
+ "influencing_style": {
+  "questions": [
+   {
+    "no": 1,
+    "text": "I exert pressure in order to achieve my objectives"
+   },
+   {
+    "no": 2,
+    "text": "I get others to support my projects by offering to help them in some way."
+   },
+   {
+    "no": 3,
+    "text": "I bring others to see the exciting possibilities in a situation."
+   },
+   {
+    "no": 4,
+    "text": "I listen carefully when people express views which are different from mine."
+   },
+   {
+    "no": 5,
+    "text": "I present strong arguments for the proposals I favour."
+   },
+   {
+    "no": 6,
+    "text": "I am quick to make my wishes and desires known to others."
+   },
+   {
+    "no": 7,
+    "text": "I verbalise standards that I think others ought to meet."
+   },
+   {
+    "no": 8,
+    "text": "I am open with information as opposed to secretive."
+   },
+   {
+    "no": 9,
+    "text": "I make sure my optimism and enthusiasms are contagious."
+   },
+   {
+    "no": 10,
+    "text": "I smooth over disagreements i.e. pour oil on troubled waters."
+   },
+   {
+    "no": 11,
+    "text": "I help others see the goals and values they have in common."
+   },
+   {
+    "no": 12,
+    "text": "I tell people directly when they don't meet my expectations or requirements."
+   },
+   {
+    "no": 13,
+    "text": "I use the power of my position to get others to go along."
+   },
+   {
+    "no": 14,
+    "text": "I hold to my position until others show willingness to compromise or make concessions."
+   },
+   {
+    "no": 15,
+    "text": "I use praise selectively to get others to change or improve their performance."
+   },
+   {
+    "no": 16,
+    "text": "My belief in others helps them to feel stronger and more confident."
+   },
+   {
+    "no": 17,
+    "text": "I use humour or anecdotes effectively to help make a point."
+   },
+   {
+    "no": 18,
+    "text": "I put forward proposals and suggestions that I feel have merit even if they are unpopular."
+   },
+   {
+    "no": 19,
+    "text": "I am open about my motives and intentions."
+   },
+   {
+    "no": 20,
+    "text": "I work with others to help get the best solution to the problems."
+   },
+   {
+    "no": 21,
+    "text": "I am prepared to make a fuss to get things done."
+   },
+   {
+    "no": 22,
+    "text": "I use rational argument to make my points."
+   },
+   {
+    "no": 23,
+    "text": "I help other people to solve their own problems."
+   },
+   {
+    "no": 24,
+    "text": "I have a clear code of principles that I communicate to others."
+   },
+   {
+    "no": 25,
+    "text": "I am able to communicate what needs to be done to create a better future."
+   },
+   {
+    "no": 26,
+    "text": "I check my understanding of what others have said."
+   },
+   {
+    "no": 27,
+    "text": "I defuse conflict situations by the use of humour or an appropriate change of subject."
+   },
+   {
+    "no": 28,
+    "text": "I challenge ideas or suggestions I disagree with or have questions about."
+   },
+   {
+    "no": 29,
+    "text": "I exchange favours in order to get things accomplished."
+   },
+   {
+    "no": 30,
+    "text": "I present my ideas with vigour."
+   },
+   {
+    "no": 31,
+    "text": "I exert pressure on people in order to achieve my objectives."
+   },
+   {
+    "no": 32,
+    "text": "I take steps to acquire formal authority to enable me to implement my plans."
+   },
+   {
+    "no": 33,
+    "text": "I take great care to educate others so that they can understand what I am thinking."
+   },
+   {
+    "no": 34,
+    "text": "I bargain to get what I want."
+   },
+   {
+    "no": 35,
+    "text": "I strive to inspire people by the way I present ideas."
+   },
+   {
+    "no": 36,
+    "text": "If individuals are not participating I go out of my way to involve them."
+   },
+   {
+    "no": 37,
+    "text": "I am quick to state my wishes to others."
+   },
+   {
+    "no": 38,
+    "text": "I use my personality and charm to advantage."
+   },
+   {
+    "no": 39,
+    "text": "I try to find common ground with others."
+   },
+   {
+    "no": 40,
+    "text": "I work steadily to build trust into relationships to enable effective joint working."
+   }
+  ],
+  "sheets_raw": {
+   "Asmt": [
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "S No.",
+     "",
+     "Rating"
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     1,
+     "I exert pressure in order to achieve my objectives",
+     1
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     2,
+     "I get others to support my projects by offering to help them in some way.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     3,
+     "I bring others to see the exciting possibilities in a situation.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     4,
+     "I listen carefully when people express views which are different from mine.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     5,
+     " I present strong arguments for the proposals I favour.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     6,
+     "I am quick to make my wishes and desires known to others.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     7,
+     "I verbalise standards that I think others ought to meet.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     8,
+     "I am open with information as opposed to secretive.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     9,
+     "I make sure my optimism and enthusiasms are contagious.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     10,
+     "I smooth over disagreements i.e. pour oil on troubled waters.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     11,
+     "I help others see the goals and values they have in common.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     12,
+     "I tell people directly when they don't meet my expectations or requirements.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     13,
+     "I use the power of my position to get others to go along.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     14,
+     "I hold to my position until others show willingness to compromise or make concessions.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     15,
+     "I use praise selectively to get others to change or improve their performance.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     16,
+     "My belief in others helps them to feel stronger and more confident.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     17,
+     "I use humour or anecdotes effectively to help make a point.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     18,
+     "I put forward proposals and suggestions that I feel have merit even if they are unpopular.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     19,
+     "I am open about my motives and intentions.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     20,
+     "I work with others to help get the best solution to the problems.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     21,
+     "I am prepared to make a fuss to get things done.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     22,
+     "I use rational argument to make my points.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     23,
+     "I help other people to solve their own problems.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     24,
+     "I have a clear code of principles that I communicate to others.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     25,
+     "I am able to communicate what needs to be done to create a better future.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     26,
+     "I check my understanding of what others have said.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     27,
+     "I defuse conflict situations by the use of humour or an appropriate change of subject.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     28,
+     "I challenge ideas or suggestions I disagree with or have questions about.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     29,
+     "I exchange favours in order to get things accomplished.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     30,
+     "I present my ideas with vigour.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     31,
+     "I exert pressure on people in order to achieve my objectives.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     32,
+     "I take steps to acquire formal authority to enable me to implement my plans.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     33,
+     "I take great care to educate others so that they can understand what I am thinking.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     34,
+     "I bargain to get what I want.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     35,
+     " I strive to inspire people by the way I present ideas.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     36,
+     "If individuals are not participating I go out of my way to involve them.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     37,
+     "I am quick to state my wishes to others.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     38,
+     "I use my personality and charm to advantage.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     39,
+     "I try to find common ground with others.",
+     0
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     40,
+     "I work steadily to build trust into relationships to enable effective joint working.",
+     0
+    ]
+   ],
+   "Sol": [
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "S No.",
+     "Score",
+     "S No.",
+     "Score",
+     "S No.",
+     "Score",
+     "S No.",
+     "Score",
+     "Score",
+     ""
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     1,
+     1,
+     13,
+     0,
+     21,
+     0,
+     31,
+     0,
+     1,
+     "Force"
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     7,
+     0,
+     12,
+     0,
+     24,
+     0,
+     32,
+     0,
+     0,
+     "Rules & Standards"
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     2,
+     0,
+     14,
+     0,
+     29,
+     0,
+     34,
+     0,
+     0,
+     "Exange"
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     5,
+     0,
+     18,
+     0,
+     22,
+     0,
+     33,
+     0,
+     0,
+     "Persuation"
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     6,
+     0,
+     19,
+     0,
+     28,
+     0,
+     37,
+     0,
+     0,
+     "Assertion"
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "PUSH Gross Score",
+     "",
+     "",
+     1,
+     ""
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     ""
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "S No.",
+     "Score",
+     "S No.",
+     "Score",
+     "S No.",
+     "Score",
+     "S No.",
+     "Score",
+     "Score",
+     ""
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     9,
+     0,
+     17,
+     0,
+     30,
+     0,
+     38,
+     0,
+     0,
+     "Personal Magnetism"
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     3,
+     0,
+     11,
+     0,
+     25,
+     0,
+     35,
+     0,
+     0,
+     "Visioning"
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     4,
+     0,
+     16,
+     0,
+     26,
+     0,
+     39,
+     0,
+     0,
+     "Bridging / Consensus"
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     10,
+     0,
+     15,
+     0,
+     27,
+     0,
+     36,
+     0,
+     0,
+     "Environmental"
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     8,
+     0,
+     20,
+     0,
+     23,
+     0,
+     40,
+     0,
+     0,
+     "Joint Problem Solving"
+    ],
+    [
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "",
+     "PULL Gross Score",
+     "",
+     "",
+     0,
+     ""
+    ]
+   ]
+  }
+ }
+}

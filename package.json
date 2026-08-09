@@ -1,0 +1,40 @@
+{
+  "name": "assessment-platform",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:web": "vite",
+    "build:web": "vite build",
+    "build:worker": "tsc -p tsconfig.worker.json --noEmit",
+    "build": "npm run build:web && npm run build:worker",
+    "dev": "npm run build:web && wrangler dev",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "deploy": "npm run build && wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply assessment_platform --local",
+    "db:migrate:remote": "wrangler d1 migrations apply assessment_platform --remote"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260809.1",
+    "@react-pdf/pdfkit": "^6.0.0",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.120.0"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "exceljs": "^4.4.0",
+    "hono": "^4.13.1",
+    "jose": "^6.2.8",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.2",
+    "zod": "^4.4.3"
+  }
+}
