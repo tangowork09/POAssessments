@@ -4,22 +4,31 @@ A psychometric assessment platform on Cloudflare Workers. One deploy serves the
 candidate experience, the admin console and the API from a single `workers.dev`
 subdomain — no domain, no separate frontend host, no build server.
 
-Ships with the **Influencing Style Inventory**: 40 statements, ten styles, a
-Push/Pull split and a banded PDF report.
+Ships with two instruments, both live:
+
+- **Influencing Style Inventory** — 40 statements rated 0–4, ten styles, a
+  Push/Pull split and a banded report.
+- **Ego States Scale** — 66 statements rated 0–6, six transactional-analysis ego
+  states scored by column, and an ego-gram.
+
+House branding is **PO Motivation** (*Potential, Possibilities*), and a tenant
+can override the name, accent and logo from the console.
 
 ---
 
 ## What it does
 
-**Candidates** open a link, answer 40 statements eight to a page, and receive a
-report by email. Every answer is saved the moment it is given and mirrored to
+**Candidates** open a link, read the instrument's own begin-test screen — its
+title, its logo and its rating anchors, verbatim — enter their details, answer
+one statement at a time, and receive a report by email. Every answer is saved the moment it is given and mirrored to
 `localStorage`; going offline queues answers locally and flushes them on
 reconnect. Closing the tab and returning to the link resumes at the exact page.
 
 **Administrators** sign in at `/admin` to see live counts, invite people singly
-or by CSV, watch a batch send under a daily cap, export to CSV or Excel, manage
-the always-active assessment links, and set branding that reaches the candidate
-UI, the PDF and the emails at once.
+or by CSV, watch a batch send under a daily cap, filter and bulk-action the
+candidates grid, export to CSV or Excel, and manage the always-active assessment
+links. Branding — which reaches the candidate UI, the PDF and the emails at once
+— belongs to the **superadmin** role only; see *Administrator roles* below.
 
 ### Route separation
 
@@ -61,17 +70,38 @@ setting `links.active = 0` from the console.
 
 ### Multiple assessments
 
-The `assessments` table drives questions, scoring configuration, linking and
-reporting. Adding the TA Ego States Scale or the Motivation Need Assessment (both
-already seeded as `planned`) means inserting their question and
-`scoring_styles` rows — no code change to linking or the candidate flow.
+The `assessments` table drives questions, linking and the rating bounds the API
+enforces. What is *code*-shaped — which scoring engine an instrument uses, the
+anchors it shows, and its begin-test copy — lives in one registry,
+`src/shared/assessments.ts`. An instrument seeded in D1 with no registry entry
+has no scoring engine, so `buildReport` refuses it rather than guessing; the
+Motivation Need Assessment is seeded `planned` and is in exactly that state.
+
+Report payloads are a **tagged union** (`ReportPayload = IsiReportPayload |
+EgoReportPayload`). The HTML report page, the PDF writer and the exports all
+switch on `kind`, so one instrument cannot be rendered through another's layout
+by accident.
+
+### Administrator roles
+
+| Role | Branding | Everything else |
+| --- | --- | --- |
+| `superadmin` | yes | yes |
+| `admin` | **no** — nav item hidden, routes answer 403 | yes |
+
+The account seeded from `ADMIN_EMAIL` on first boot is the `superadmin` — it owns
+the deployment. Client administrators are created as plain `admin`.
 
 ---
 
 ## Scoring
 
-Each statement is answered 0–5. A style is the sum of its four statements, so
-0–20. Push and Pull are the sums of their five styles, out of 100.
+### Influencing Style Inventory
+
+Each statement is answered **0–4** on the published anchors — 0 *I never do it*,
+1 *I rarely do this*, 2 *I sometimes do this*, 3 *I often do this*, 4 *I always
+do this*. A style is the sum of its four statements, so **0–16**. Push and Pull
+are the sums of their five styles, out of **80**.
 
 | Push | Items | Pull | Items |
 | --- | --- | --- | --- |
@@ -81,11 +111,41 @@ Each statement is answered 0–5. A style is the sum of its four statements, so
 | Persuasion | 5, 18, 22, 33 | Environmental | 10, 15, 27, 36 |
 | Assertion | 6, 19, 28, 37 | Joint Problem Solving | 8, 20, 23, 40 |
 
-Bands: **0–7 Low · 8–13 Moderate · 14–20 High**.
+Bands: **0–6 Low · 7–11 Moderate · 12–16 High**.
 
 The map is asserted to cover statements 1–40 exactly once
 (`tests/scoring.test.ts`), so a future edit cannot silently drop or double-count
 a statement.
+
+### Ego States Scale
+
+Each statement is answered **0–6**. The source instrument lays the 66 statements
+out six to a row and scores by *column*, so statement `n` belongs to ego state
+`((n − 1) mod 6) + 1` — eleven statements per state, each state out of **66**,
+reported as a percentage of that.
+
+| Column | State (draft) | Statements |
+| --- | --- | --- |
+| 1 | Critical Parent (CP) | 1, 7, 13 … 61 |
+| 2 | Nurturing Parent (NP) | 2, 8, 14 … 62 |
+| 3 | Adult — Perceiving (A-P) | 3, 9, 15 … 63 |
+| 4 | Adult — Processing (A-Pr) | 4, 10, 16 … 64 |
+| 5 | Free Child (FC) | 5, 11, 17 … 65 |
+| 6 | Rebellious Child (RC) | 6, 12, 18 … 66 |
+
+> **The state names and their descriptive copy are a DRAFT pending confirmation
+> by the client.** The source workbook labels the six columns only as "St no
+> 1..6". The names, abbreviations and narrative text in `src/shared/ego.ts` are
+> ours; they are declared as data so a rename is a one-line change, and every
+> surface that shows them — the report page, the PDF and the ego-gram — carries a
+> visible "draft" note. The scores themselves are final.
+
+`tests/ego-scoring.test.ts` reads the client's own worked example straight out of
+`data/assessments_extracted.json` rather than trusting a transcription, and
+asserts the engine reproduces its published column totals — 54, 59, 55, 52, 49,
+51 — and its percentages. It also asserts the column-sum property across
+randomised inputs, so the engine is pinned by a rule and not only by one
+fixture.
 
 ---
 
@@ -120,10 +180,22 @@ confirmed by spike rather than assumed:
 Two layers of patching a library into a runtime it does not target is not a
 sound production dependency. The writer that replaced it renders text with real
 Adobe Helvetica advance widths (generated into `src/worker/pdf/afm.ts` by
-`scripts/gen-afm.mjs`), word wrapping, filled rectangles and rules, with a
-byte-accurate xref table. A three-page report is ~18 KB and takes a few
-milliseconds of pure CPU. Output was verified by rendering every page to PNG and
-inspecting it, and is covered by structural tests.
+`scripts/gen-afm.mjs`), word wrapping, Bezier paths, rounded rectangles,
+clipping and real axial `/Shading` gradients, with a byte-accurate xref table.
+
+Each instrument gets a six-page document: a cover, an executive summary, and
+then its own chapters — Push/Pull with the two method descriptions verbatim, the
+ten-style banded profile and the narrative pages for the Inventory; the ego-gram,
+the highest/lowest reading and the six state pages for the Ego States Scale.
+Every page carries a confidentiality line, the company name and `Page N of M`.
+
+The PO Motivation lockup on the cover and in the running header is drawn as
+**vector** — two rotated elliptical rings under a multi-stop gradient, plus the
+wordmark — rather than embedded as a raster. That keeps the document
+self-contained, deterministic and around 65 KB, which is the whole point of
+having a writer rather than a dependency. Output was verified by rendering every
+page to PNG and inspecting it, and is covered by structural tests
+(`tests/pdf.test.ts`).
 
 The HTML report page and the PDF render from the same `ReportPayload`, so they
 cannot disagree.
@@ -158,16 +230,28 @@ npm run build     # frontend build + worker typecheck
 npm test          # vitest
 ```
 
+After changing the brand PNG in `public/`, regenerate the copy the Worker embeds
+in PDFs and emails:
+
+```bash
+node scripts/gen-logo.mjs
+```
+
 `npm run dev:web` starts Vite with HMR on port 5173, proxying `/api` to a
 `wrangler dev` on 8787.
 
 ### Smoke test
 
 ```bash
-# admin session
+# admin session — the response carries the role
 curl -s -c ck.txt -X POST localhost:8787/api/admin/login \
   -H 'content-type: application/json' \
   -d '{"email":"admin@example.com","password":"ChangeMe!2026"}'
+# → {"user":{...,"role":"superadmin"}}
+
+# the always-active generic link per assessment; both instruments are live
+curl -s -b ck.txt localhost:8787/api/admin/links
+curl -s -b ck.txt -X POST localhost:8787/api/admin/links/generic/asm_ta_ego_states
 
 # invite (returns the personal link)
 curl -s -b ck.txt -X POST localhost:8787/api/admin/invites/single \
@@ -187,16 +271,24 @@ curl -s -X POST localhost:8787/api/candidate/start/$TOKEN \
        "experienceBand":"1-5 years","gender":"Female"}'
 # → responseId
 
+# ratings are bounded by the instrument: the Inventory takes 0-4, the Ego
+# States Scale 0-6, and anything outside its own range is a 400.
 curl -s -X POST "localhost:8787/api/candidate/answers/$TOKEN?response=$RID" \
   -H 'content-type: application/json' \
-  -d '{"answers":[{"no":1,"value":3}],"resumePage":0}'
+  -d '{"answers":[{"no":1,"value":4}],"resumePage":0}'
+curl -s -X POST "localhost:8787/api/candidate/answers/$TOKEN?response=$RID" \
+  -H 'content-type: application/json' \
+  -d '{"answers":[{"no":1,"value":5}]}'      # → 400 on the Inventory
 
 curl -s -X POST localhost:8787/api/candidate/submit/$TOKEN \
   -H 'content-type: application/json' -d "{\"responseId\":\"$RID\"}"
 # → { "completed": true, "reportToken": "..." }
 
-curl -s localhost:8787/api/report/$REPORT_TOKEN          # JSON
+curl -s localhost:8787/api/report/$REPORT_TOKEN          # JSON, tagged with "kind"
 curl -s -o r.pdf localhost:8787/api/report/$REPORT_TOKEN/pdf
+
+# branding is superadmin-only
+curl -s -b ck.txt localhost:8787/api/admin/branding      # → PO Motivation + logo
 ```
 
 ---
@@ -333,8 +425,10 @@ holds roughly 280,000 reports.
 ```
 migrations/          D1 schema and seed data
 data/                Source question JSON (the extract this repo was seeded from)
+public/              Brand assets (the PO Motivation logo)
 scripts/gen-afm.mjs  Regenerates the Helvetica metric tables
-src/shared/          Scoring engine, style definitions, wire types
+scripts/gen-logo.mjs Regenerates the embedded logo data URI from the PNG
+src/shared/          Assessment registry, both scoring engines, brand, wire types
 src/worker/
   index.ts           Entry: routing, shell selection, queue consumer
   bootstrap.ts       First-boot admin and generic-link seeding
@@ -349,13 +443,19 @@ web/
   src/candidate/     Welcome, details, statements, completion, report
   src/admin/         Login, console shell, six panels
   src/styles/        base.css (shared tokens) + candidate.css + admin.css
-tests/               Scoring, tokens, PDF
+tests/               Both scoring engines, the registry, tokens, CSV, PDF
 ```
 
 ## Security
 
 - Candidate access is the link token alone; there is no candidate login to
   attack.
+- Rating bounds are enforced per instrument from the assessment row, so a 5
+  submitted against the 0–4 Inventory is rejected at the edge rather than
+  clamped — a value outside the range means the client and the server disagree
+  about the scale, and absorbing it would hide that.
+- Branding is `superadmin`-only, enforced in middleware rather than only by
+  hiding the nav item.
 - Tokens are opaque and stored only as keyed hashes.
 - Admin sessions are HS256 JWTs in an httpOnly, SameSite=Lax cookie, 12 hours.
 - Every public body is parsed through a zod schema.
