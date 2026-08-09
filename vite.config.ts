@@ -2,6 +2,8 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 
+const here = import.meta.dirname;
+
 /**
  * Two entry points, deliberately. The candidate experience and the admin
  * console are separate shells that share only design tokens — there is no
@@ -16,8 +18,8 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: {
-        main: resolve(__dirname, 'web/index.html'),
-        admin: resolve(__dirname, 'web/admin.html'),
+        main: resolve(here, 'web/index.html'),
+        admin: resolve(here, 'web/admin.html'),
       },
     },
   },

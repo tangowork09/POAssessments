@@ -162,3 +162,30 @@ td.mono{ font-variant-numeric:tabular-nums; }
   z-index:200;
 }
 .toast.is-shown{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+/* ------------------------------------------------------------------
+   React-router marks the active NavLink with aria-current="page"; the
+   mockup styled aria-current="true". Same appearance, both spellings.
+   ------------------------------------------------------------------ */
+.side-item[aria-current="page"]{ background:var(--accent-soft); color:var(--accent-3); font-weight:600; }
+.side-item[aria-current="page"] svg{ color:var(--accent); }
+.side-item{ text-decoration:none; }
+.side-item:hover{ text-decoration:none; }
+
+/* Console-only extras that the static mockup faked with inline markup. */
+.empty-state{ padding:48px 20px; text-align:center; color:var(--ink-3); font-size:13.5px; }
+.empty-state b{ display:block; color:var(--ink); font-size:15px; font-weight:620; margin-bottom:6px; }
+.stack-gap{ display:grid; gap:16px; }
+.inline-note{ font-size:12.5px; color:var(--ink-3); }
+.file-drop{
+  border:1px dashed var(--line-2); border-radius:var(--r-3); background:var(--surface-2);
+  padding:24px; text-align:center; font-size:13.5px; color:var(--ink-3);
+}
+.file-drop input{ display:block; margin:12px auto 0; font-size:13px; }
+.progress-strip{ height:6px; border-radius:3px; background:var(--surface-3); overflow:hidden; }
+.progress-strip i{ display:block; height:100%; background:var(--accent); border-radius:3px; }
+.code-line{
+  font-family:var(--mono); font-size:12.5px; color:var(--ink-2);
+  background:var(--surface-3); border:1px solid var(--line); border-radius:var(--r-2);
+  padding:9px 12px; overflow-x:auto; white-space:nowrap;
+}
