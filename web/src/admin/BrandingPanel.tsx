@@ -3,9 +3,9 @@
  * emails, because all three read the same settings rows.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, api } from '../lib/api.js';
-import { Head, Loading, Toast, useToast } from './ui.js';
+import { CardHead, ErrorState, Head, Loading, Toast, useToast } from './ui.js';
 import type { Branding } from '../../../src/shared/types.js';
 
 const MAX_LOGO_BYTES = 1_000_000;
@@ -14,15 +14,40 @@ export function BrandingPanel() {
   const [branding, setBranding] = useState<Branding | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [toast, showToast] = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    api.get<{ branding: Branding }>('/api/admin/branding').then((r) => setBranding(r.branding));
+  const load = useCallback(() => {
+    setLoadError(null);
+    api
+      .get<{ branding: Branding }>('/api/admin/branding')
+      .then((r) => setBranding(r.branding))
+      .catch((e: unknown) =>
+        setLoadError(
+          e instanceof ApiError && e.status === 403
+            ? 'Branding is restricted to super admin accounts.'
+            : e instanceof Error
+              ? e.message
+              : 'Branding could not be loaded.',
+        ),
+      );
   }, []);
 
-  if (!branding) return <Loading />;
+  useEffect(load, [load]);
+
+  if (loadError) {
+    return (
+      <>
+        <Head title="Branding" />
+        <section className="card">
+          <ErrorState message={loadError} onRetry={load} />
+        </section>
+      </>
+    );
+  }
+  if (!branding) return <Loading label="Loading branding…" />;
 
   const set = (patch: Partial<Branding>): void => setBranding({ ...branding, ...patch });
 
@@ -65,14 +90,9 @@ export function BrandingPanel() {
 
       <div className="grid-2">
         <section className="card">
-          <div className="card-head">
-            <div>
-              <div className="card-title">Identity</div>
-              <div className="card-sub">Shown on the assessment, the report and outbound mail</div>
-            </div>
-          </div>
+          <CardHead title="Identity" sub="Shown on the assessment, the report and outbound mail" />
           <div className="card-body">
-            <div className="form-grid" style={{ gridTemplateColumns: '1fr' }}>
+            <div className="form-grid form-grid-1">
               <div className={`field field-full${errors.companyName ? ' has-error' : ''}`}>
                 <label htmlFor="b-name">Company name</label>
                 <input
@@ -86,17 +106,17 @@ export function BrandingPanel() {
 
               <div className={`field field-full${errors.accentColor ? ' has-error' : ''}`}>
                 <label htmlFor="b-accent">Accent colour</label>
-                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                <div className="colour-row">
                   <input
                     type="color"
+                    className="colour-swatch"
                     value={/^#[0-9a-fA-F]{6}$/.test(branding.accentColor) ? branding.accentColor : '#1A4FD6'}
                     onChange={(e) => set({ accentColor: e.target.value.toUpperCase() })}
                     aria-label="Pick accent colour"
-                    style={{ width: 44, height: 40, padding: 2, border: '1px solid var(--line-2)', borderRadius: 6 }}
                   />
                   <input
                     id="b-accent"
-                    className="control"
+                    className="control num"
                     value={branding.accentColor}
                     onChange={(e) => set({ accentColor: e.target.value })}
                   />
@@ -121,13 +141,12 @@ export function BrandingPanel() {
                 <label htmlFor="b-logo">Logo</label>
                 <div className="file-drop">
                   {branding.logoDataUrl ? (
-                    <img
-                      src={branding.logoDataUrl}
-                      alt="Current logo"
-                      style={{ maxHeight: 56, maxWidth: 200, margin: '0 auto', display: 'block' }}
-                    />
+                    <img className="logo-preview" src={branding.logoDataUrl} alt="Current logo" />
                   ) : (
-                    <span>No logo uploaded — the company initial is used instead.</span>
+                    <>
+                      <b>No logo set</b>
+                      <span>Saving now restores the house PO Motivation mark.</span>
+                    </>
                   )}
                   <input
                     id="b-logo"
@@ -138,20 +157,21 @@ export function BrandingPanel() {
                   />
                   {branding.logoDataUrl ? (
                     <button
-                      className="link-btn"
-                      style={{ marginTop: 10 }}
+                      className="link-btn mt-2"
+                      type="button"
                       onClick={() => {
                         set({ logoDataUrl: '' });
                         if (fileRef.current) fileRef.current.value = '';
                       }}
                     >
-                      Remove logo
+                      Reset to the PO Motivation logo
                     </button>
                   ) : null}
                 </div>
-                <p className="inline-note" style={{ marginTop: 8 }}>
-                  PNG, JPEG, SVG or WebP up to 1 MB. Stored in the database as a data URL, so no bucket is
-                  needed.
+                <p className="inline-note mt-2">
+                  PNG, JPEG, SVG or WebP up to 1 MB, stored in the database as a data URL. A wide lockup
+                  works best — the house mark is 331 × 140. There is never no logo: clearing yours restores
+                  the PO Motivation one.
                 </p>
               </div>
             </div>
@@ -164,7 +184,7 @@ export function BrandingPanel() {
 
             <div className="form-foot">
               <span className="inline-note">Existing reports keep the branding they were issued with.</span>
-              <button className="btn btn-primary" onClick={save} disabled={busy}>
+              <button className="btn btn-primary" type="button" onClick={save} disabled={busy}>
                 {busy ? 'Saving…' : 'Save branding'}
               </button>
             </div>
@@ -172,50 +192,29 @@ export function BrandingPanel() {
         </section>
 
         <section className="card">
-          <div className="card-head">
-            <div>
-              <div className="card-title">Preview</div>
-              <div className="card-sub">How the header reads to a candidate</div>
-            </div>
-          </div>
+          <CardHead title="Preview" sub="How the header reads to a candidate" />
           <div className="card-body">
-            <div
-              style={{
-                border: '1px solid var(--line)',
-                borderRadius: 8,
-                padding: 16,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                background: 'var(--surface-2)',
-              }}
-            >
+            <div className="brand-preview">
               {branding.logoDataUrl ? (
-                <img
-                  src={branding.logoDataUrl}
-                  alt=""
-                  style={{ width: 32, height: 32, objectFit: 'contain', borderRadius: 6 }}
-                />
+                <img className="brand-preview-logo" src={branding.logoDataUrl} alt="" />
               ) : (
-                <div className="logo-slot" style={{ background: branding.accentColor }}>
+                <div className="logo-slot" style={{ background: branding.accentColor }} aria-hidden="true">
                   {(branding.companyName || 'A').charAt(0).toUpperCase()}
                 </div>
               )}
               <div className="brand-text">
                 <span className="brand-name">{branding.companyName || 'Your organisation'}</span>
-                <span className="brand-sub">Influencing Style Inventory</span>
+                {/* Neutral: the same header serves every instrument. */}
+                <span className="brand-sub">Assessment</span>
               </div>
             </div>
 
-            <button
-              className="btn btn-primary"
-              style={{ marginTop: 16, background: branding.accentColor }}
-              type="button"
-            >
+            {/* A span, not a button: it is a picture of the candidate's CTA, not one. */}
+            <span className="btn btn-primary mt-4 is-preview" style={{ background: branding.accentColor }}>
               Start the assessment
-            </button>
+            </span>
 
-            <p className="inline-note" style={{ marginTop: 16 }}>
+            <p className="inline-note mt-4">
               The accent drives the primary button, focus rings, progress bar, the Pull data colour and the
               accent marks in the PDF. Push keeps its warm clay hue so the two data series stay
               distinguishable.

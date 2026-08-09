@@ -3,15 +3,25 @@
 import { useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
+import { RolePill } from './ui.js';
 import type { AdminUser } from '../../../src/shared/types.js';
 
-const NAV = [
+interface NavItem {
+  to: string;
+  label: string;
+  icon: () => ReactNode;
+  end?: boolean;
+  /** Present when the item is restricted to one role. */
+  superadminOnly?: boolean;
+}
+
+const NAV: NavItem[] = [
   { to: '/admin', label: 'Dashboard', icon: IconGrid, end: true },
   { to: '/admin/assessments', label: 'Assessments', icon: IconDoc },
   { to: '/admin/candidates', label: 'Candidates', icon: IconPeople },
   { to: '/admin/invites', label: 'Invites', icon: IconSend },
   { to: '/admin/links', label: 'Assessment Link', icon: IconLink },
-  { to: '/admin/branding', label: 'Branding', icon: IconBrush },
+  { to: '/admin/branding', label: 'Branding', icon: IconBrush, superadminOnly: true },
 ];
 
 export function AdminShell({
@@ -26,6 +36,10 @@ export function AdminShell({
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
 
+  // Branding writes settings that reach every candidate, report and email, so
+  // the nav item is not merely disabled for an ordinary admin — it is absent.
+  const items = NAV.filter((item) => !item.superadminOnly || user.role === 'superadmin');
+
   async function signOut(): Promise<void> {
     await api.post('/api/admin/logout');
     onSignedOut();
@@ -37,7 +51,9 @@ export function AdminShell({
       <header className="topbar">
         <div className="topbar-inner">
           <div className="brand">
-            <div className="logo-slot">A</div>
+            <div className="logo-slot" aria-hidden="true">
+              A
+            </div>
             <div className="brand-text">
               <span className="brand-name">Admin console</span>
               <span className="brand-sub">Assessment Platform</span>
@@ -45,10 +61,11 @@ export function AdminShell({
           </div>
           <div className="topbar-spacer" />
           <div className="topbar-meta">
-            <span className="muted" style={{ fontSize: 12.5 }}>
-              {user.email}
+            <RolePill role={user.role} />
+            <span className="topbar-email">{user.email}</span>
+            <span className="avatar" aria-hidden="true">
+              {initials(user.name || user.email)}
             </span>
-            <span className="avatar">{initials(user.name || user.email)}</span>
           </div>
         </div>
       </header>
@@ -58,6 +75,7 @@ export function AdminShell({
           <button
             className="side-toggle"
             aria-expanded={open}
+            aria-controls="admin-nav"
             onClick={() => setOpen((v) => !v)}
             type="button"
           >
@@ -65,10 +83,10 @@ export function AdminShell({
             <IconChevron />
           </button>
 
-          <div className={`side-body${open ? ' is-open' : ''}`}>
+          <div className={`side-body${open ? ' is-open' : ''}`} id="admin-nav">
             <p className="side-label">Manage</p>
-            <nav className="side-nav">
-              {NAV.map(({ to, label, icon: Icon, end }) => (
+            <nav className="side-nav" aria-label="Console sections">
+              {items.map(({ to, label, icon: Icon, end }) => (
                 <NavLink key={to} to={to} end={end} className="side-item" onClick={() => setOpen(false)}>
                   <Icon />
                   {label}
@@ -78,10 +96,13 @@ export function AdminShell({
 
             <div className="side-card">
               <b>Signed in</b>
-              {user.email}
+              <span className="side-card-email">{user.email}</span>
+              <span className="side-card-role">
+                <RolePill role={user.role} />
+              </span>
             </div>
 
-            <button className="side-item" type="button" onClick={signOut} style={{ width: '100%' }}>
+            <button className="side-item side-item-full" type="button" onClick={signOut}>
               <IconExit />
               Sign out
             </button>

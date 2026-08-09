@@ -6,7 +6,17 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, api } from '../lib/api.js';
-import { Head, Toast, copyToClipboard, useToast } from './ui.js';
+import {
+  CardHead,
+  EmptyState,
+  ErrorState,
+  Head,
+  Loading,
+  Toast,
+  copyToClipboard,
+  formatDateTime,
+  useToast,
+} from './ui.js';
 
 interface Assessment {
   id: string;
@@ -50,17 +60,31 @@ interface BatchItem {
   error: string | null;
 }
 
+interface OutboxMessage {
+  id: string;
+  to_email: string;
+  subject: string;
+  kind: string;
+  status: string;
+  error: string | null;
+  created_at: string;
+  sent_at: string | null;
+}
+
 export function Invites() {
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [assessmentId, setAssessmentId] = useState('');
   const [toast, showToast] = useToast();
 
   useEffect(() => {
-    api.get<{ assessments: Assessment[] }>('/api/admin/assessments').then((r) => {
-      setAssessments(r.assessments);
-      const live = r.assessments.find((a) => a.status === 'live');
-      if (live) setAssessmentId(live.id);
-    });
+    api
+      .get<{ assessments: Assessment[] }>('/api/admin/assessments')
+      .then((r) => {
+        setAssessments(r.assessments);
+        const live = r.assessments.find((a) => a.status === 'live');
+        if (live) setAssessmentId(live.id);
+      })
+      .catch(() => setAssessments([]));
   }, []);
 
   return (
@@ -76,6 +100,7 @@ export function Invites() {
         />
         <BulkInvite assessmentId={assessmentId} onToast={showToast} />
         <MailSettings onToast={showToast} />
+        <Outbox />
       </div>
 
       <Toast message={toast} />
@@ -135,12 +160,7 @@ function SingleInvite({
 
   return (
     <section className="card">
-      <div className="card-head">
-        <div>
-          <div className="card-title">Invite one person</div>
-          <div className="card-sub">Creates a personal link and emails it</div>
-        </div>
-      </div>
+      <CardHead title="Invite one person" sub="Creates a personal link and emails it" />
       <form className="card-body" onSubmit={(e) => submit(e, true)}>
         <div className="form-grid">
           <div className="field">
@@ -191,6 +211,7 @@ function SingleInvite({
               value={assessmentId}
               onChange={(e) => onAssessment(e.target.value)}
             >
+              {assessments.length === 0 ? <option value="">No assessment available yet</option> : null}
               {assessments.map((a) => (
                 <option key={a.id} value={a.id} disabled={a.status !== 'live'}>
                   {a.name}
@@ -202,7 +223,7 @@ function SingleInvite({
         </div>
 
         {error ? (
-          <div className="banner is-shown" style={{ marginTop: 16 }} role="alert">
+          <div className="banner is-shown mt-4" role="alert">
             <span>{error}</span>
           </div>
         ) : null}
@@ -302,20 +323,20 @@ function BulkInvite({ assessmentId, onToast }: { assessmentId: string; onToast: 
 
   return (
     <section className="card">
-      <div className="card-head">
-        <div>
-          <div className="card-title">Invite in bulk</div>
-          <div className="card-sub">
-            CSV with an <code>email</code> column; first name, last name and organisation are optional
-          </div>
-        </div>
-      </div>
+      <CardHead
+        title="Invite in bulk"
+        sub="CSV with an email column; first name, last name and organisation are optional"
+      />
 
       <div className="card-body">
         {!preview && !batchId ? (
           <div className="file-drop">
-            Upload a CSV to check it before anything is sent.
-            <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={onFile} disabled={busy} />
+            <b>No list uploaded yet</b>
+            <span>Upload a CSV and every row is validated before a single message is sent.</span>
+            <label className="file-pick">
+              <span className="btn btn-secondary btn-sm">{busy ? 'Reading…' : 'Choose a CSV file'}</span>
+              <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={onFile} disabled={busy} />
+            </label>
           </div>
         ) : null}
 
@@ -327,7 +348,7 @@ function BulkInvite({ assessmentId, onToast }: { assessmentId: string; onToast: 
 
         {preview ? (
           <>
-            <div className="toolbar-row" style={{ marginBottom: 12 }}>
+            <div className="toolbar-row mb-3">
               <span className="pill pill-ok">{preview.validCount} will be invited</span>
               {preview.invalidCount > 0 ? (
                 <span className="pill pill-warn">{preview.invalidCount} skipped</span>
@@ -346,38 +367,54 @@ function BulkInvite({ assessmentId, onToast }: { assessmentId: string; onToast: 
               </div>
             ) : null}
 
-            <div className="table-scroll capped">
-              <table>
-                <thead>
-                  <tr>
-                    <th className="right">Row</th>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Organisation</th>
-                    <th>Result</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {preview.items.map((i) => (
-                    <tr key={i.row}>
-                      <td className="right num">{i.row}</td>
-                      <td className="name">
-                        {i.firstName} {i.lastName}
-                      </td>
-                      <td>{i.email || <em className="muted">missing</em>}</td>
-                      <td>{i.organisation || '—'}</td>
-                      <td>
-                        {i.valid ? (
-                          <span className="pill pill-ok">{i.known ? 'Known — will resend' : 'Will invite'}</span>
-                        ) : (
-                          <span className="pill pill-warn">{i.issue}</span>
-                        )}
-                      </td>
+            {preview.items.length === 0 ? (
+              <EmptyState
+                title="That file has no rows"
+                body="The CSV parsed cleanly but contained no data rows. Check it has a header line and at least one email."
+                action={{
+                  label: 'Choose another file',
+                  onClick: () => {
+                    setPreview(null);
+                    if (fileRef.current) fileRef.current.value = '';
+                  },
+                }}
+              />
+            ) : (
+              <div className="table-scroll capped">
+                <table className="table-preview">
+                  <thead>
+                    <tr>
+                      <th className="right">Row</th>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Organisation</th>
+                      <th>Result</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {preview.items.map((i) => (
+                      <tr key={i.row}>
+                        <td className="right num">{i.row}</td>
+                        <td className="name">
+                          {`${i.firstName} ${i.lastName}`.trim() || <span className="muted">—</span>}
+                        </td>
+                        <td>{i.email || <em className="muted">missing</em>}</td>
+                        <td className="cell-truncate">{i.organisation || <span className="muted">—</span>}</td>
+                        <td>
+                          {i.valid ? (
+                            <span className="pill pill-ok">
+                              {i.known ? 'Known — will resend' : 'Will invite'}
+                            </span>
+                          ) : (
+                            <span className="pill pill-warn">{i.issue}</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             <div className="form-foot">
               <button
@@ -402,26 +439,31 @@ function BulkInvite({ assessmentId, onToast }: { assessmentId: string; onToast: 
 
         {batch ? (
           <>
-            <div className="toolbar-row" style={{ marginBottom: 10 }}>
+            <div className="toolbar-row mb-3" role="status" aria-live="polite">
               <span className="pill pill-ok">{batch.batch.sent} sent</span>
               {batch.batch.failed > 0 ? (
                 <span className="pill pill-warn">{batch.batch.failed} failed</span>
               ) : null}
               <span className="inline-note">of {batch.batch.total} queued</span>
             </div>
-            <div className="progress-strip">
+            <div
+              className="progress-strip"
+              role="progressbar"
+              aria-label="Batch progress"
+              aria-valuenow={batch.batch.sent + batch.batch.failed}
+              aria-valuemin={0}
+              aria-valuemax={batch.batch.total}
+            >
               <i
                 style={{
-                  width: `${((batch.batch.sent + batch.batch.failed) / Math.max(batch.batch.total, 1)) * 100}%`,
+                  transform: `scaleX(${(batch.batch.sent + batch.batch.failed) / Math.max(batch.batch.total, 1)})`,
                 }}
               />
             </div>
 
             {failures.length > 0 ? (
               <>
-                <p className="side-label" style={{ padding: 0, marginTop: 20 }}>
-                  Failures
-                </p>
+                <p className="group-label mt-6">Failures</p>
                 <div className="table-scroll capped">
                   <table>
                     <thead>
@@ -497,25 +539,22 @@ function MailSettings({ onToast }: { onToast: (msg: string) => void }) {
 
   return (
     <section className="card">
-      <div className="card-head">
-        <div>
-          <div className="card-title">Sending</div>
-          <div className="card-sub">Applies to invitations across every assessment</div>
-        </div>
-      </div>
+      <CardHead title="Sending" sub="Applies to invitations across every assessment" />
       <div className="card-body">
         <div className="wl-row">
           <div className="wl-key">
-            <b>Daily send cap</b>
+            <b>
+              <label htmlFor="mail-cap">Daily send cap</label>
+            </b>
             <span>Invitations per UTC day</span>
           </div>
           <div className="wl-val">
             <input
-              className="control"
+              id="mail-cap"
+              className="control control-num"
               type="number"
               min={1}
               max={10000}
-              style={{ width: 120 }}
               value={cap}
               onChange={(e) => setCap(Number(e.target.value))}
             />
@@ -527,7 +566,7 @@ function MailSettings({ onToast }: { onToast: (msg: string) => void }) {
             <span>Report emails carry the PDF as well as the link</span>
           </div>
           <div className="wl-val">
-            <label style={{ display: 'inline-flex', gap: 8, alignItems: 'center', fontSize: 13.5 }}>
+            <label className="check-label">
               <input type="checkbox" checked={attach} onChange={(e) => setAttach(e.target.checked)} />
               Attach the report PDF
             </label>
@@ -535,11 +574,96 @@ function MailSettings({ onToast }: { onToast: (msg: string) => void }) {
         </div>
         <div className="form-foot">
           <span className="inline-note">Reports are always available at the emailed link.</span>
-          <button className="btn btn-primary" onClick={save} disabled={busy}>
+          <button className="btn btn-primary" type="button" onClick={save} disabled={busy}>
             {busy ? 'Saving…' : 'Save sending settings'}
           </button>
         </div>
       </div>
+    </section>
+  );
+}
+
+// ------------------------------------------------------------------- outbox
+
+/**
+ * Several actions report "the message is in the outbox". Without this card
+ * that sentence names a place the operator cannot reach.
+ */
+function Outbox() {
+  const [messages, setMessages] = useState<OutboxMessage[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setError(null);
+    api
+      .get<{ messages: OutboxMessage[] }>('/api/admin/outbox')
+      .then((r) => setMessages(r.messages))
+      .catch((e: Error) => setError(e.message));
+  }, []);
+
+  useEffect(load, [load]);
+
+  return (
+    <section className="card">
+      <CardHead
+        title="Outbox"
+        sub="The last 100 messages the platform tried to send"
+        aside={
+          <button className="btn btn-secondary btn-sm" type="button" onClick={load}>
+            Refresh
+          </button>
+        }
+      />
+      {error ? (
+        <ErrorState message={error} onRetry={load} />
+      ) : !messages ? (
+        <Loading label="Loading the outbox…" />
+      ) : messages.length === 0 ? (
+        <EmptyState
+          title="Nothing has been sent yet"
+          body="Every invitation and report email is recorded here with its result, so a failed send is never silent."
+        />
+      ) : (
+        <div className="table-scroll capped">
+          <table className="table-outbox">
+            <thead>
+              <tr>
+                <th>Recipient</th>
+                <th>Subject</th>
+                <th>Kind</th>
+                <th>Status</th>
+                <th className="right">Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {messages.map((m) => (
+                <tr key={m.id}>
+                  <td className="name">{m.to_email}</td>
+                  <td className="cell-truncate" title={m.subject}>
+                    {m.subject}
+                  </td>
+                  <td>{m.kind}</td>
+                  <td>
+                    <span
+                      className={`pill ${
+                        m.status === 'sent'
+                          ? 'pill-ok'
+                          : m.status === 'failed'
+                            ? 'pill-warn'
+                            : 'pill-neutral'
+                      }`}
+                    >
+                      {m.status}
+                    </span>
+                    {m.error ? <span className="cell-sub danger">{m.error}</span> : null}
+                  </td>
+                  <td className="right num">{formatDateTime(m.created_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   );
 }

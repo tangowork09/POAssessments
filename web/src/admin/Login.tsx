@@ -25,20 +25,16 @@ export function Login({ onSignedIn }: { onSignedIn: (user: AdminUser) => void })
   }
 
   return (
-    <div className="wrap" style={{ maxWidth: 420 }}>
-      <form className="card" style={{ padding: 40, marginTop: 72 }} onSubmit={submit}>
-        <div className="logo-slot" style={{ marginBottom: 20 }}>
+    <div className="wrap login-wrap">
+      <form className="card login-card" onSubmit={submit}>
+        <div className="logo-slot" aria-hidden="true">
           A
         </div>
-        <p className="eyebrow">Assessment Platform</p>
-        <h1 className="display" style={{ fontSize: 24, marginTop: 8 }}>
-          Sign in to the console
-        </h1>
-        <p className="hint" style={{ marginTop: 10 }}>
-          Administrator access only.
-        </p>
+        <p className="eyebrow mt-4">Assessment Platform</p>
+        <h1 className="display login-title">Sign in to the console</h1>
+        <p className="hint mt-2">Administrator access only.</p>
 
-        <div className="form-grid" style={{ gridTemplateColumns: '1fr', marginTop: 28 }}>
+        <div className="form-grid form-grid-1 mt-5">
           <div className="field field-full">
             <label htmlFor="email">Email address</label>
             <input
@@ -66,17 +62,12 @@ export function Login({ onSignedIn }: { onSignedIn: (user: AdminUser) => void })
         </div>
 
         {error ? (
-          <div className="banner is-shown" style={{ marginTop: 18 }} role="alert">
+          <div className="banner is-shown mt-4" role="alert">
             <span>{error}</span>
           </div>
         ) : null}
 
-        <button
-          className="btn btn-primary btn-lg"
-          type="submit"
-          disabled={busy}
-          style={{ width: '100%', marginTop: 24 }}
-        >
+        <button className="btn btn-primary btn-lg btn-block mt-5" type="submit" disabled={busy}>
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
