@@ -161,6 +161,15 @@ export const STYLES: readonly InfluencingStyle[] = [
   },
 ];
 
+/**
+ * The client's own description of the two influencing methods, reproduced
+ * verbatim. This is approved copy: do not paraphrase, reflow or "improve" it.
+ */
+export const INFLUENCING_METHODS = {
+  push: 'The Push Method — this approach is logical and aggressive with quick results. When using this method, managers may make demands on employees without considering the immediate or long-term impacts on specific individuals. This aggressive approach may not be well-received. As a result, employees may not be receptive or cooperative. However, when used correctly, push strategies can bring about solid results.',
+  pull: 'The Pull Method — this approach is all about including the individual in the decision-making process so that the person has a stake in the eventual outcomes. This method usually leads to a proactive response, in which the individual is more likely to fully accomplish the tasks set forth. Results from this approach are generally positive, but may take a bit longer to come to fruition in comparison to those achieved by means of the Push Method approach.',
+} as const;
+
 export const STYLE_BY_KEY: Readonly<Record<string, InfluencingStyle>> = Object.fromEntries(
   STYLES.map((s) => [s.key, s]),
 );

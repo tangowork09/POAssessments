@@ -1,14 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BALANCED_WITHIN,
+  MAX_ANSWER,
   MAX_SIDE_SCORE,
   MAX_STYLE_SCORE,
+  MIN_ANSWER,
   QUESTION_COUNT,
+  SCALE_LABELS,
+  SCALE_SHORT_LABELS,
   ScoringError,
   bandFor,
   executiveSummary,
   scoreAnswers,
 } from '../src/shared/scoring.js';
-import { PULL_STYLES, PUSH_STYLES, STYLES } from '../src/shared/styles.js';
+import { INFLUENCING_METHODS, PULL_STYLES, PUSH_STYLES, STYLES } from '../src/shared/styles.js';
 
 /** Answers built from a per-style map, mirroring how a real response arrives. */
 function answersFrom(map: Record<string, [number, number, number, number]>): Record<number, number> {
@@ -70,18 +75,56 @@ describe('style → item map', () => {
   });
 });
 
+describe('the published 0–4 rating scale', () => {
+  it('runs 0..4, so a style is out of 16 and a side out of 80', () => {
+    expect(MIN_ANSWER).toBe(0);
+    expect(MAX_ANSWER).toBe(4);
+    expect(MAX_STYLE_SCORE).toBe(16);
+    expect(MAX_SIDE_SCORE).toBe(80);
+  });
+
+  it('carries the published anchors verbatim, one per point', () => {
+    expect([...SCALE_LABELS]).toEqual([
+      'I never do it',
+      'I rarely do this',
+      'I sometimes do this',
+      'I often do this',
+      'I always do this',
+    ]);
+    expect(SCALE_LABELS).toHaveLength(MAX_ANSWER - MIN_ANSWER + 1);
+    expect(SCALE_SHORT_LABELS).toHaveLength(SCALE_LABELS.length);
+  });
+});
+
+describe('the method descriptions', () => {
+  it('reproduces the client copy verbatim', () => {
+    expect(INFLUENCING_METHODS.push).toBe(
+      'The Push Method — this approach is logical and aggressive with quick results. When using this method, managers may make demands on employees without considering the immediate or long-term impacts on specific individuals. This aggressive approach may not be well-received. As a result, employees may not be receptive or cooperative. However, when used correctly, push strategies can bring about solid results.',
+    );
+    expect(INFLUENCING_METHODS.pull).toBe(
+      'The Pull Method — this approach is all about including the individual in the decision-making process so that the person has a stake in the eventual outcomes. This method usually leads to a proactive response, in which the individual is more likely to fully accomplish the tasks set forth. Results from this approach are generally positive, but may take a bit longer to come to fruition in comparison to those achieved by means of the Push Method approach.',
+    );
+  });
+});
+
 describe('bandFor', () => {
-  it('maps 0–7 Low, 8–13 Moderate, 14–20 High', () => {
-    for (let n = 0; n <= 7; n++) expect(bandFor(n)).toBe('Low');
-    for (let n = 8; n <= 13; n++) expect(bandFor(n)).toBe('Moderate');
-    for (let n = 14; n <= MAX_STYLE_SCORE; n++) expect(bandFor(n)).toBe('High');
+  it('maps 0–6 Low, 7–11 Moderate, 12–16 High', () => {
+    for (let n = 0; n <= 6; n++) expect(bandFor(n)).toBe('Low');
+    for (let n = 7; n <= 11; n++) expect(bandFor(n)).toBe('Moderate');
+    for (let n = 12; n <= MAX_STYLE_SCORE; n++) expect(bandFor(n)).toBe('High');
   });
 
   it('places the boundaries on the stated side', () => {
-    expect(bandFor(7)).toBe('Low');
-    expect(bandFor(8)).toBe('Moderate');
-    expect(bandFor(13)).toBe('Moderate');
-    expect(bandFor(14)).toBe('High');
+    expect(bandFor(6)).toBe('Low');
+    expect(bandFor(7)).toBe('Moderate');
+    expect(bandFor(11)).toBe('Moderate');
+    expect(bandFor(12)).toBe('High');
+  });
+
+  it('covers the whole range with no gap', () => {
+    for (let n = 0; n <= MAX_STYLE_SCORE; n++) {
+      expect(['Low', 'Moderate', 'High']).toContain(bandFor(n));
+    }
   });
 });
 
@@ -96,8 +139,8 @@ describe('scoreAnswers', () => {
     expect(r.orientation).toBe('Balanced');
   });
 
-  it('scores an all-five response at the ceiling', () => {
-    const r = scoreAnswers(flat(5));
+  it('scores an all-four response at the ceiling', () => {
+    const r = scoreAnswers(flat(MAX_ANSWER));
     expect(r.push).toBe(MAX_SIDE_SCORE);
     expect(r.pull).toBe(MAX_SIDE_SCORE);
     for (const s of r.styles) {
@@ -107,61 +150,63 @@ describe('scoreAnswers', () => {
     }
   });
 
-  it('scores the known Priya Sharma fixture', () => {
-    // A pull-oriented profile with hand-checked totals.
+  it('scores a hand-checked 0–4 fixture', () => {
+    // A pull-oriented profile, every item inside the published 0..4 range.
     const answers = answersFrom({
-      force: [2, 1, 1, 1], //  5
-      rules: [3, 3, 4, 2], // 12
-      exchange: [2, 3, 2, 2], //  9
-      persuasion: [4, 4, 5, 4], // 17
-      assertion: [3, 4, 3, 3], // 13
-      magnetism: [4, 3, 4, 3], // 14
-      visioning: [5, 5, 4, 5], // 19
-      bridging: [5, 4, 5, 4], // 18
-      environmental: [3, 4, 3, 4], // 14
-      joint: [4, 5, 4, 4], // 17
+      force: [1, 1, 1, 1], //  4  Low
+      rules: [2, 3, 3, 2], // 10  Moderate
+      exchange: [2, 2, 2, 1], //  7  Moderate
+      persuasion: [3, 4, 4, 3], // 14  High
+      assertion: [3, 3, 2, 3], // 11  Moderate
+      magnetism: [3, 3, 3, 2], // 11  Moderate
+      visioning: [4, 4, 4, 3], // 15  High
+      bridging: [4, 3, 4, 4], // 15  High
+      environmental: [3, 3, 2, 3], // 11  Moderate
+      joint: [4, 3, 3, 3], // 13  High
     });
     const r = scoreAnswers(answers);
     const byKey = Object.fromEntries(r.styles.map((s) => [s.key, s.score]));
 
     expect(byKey).toEqual({
-      force: 5,
-      rules: 12,
-      exchange: 9,
-      persuasion: 17,
-      assertion: 13,
-      magnetism: 14,
-      visioning: 19,
-      bridging: 18,
-      environmental: 14,
-      joint: 17,
+      force: 4,
+      rules: 10,
+      exchange: 7,
+      persuasion: 14,
+      assertion: 11,
+      magnetism: 11,
+      visioning: 15,
+      bridging: 15,
+      environmental: 11,
+      joint: 13,
     });
-    expect(r.push).toBe(5 + 12 + 9 + 17 + 13); // 56
-    expect(r.pull).toBe(14 + 19 + 18 + 14 + 17); // 82
+    expect(r.push).toBe(4 + 10 + 7 + 14 + 11); // 46
+    expect(r.pull).toBe(11 + 15 + 15 + 11 + 13); // 65
     expect(r.orientation).toBe('Pull');
-    expect(r.top3.map((s) => s.key)).toEqual(['visioning', 'bridging', 'joint']);
+    // Visioning and Bridging tie on 15; the tie breaks on display name.
+    expect(r.top3.map((s) => s.key)).toEqual(['bridging', 'visioning', 'persuasion']);
     expect(r.development.key).toBe('force');
     expect(r.development.band).toBe('Low');
-    expect(r.pushShare).toBe(40.6);
-    expect(r.pullShare).toBe(59.4);
+    expect(r.pushShare).toBe(41.4);
+    expect(r.pullShare).toBe(58.6);
+    for (const s of r.styles) expect(s.score).toBeLessThanOrEqual(MAX_STYLE_SCORE);
   });
 
   it('reads item positions correctly rather than by order', () => {
     // Only statement 21 (Force, third item) is answered above zero.
     const answers: Record<number, number> = {};
     for (let n = 1; n <= QUESTION_COUNT; n++) answers[n] = 0;
-    answers[21] = 5;
+    answers[21] = 4;
     const r = scoreAnswers(answers);
-    expect(r.styles.find((s) => s.key === 'force')!.score).toBe(5);
-    expect(r.push).toBe(5);
+    expect(r.styles.find((s) => s.key === 'force')!.score).toBe(4);
+    expect(r.push).toBe(4);
     expect(r.pull).toBe(0);
-    expect(r.orientation).toBe('Balanced'); // within 5 points
+    expect(r.orientation).toBe('Balanced'); // within BALANCED_WITHIN
   });
 
-  it('calls a 6-point gap an orientation but 5 balanced', () => {
-    const balanced = { ...flat(0), 1: 5 };
+  it(`calls a gap of ${BALANCED_WITHIN} balanced and one more an orientation`, () => {
+    const balanced = { ...flat(0), 1: BALANCED_WITHIN };
     expect(scoreAnswers(balanced).orientation).toBe('Balanced');
-    const leaning = { ...flat(0), 1: 5, 13: 1 };
+    const leaning = { ...flat(0), 1: BALANCED_WITHIN, 13: 1 };
     expect(scoreAnswers(leaning).orientation).toBe('Push');
   });
 
@@ -182,15 +227,17 @@ describe('scoreAnswers', () => {
   });
 
   it('rejects out-of-range and non-integer answers', () => {
-    expect(() => scoreAnswers({ ...flat(3), 4: 6 })).toThrow(/statement 4/);
+    // 5 was valid on the retired scale and must now be refused outright.
+    expect(() => scoreAnswers({ ...flat(3), 4: 5 })).toThrow(/statement 4/);
     expect(() => scoreAnswers({ ...flat(3), 4: -1 })).toThrow(/statement 4/);
     expect(() => scoreAnswers({ ...flat(3), 4: 2.5 })).toThrow(/statement 4/);
+    expect(() => scoreAnswers({ ...flat(3), 4: MAX_ANSWER })).not.toThrow();
   });
 
   it('keeps push and pull shares summing to 100', () => {
     for (let seed = 0; seed < 40; seed++) {
       const answers: Record<number, number> = {};
-      for (let n = 1; n <= QUESTION_COUNT; n++) answers[n] = (n * 7 + seed * 13) % 6;
+      for (let n = 1; n <= QUESTION_COUNT; n++) answers[n] = (n * 7 + seed * 13) % (MAX_ANSWER + 1);
       const r = scoreAnswers(answers);
       expect(r.pushShare + r.pullShare).toBeCloseTo(100, 5);
       expect(r.push + r.pull).toBe(
@@ -208,14 +255,14 @@ describe('executiveSummary', () => {
       answersFrom({
         force: [0, 0, 0, 0],
         rules: [1, 1, 1, 1],
-        exchange: [2, 2, 2, 2],
-        persuasion: [3, 3, 3, 3],
-        assertion: [2, 2, 2, 2],
-        magnetism: [4, 4, 4, 4],
-        visioning: [5, 5, 5, 5],
-        bridging: [3, 3, 3, 3],
-        environmental: [2, 2, 2, 2],
-        joint: [4, 4, 4, 3],
+        exchange: [1, 2, 1, 2],
+        persuasion: [2, 2, 2, 2],
+        assertion: [2, 1, 2, 1],
+        magnetism: [3, 3, 3, 3],
+        visioning: [4, 4, 4, 4],
+        bridging: [2, 3, 2, 3],
+        environmental: [1, 2, 2, 1],
+        joint: [3, 3, 3, 2],
       }),
     );
     const text = executiveSummary(r, 'Priya');
