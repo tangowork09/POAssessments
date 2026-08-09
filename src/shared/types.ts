@@ -35,8 +35,12 @@ export interface CandidateSession {
   scaleLabels: readonly string[];
   /** Present once a response row exists (personal link, or generic link resumed). */
   response: CandidateResponseState | null;
-  /** Set when the candidate has already finished — the shell jumps to completion. */
-  reportToken: string | null;
+  /**
+   * True once a report exists for this candidate. The report token itself is
+   * never returned here — it is stored only as a keyed hash — so the candidate
+   * reads their report through their own link instead.
+   */
+  reportAvailable: boolean;
 }
 
 export interface CandidateResponseState {

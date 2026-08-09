@@ -56,10 +56,10 @@ export function renderReportPdf(report: ReportPayload): Uint8Array {
   drawTitleBlock(doc, report, cur, accent);
   drawSubjectStrip(doc, report, cur);
   drawExecSummary(doc, report, cur, accent);
-  drawHeadline(doc, report, cur, accent);
+  drawHeadline(doc, report, cur);
   drawSplit(doc, report, cur);
   drawBars(doc, report, cur);
-  drawNarratives(doc, report, cur, accent);
+  drawNarratives(doc, report, cur);
   drawDevelopment(doc, report, cur, accent);
   drawFooters(doc, report);
 
@@ -198,7 +198,7 @@ function drawExecSummary(doc: PdfDoc, report: ReportPayload, cur: Cursor, accent
   cur.y += boxH + 26;
 }
 
-function drawHeadline(doc: PdfDoc, report: ReportPayload, cur: Cursor, accent: string): void {
+function drawHeadline(doc: PdfDoc, report: ReportPayload, cur: Cursor): void {
   const lead = report.narratives[0];
   if (!lead) return;
   const h = 76;
@@ -350,7 +350,7 @@ function drawBars(doc: PdfDoc, report: ReportPayload, cur: Cursor): void {
   cur.y += 8;
 }
 
-function drawNarratives(doc: PdfDoc, report: ReportPayload, cur: Cursor, accent: string): void {
+function drawNarratives(doc: PdfDoc, report: ReportPayload, cur: Cursor): void {
   sectionHead(doc, cur, 'Your top three styles', 'Narrative and overuse risk', 140);
 
   report.narratives.forEach((n, i) => {
@@ -416,7 +416,6 @@ function drawNarratives(doc: PdfDoc, report: ReportPayload, cur: Cursor, accent:
   });
 
   cur.y += 10;
-  void accent;
 }
 
 function drawDevelopment(doc: PdfDoc, report: ReportPayload, cur: Cursor, accent: string): void {

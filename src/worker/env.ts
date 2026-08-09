@@ -25,7 +25,11 @@ export interface Env {
 }
 
 export type PipelineMessage =
-  | { type: 'score_and_deliver'; responseId: string }
+  /**
+   * `reportToken` is minted at submit time so the candidate can be given a
+   * working report URL immediately; the pipeline stores only its hash.
+   */
+  | { type: 'score_and_deliver'; responseId: string; reportToken: string }
   | { type: 'send_invite'; batchItemId: string };
 
 /** Base URL for links in mail, preferring the request origin in development. */

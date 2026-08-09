@@ -20,6 +20,14 @@ export interface AdminClaims {
   name: string;
 }
 
+/** The Hono environment every authenticated admin route runs under. */
+export interface AdminHono {
+  Bindings: Env;
+  Variables: { admin: AdminClaims };
+}
+
+type Ctx = Context<AdminHono>;
+
 /** bcryptjs rounds — 10 keeps sign-in inside the Workers CPU budget. */
 const BCRYPT_ROUNDS = 10;
 
@@ -40,7 +48,7 @@ function secretKey(env: Env): Uint8Array {
   return encoder.encode(env.JWT_SECRET);
 }
 
-export async function issueSession(c: Context<{ Bindings: Env }>, claims: AdminClaims): Promise<void> {
+export async function issueSession(c: Ctx, claims: AdminClaims): Promise<void> {
   const token = await new SignJWT({ email: claims.email, name: claims.name })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(claims.sub)
@@ -59,11 +67,11 @@ export async function issueSession(c: Context<{ Bindings: Env }>, claims: AdminC
   });
 }
 
-export function clearSession(c: Context<{ Bindings: Env }>): void {
+export function clearSession(c: Ctx): void {
   deleteCookie(c, SESSION_COOKIE, { path: '/' });
 }
 
-export async function readSession(c: Context<{ Bindings: Env }>): Promise<AdminClaims | null> {
+export async function readSession(c: Ctx): Promise<AdminClaims | null> {
   const token = getCookie(c, SESSION_COOKIE);
   if (!token) return null;
   try {
