@@ -15,6 +15,8 @@
 
 import { FIRST_CHAR, LAST_CHAR, WIDTHS, type StdFont } from './afm.js';
 
+export type { StdFont } from './afm.js';
+
 export interface Rgb {
   r: number;
   g: number;
@@ -164,10 +166,222 @@ class Page {
   constructor(readonly size: PageSize) {}
 }
 
+/** A stop on an axial gradient: `offset` runs 0..1 along the gradient axis. */
+export interface GradientStop {
+  offset: number;
+  color: Rgb | string;
+}
+
+interface GradientDef {
+  /** Resource name, e.g. 'Sh1'. */
+  name: string;
+  /** Already flipped into PDF (bottom-up) space. */
+  coords: [number, number, number, number];
+  stops: { offset: number; color: Rgb }[];
+}
+
+/** Handle returned by {@link PdfDoc.gradient}; pass it to a paint call. */
+export interface GradientRef {
+  readonly name: string;
+}
+
+const KAPPA = 0.5522847498307936;
+
+/**
+ * Collects a path in top-down layout coordinates and paints it.
+ *
+ * Every method returns `this`, so a path reads as one expression. The paint
+ * calls (`fill`, `stroke`, `fillStroke`, `clip`, `shade`) each emit their own
+ * `q`/`Q` pair, so a path never leaks graphics state.
+ */
+export class PathBuilder {
+  private readonly segs: string[] = [];
+
+  constructor(
+    private readonly page: Page,
+    private readonly height: number,
+  ) {}
+
+  private fy(y: number): number {
+    return this.height - y;
+  }
+
+  moveTo(x: number, y: number): this {
+    this.segs.push(`${fmt(x)} ${fmt(this.fy(y))} m`);
+    return this;
+  }
+
+  lineTo(x: number, y: number): this {
+    this.segs.push(`${fmt(x)} ${fmt(this.fy(y))} l`);
+    return this;
+  }
+
+  /** Cubic Bezier through two control points. */
+  curveTo(c1x: number, c1y: number, c2x: number, c2y: number, x: number, y: number): this {
+    this.segs.push(
+      `${fmt(c1x)} ${fmt(this.fy(c1y))} ${fmt(c2x)} ${fmt(this.fy(c2y))} ` +
+        `${fmt(x)} ${fmt(this.fy(y))} c`,
+    );
+    return this;
+  }
+
+  close(): this {
+    this.segs.push('h');
+    return this;
+  }
+
+  /** Appends a rectangle as its own subpath. */
+  rect(x: number, y: number, w: number, h: number): this {
+    this.segs.push(`${fmt(x)} ${fmt(this.fy(y + h))} ${fmt(w)} ${fmt(h)} re`);
+    return this;
+  }
+
+  /** Appends a rounded rectangle as its own subpath. */
+  roundRect(x: number, y: number, w: number, h: number, radius: number): this {
+    const r = Math.max(0, Math.min(radius, Math.min(w, h) / 2));
+    if (r === 0) return this.rect(x, y, w, h);
+    const k = r * KAPPA;
+    const x1 = x + w;
+    const y1 = y + h;
+    this.moveTo(x + r, y);
+    this.lineTo(x1 - r, y);
+    this.curveTo(x1 - r + k, y, x1, y + r - k, x1, y + r);
+    this.lineTo(x1, y1 - r);
+    this.curveTo(x1, y1 - r + k, x1 - r + k, y1, x1 - r, y1);
+    this.lineTo(x + r, y1);
+    this.curveTo(x + r - k, y1, x, y1 - r + k, x, y1 - r);
+    this.lineTo(x, y + r);
+    this.curveTo(x, y + r - k, x + r - k, y, x + r, y);
+    return this.close();
+  }
+
+  /**
+   * Appends a full ellipse as its own subpath, optionally rotated.
+   *
+   * `rotation` is in degrees, clockwise on screen (the layout layer's y grows
+   * downward). Two ellipses in one path plus an even-odd fill make a ring.
+   */
+  ellipse(cx: number, cy: number, rx: number, ry: number, rotation = 0): this {
+    const a = (rotation * Math.PI) / 180;
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    const p = (u: number, v: number): [number, number] => [
+      cx + u * cos - v * sin,
+      cy + u * sin + v * cos,
+    ];
+    const kx = rx * KAPPA;
+    const ky = ry * KAPPA;
+    // Four quarter-arcs, walking the unrotated ellipse and rotating each point.
+    const pts: [number, number][][] = [
+      [
+        [rx, 0],
+        [rx, ky],
+        [kx, ry],
+        [0, ry],
+      ],
+      [
+        [0, ry],
+        [-kx, ry],
+        [-rx, ky],
+        [-rx, 0],
+      ],
+      [
+        [-rx, 0],
+        [-rx, -ky],
+        [-kx, -ry],
+        [0, -ry],
+      ],
+      [
+        [0, -ry],
+        [kx, -ry],
+        [rx, -ky],
+        [rx, 0],
+      ],
+    ];
+    const start = p(pts[0]![0]![0], pts[0]![0]![1]);
+    this.moveTo(start[0], start[1]);
+    for (const arc of pts) {
+      const c1 = p(arc[1]![0], arc[1]![1]);
+      const c2 = p(arc[2]![0], arc[2]![1]);
+      const to = p(arc[3]![0], arc[3]![1]);
+      this.curveTo(c1[0], c1[1], c2[0], c2[1], to[0], to[1]);
+    }
+    return this.close();
+  }
+
+  /** Convenience: a closed polygon through the given top-down points. */
+  polygon(points: readonly (readonly [number, number])[]): this {
+    points.forEach(([x, y], i) => (i === 0 ? this.moveTo(x, y) : this.lineTo(x, y)));
+    return this.close();
+  }
+
+  fill(color: Rgb | string, evenOdd = false): void {
+    if (this.segs.length === 0) return;
+    const c = typeof color === 'string' ? hex(color) : color;
+    this.page.ops.push(
+      'q',
+      `${fmt(c.r)} ${fmt(c.g)} ${fmt(c.b)} rg`,
+      ...this.segs,
+      evenOdd ? 'f*' : 'f',
+      'Q',
+    );
+  }
+
+  stroke(color: Rgb | string, lineWidth = 0.6): void {
+    if (this.segs.length === 0) return;
+    const c = typeof color === 'string' ? hex(color) : color;
+    this.page.ops.push(
+      'q',
+      `${fmt(c.r)} ${fmt(c.g)} ${fmt(c.b)} RG`,
+      `${fmt(lineWidth)} w`,
+      '1 J 1 j',
+      ...this.segs,
+      'S',
+      'Q',
+    );
+  }
+
+  fillStroke(fillColor: Rgb | string, strokeColor: Rgb | string, lineWidth = 0.6): void {
+    if (this.segs.length === 0) return;
+    const f = typeof fillColor === 'string' ? hex(fillColor) : fillColor;
+    const s = typeof strokeColor === 'string' ? hex(strokeColor) : strokeColor;
+    this.page.ops.push(
+      'q',
+      `${fmt(f.r)} ${fmt(f.g)} ${fmt(f.b)} rg`,
+      `${fmt(s.r)} ${fmt(s.g)} ${fmt(s.b)} RG`,
+      `${fmt(lineWidth)} w`,
+      ...this.segs,
+      'B',
+      'Q',
+    );
+  }
+
+  /** Paints an axial gradient through this path, using it as the clip. */
+  shade(ref: GradientRef, evenOdd = false): void {
+    if (this.segs.length === 0) return;
+    this.page.ops.push('q', ...this.segs, evenOdd ? 'W* n' : 'W n', `/${ref.name} sh`, 'Q');
+  }
+
+  /** Runs `fn` with this path installed as the clip region. */
+  clip(fn: () => void, evenOdd = false): void {
+    if (this.segs.length === 0) {
+      fn();
+      return;
+    }
+    this.page.ops.push('q', ...this.segs, evenOdd ? 'W* n' : 'W n');
+    try {
+      fn();
+    } finally {
+      this.page.ops.push('Q');
+    }
+  }
+}
+
 export class PdfDoc {
   private readonly pages: Page[] = [];
   private current: Page;
   private readonly usedFonts = new Set<StdFont>();
+  private readonly gradients: GradientDef[] = [];
 
   constructor(
     readonly size: PageSize = A4,
@@ -311,6 +525,80 @@ export class PdfDoc {
     this.line(x, y, x + width, y, color, lineWidth);
   }
 
+  // ------------------------------------------------------------------- paths
+
+  /** Starts a path in the same top-down coordinates as the rest of the layer. */
+  path(): PathBuilder {
+    return new PathBuilder(this.current, this.current.size.height);
+  }
+
+  /** Filled rectangle with rounded corners. */
+  roundRect(x: number, y: number, w: number, h: number, radius: number, color: Rgb | string): void {
+    if (w <= 0 || h <= 0) return;
+    this.path().roundRect(x, y, w, h, radius).fill(color);
+  }
+
+  /** Stroked rounded-rectangle outline. */
+  strokeRoundRect(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    radius: number,
+    color: Rgb | string,
+    lineWidth = 0.6,
+  ): void {
+    if (w <= 0 || h <= 0) return;
+    this.path().roundRect(x, y, w, h, radius).stroke(color, lineWidth);
+  }
+
+  /** Filled polygon — the cover geometry's triangles and wedges. */
+  polygon(points: readonly (readonly [number, number])[], color: Rgb | string): void {
+    if (points.length < 3) return;
+    this.path().polygon(points).fill(color);
+  }
+
+  // --------------------------------------------------------------- gradients
+
+  /**
+   * Registers an axial (`/ShadingType 2`) gradient running from (x1,y1) to
+   * (x2,y2) in top-down layout coordinates. The handle can be painted into any
+   * path via {@link PathBuilder.shade} or into a rectangle via
+   * {@link PdfDoc.shadeRect}, on any page — shadings live in the shared
+   * resource dictionary.
+   */
+  gradient(
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    stops: readonly GradientStop[],
+  ): GradientRef {
+    const resolved = stops
+      .map((s) => ({
+        offset: Math.max(0, Math.min(1, s.offset)),
+        color: typeof s.color === 'string' ? hex(s.color) : s.color,
+      }))
+      .sort((a, b) => a.offset - b.offset);
+    if (resolved.length === 0) resolved.push({ offset: 0, color: { r: 0, g: 0, b: 0 } });
+    if (resolved.length === 1) resolved.push({ ...resolved[0]!, offset: 1 });
+
+    const h = this.size.height;
+    const def: GradientDef = {
+      name: `Sh${this.gradients.length + 1}`,
+      coords: [x1, h - y1, x2, h - y2],
+      stops: resolved,
+    };
+    this.gradients.push(def);
+    return { name: def.name };
+  }
+
+  /** Paints a registered gradient across a rectangle. */
+  shadeRect(x: number, y: number, w: number, h: number, ref: GradientRef): void {
+    if (w <= 0 || h <= 0) return;
+    this.path().rect(x, y, w, h).shade(ref);
+  }
+
   build(): Uint8Array {
     const objects: string[] = [];
     const addObject = (body: string): number => {
@@ -331,12 +619,49 @@ export class PdfDoc {
       );
     }
 
+    // Axial shadings, each with its own interpolation function. Two stops use a
+    // single exponential function; more stops are stitched with a type-3.
+    const shadingRefs: string[] = [];
+    for (const g of this.gradients) {
+      const rgb = (c: Rgb): string => `[${fmt(c.r)} ${fmt(c.g)} ${fmt(c.b)}]`;
+      let fnNum: number;
+      if (g.stops.length === 2) {
+        fnNum = addObject(
+          `<< /FunctionType 2 /Domain [0 1] /C0 ${rgb(g.stops[0]!.color)} ` +
+            `/C1 ${rgb(g.stops[1]!.color)} /N 1 >>`,
+        );
+      } else {
+        const parts: number[] = [];
+        for (let i = 0; i < g.stops.length - 1; i++) {
+          parts.push(
+            addObject(
+              `<< /FunctionType 2 /Domain [0 1] /C0 ${rgb(g.stops[i]!.color)} ` +
+                `/C1 ${rgb(g.stops[i + 1]!.color)} /N 1 >>`,
+            ),
+          );
+        }
+        const bounds = g.stops.slice(1, -1).map((s) => fmt(s.offset));
+        const encode = parts.map(() => '0 1').join(' ');
+        fnNum = addObject(
+          `<< /FunctionType 3 /Domain [0 1] /Functions [${parts.map((n) => `${n} 0 R`).join(' ')}] ` +
+            `/Bounds [${bounds.join(' ')}] /Encode [${encode}] >>`,
+        );
+      }
+      const shadingNum = addObject(
+        `<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [${g.coords.map(fmt).join(' ')}] ` +
+          `/Function ${fnNum} 0 R /Extend [true true] >>`,
+      );
+      shadingRefs.push(`/${g.name} ${shadingNum} 0 R`);
+    }
+
     const resources =
       '<< /Font << ' +
       (Object.entries(fontObjects) as [StdFont, number][])
         .map(([font, num]) => `/${FONT_RESOURCE[font]} ${num} 0 R`)
         .join(' ') +
-      ' >> >>';
+      ' >>' +
+      (shadingRefs.length ? ` /Shading << ${shadingRefs.join(' ')} >>` : '') +
+      ' >>';
 
     const pageNumbers: number[] = [];
     for (const page of this.pages) {
