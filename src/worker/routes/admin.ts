@@ -32,7 +32,7 @@ import {
   mailSettingsSchema,
   singleInviteSchema,
 } from '../lib/validation.js';
-import { dispatch, ensureCandidateAndLink, sendsToday } from '../pipeline.js';
+import { consumeSendAllowance, dispatch, ensureCandidateAndLink, sendsToday } from '../pipeline.js';
 import { inviteEmail } from '../email/templates.js';
 import { MAX_STYLE_SCORE } from '../../shared/scoring.js';
 import { STYLES } from '../../shared/styles.js';
@@ -349,6 +349,11 @@ adminRoutes.post('/candidates/:responseId/resend', async (c) => {
   if (!row) return c.json({ error: 'Unknown candidate' }, 404);
 
   const settings = await getSettings(c.env);
+  const cap = dailySendCap(settings);
+  if (!(await consumeSendAllowance(c.env, cap))) {
+    return c.json({ status: 'failed', error: `Daily send cap of ${cap} reached.` }, 429);
+  }
+
   const { token } = await ensureCandidateAndLink(c.env, {
     assessmentId: row.assessment_id,
     email: row.email,
@@ -466,8 +471,9 @@ adminRoutes.post('/invites/single', async (c) => {
 
   const settings = await getSettings(c.env);
   const cap = dailySendCap(settings);
-  const used = await sendsToday(c.env);
-  if (used >= cap) {
+  // Consumes the slot as well as checking it, so single and bulk sends draw on
+  // the same ledger rather than the cap only counting batches.
+  if (!(await consumeSendAllowance(c.env, cap))) {
     return c.json({ url, sent: false, error: `Daily send cap of ${cap} reached.` }, 429);
   }
 

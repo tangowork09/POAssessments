@@ -7,11 +7,15 @@
 
   "observability": { "enabled": true },
 
+  // The Worker decides which shell every document request gets, so it must run
+  // before the assets binding — otherwise SPA fallback would serve index.html
+  // for /admin/* and defeat the split. Static files are fetched back out of the
+  // binding by the Worker itself.
   "assets": {
     "directory": "./dist/client",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    "not_found_handling": "none",
+    "run_worker_first": true
   },
 
   "d1_databases": [

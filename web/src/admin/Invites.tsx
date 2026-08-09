@@ -285,15 +285,11 @@ function BulkInvite({ assessmentId, onToast }: { assessmentId: string; onToast: 
   useEffect(() => {
     if (!batchId) return;
     void poll();
+    // Stop once every item has settled — a finished batch never changes again.
+    if (batch && batch.batch.sent + batch.batch.failed >= batch.batch.total) return;
     const t = setInterval(poll, 2000);
     return () => clearInterval(t);
-  }, [batchId, poll]);
-
-  useEffect(() => {
-    if (batch && batch.batch.sent + batch.batch.failed >= batch.batch.total) {
-      // Batch finished — one more read settles the final list, then stop.
-    }
-  }, [batch]);
+  }, [batchId, poll, batch]);
 
   async function retry(): Promise<void> {
     if (!batchId) return;

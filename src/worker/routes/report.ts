@@ -113,13 +113,20 @@ reportRoutes.get('/by-link/:token', async (c) => {
 
 async function pdfResponse(c: Context<{ Bindings: Env }>, row: ReportRow | null): Promise<Response> {
   if (!row) return c.json({ error: 'Report not found.' }, 404);
+  // D1 returns a BLOB as a plain array of byte values, not an ArrayBuffer —
+  // handing that straight to Response() yields an empty body.
   const rec = await c.env.DB.prepare('SELECT pdf FROM reports WHERE id = ?1')
     .bind(row.report_id)
-    .first<{ pdf: ArrayBuffer | null }>();
+    .first<{ pdf: number[] | ArrayBuffer | null }>();
   if (!rec?.pdf) return c.json({ error: 'The PDF for this report is not available.' }, 404);
 
+  const bytes = Array.isArray(rec.pdf) ? new Uint8Array(rec.pdf) : new Uint8Array(rec.pdf);
+  if (bytes.byteLength === 0) {
+    return c.json({ error: 'The PDF for this report is not available.' }, 404);
+  }
+
   const name = `${row.first_name}-${row.last_name}-report`.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
-  return new Response(rec.pdf, {
+  return new Response(bytes, {
     headers: {
       'content-type': 'application/pdf',
       'content-disposition': `inline; filename="${name}.pdf"`,
