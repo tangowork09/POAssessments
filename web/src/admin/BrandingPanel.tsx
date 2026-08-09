@@ -107,6 +107,11 @@ export function BrandingPanel() {
               <div className={`field field-full${errors.accentColor ? ' has-error' : ''}`}>
                 <label htmlFor="b-accent">Accent colour</label>
                 <div className="colour-row">
+                  {/*
+                    <input type="color"> rejects anything but a literal
+                    six-digit hex, so a var() is not an option here. The
+                    fallback is the same value as --accent in base.css.
+                  */}
                   <input
                     type="color"
                     className="colour-swatch"

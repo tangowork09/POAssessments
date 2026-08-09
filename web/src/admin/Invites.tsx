@@ -585,6 +585,12 @@ function MailSettings({ onToast }: { onToast: (msg: string) => void }) {
 
 // ------------------------------------------------------------------- outbox
 
+/** Stored enum values are lower_snake; the console shows prose. */
+function sentenceCase(value: string): string {
+  const words = value.replace(/_/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 /**
  * Several actions report "the message is in the outbox". Without this card
  * that sentence names a place the operator cannot reach.
@@ -642,7 +648,7 @@ function Outbox() {
                   <td className="cell-truncate" title={m.subject}>
                     {m.subject}
                   </td>
-                  <td>{m.kind}</td>
+                  <td>{sentenceCase(m.kind)}</td>
                   <td>
                     <span
                       className={`pill ${
@@ -653,7 +659,7 @@ function Outbox() {
                             : 'pill-neutral'
                       }`}
                     >
-                      {m.status}
+                      {sentenceCase(m.status)}
                     </span>
                     {m.error ? <span className="cell-sub danger">{m.error}</span> : null}
                   </td>

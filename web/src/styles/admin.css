@@ -181,7 +181,15 @@ td.name{ color:var(--ink); font-weight:580; }
 .table-funnel{ min-width:760px; }
 .table-recent{ min-width:420px; }
 .table-preview{ min-width:640px; }
-.table-outbox{ min-width:720px; }
+/* Subject is the widest thing here, so it gets the slack rather than the
+   truncation — .cell-truncate alone would collapse it to nothing. */
+.table-outbox{ min-width:720px; table-layout:fixed; }
+.table-outbox th:nth-child(1){ width:250px; }
+.table-outbox th:nth-child(2){ width:auto; }
+.table-outbox th:nth-child(3){ width:90px; }
+.table-outbox th:nth-child(4){ width:180px; }
+.table-outbox th:nth-child(5){ width:130px; }
+.table-outbox td:nth-child(1){ overflow:hidden; text-overflow:ellipsis; }
 
 .cell-result .result-label{ display:block; color:var(--ink); font-weight:560; font-size:13px; line-height:1.35; }
 .cell-result .muted{ font-size:12.5px; }
@@ -315,12 +323,15 @@ td.name{ color:var(--ink); font-weight:580; }
    ============================================================ */
 .wl-row{ display:flex; align-items:center; gap:16px; padding:16px 0; border-bottom:1px solid var(--line); flex-wrap:wrap; }
 .wl-row:last-child{ border-bottom:0; }
-.wl-key{ width:200px; flex:none; }
+.wl-key{ width:236px; flex:none; }
 .wl-key b{ display:block; font-size:13.5px; font-weight:600; color:var(--ink); }
 .wl-key span{ font-size:12px; color:var(--ink-3); }
 .wl-val{ flex:1 1 260px; min-width:0; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
 .wl-actions{ display:flex; gap:8px; margin-left:auto; }
 .wl-full{ flex-basis:100%; }
+/* A settings row already ends in a rule; the footer's own rule would read as
+   a second, emptier divider right below it. */
+.wl-row + .form-foot{ border-top:0; margin-top:12px; padding-top:0; }
 @media (max-width:640px){
   .wl-key{ width:100%; }
   .wl-actions{ margin-left:0; }
