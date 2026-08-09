@@ -1,9 +1,14 @@
 /**
- * One statement at a time, rated 0–5 on six big squares.
+ * One statement at a time, rated on the instrument's own scale.
  *
- * Keyboard: 0–5 rate the statement and move on, Enter continues, Backspace goes
- * back, arrow keys move between the six squares. The scale is a real radiogroup
- * so screen readers announce it as one control.
+ * The scale is not fixed: the Influencing Styles Questionnaire is rated 0–4 on
+ * five squares and the Ego States Scale 0–6 on seven, so the control is built
+ * from `scale` and the grid column count travels to CSS as a custom property
+ * rather than being hard-coded in the stylesheet.
+ *
+ * Keyboard: the digit keys inside the scale rate the statement and move on,
+ * Enter continues, Backspace goes back, arrow keys move between the squares.
+ * The scale is a real radiogroup so screen readers announce it as one control.
  *
  * The wire format is unchanged. The server and the autosave engine still think
  * in pages of `perPage` statements, so `resumePage` keeps its meaning and an
@@ -13,9 +18,9 @@
  * which makes resume land on the exact question rather than the page.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SaveState } from '../lib/autosave.js';
-import type { Question } from '../../../src/shared/types.js';
+import type { Question, ScaleInfo } from '../../../src/shared/types.js';
 
 const AUTO_ADVANCE_MS = 300;
 
@@ -47,7 +52,7 @@ function prefersReducedMotion(): boolean {
 
 export function QuestionPage({
   questions,
-  scaleLabels,
+  scale,
   perPage,
   page,
   answers,
@@ -60,7 +65,7 @@ export function QuestionPage({
   onSubmit,
 }: {
   questions: Question[];
-  scaleLabels: readonly string[];
+  scale: ScaleInfo;
   perPage: number;
   page: number;
   answers: Record<number, number>;
@@ -96,6 +101,10 @@ export function QuestionPage({
 
   const total = questions.length;
   const current = questions[Math.min(index, Math.max(0, total - 1))];
+  const options = useMemo(
+    () => Array.from({ length: scale.max - scale.min + 1 }, (_, i) => scale.min + i),
+    [scale.max, scale.min],
+  );
   const value = current ? answers[current.no] : undefined;
   const answeredTotal = questions.filter((q) => answers[q.no] !== undefined).length;
   const isLast = index >= total - 1;
@@ -172,9 +181,13 @@ export function QuestionPage({
       const tag = el?.tagName?.toLowerCase();
       if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
 
-      if (e.key >= '0' && e.key <= '5' && e.key.length === 1) {
+      // Only the digits this instrument actually offers: on a 0–4 scale a
+      // stray '5' must do nothing rather than silently miss.
+      if (e.key.length === 1 && e.key >= '0' && e.key <= '9') {
+        const v = Number(e.key);
+        if (v < scale.min || v > scale.max) return;
         e.preventDefault();
-        pick(Number(e.key));
+        pick(v);
       } else if (e.key === 'Enter') {
         // A focused square handles its own Enter as a click.
         if (el?.classList?.contains('rate')) return;
@@ -187,17 +200,17 @@ export function QuestionPage({
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [advance, goTo, index, pick]);
+  }, [advance, goTo, index, pick, scale.max, scale.min]);
 
   function handleRatingKey(e: React.KeyboardEvent<HTMLDivElement>): void {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown')
       return;
     e.preventDefault();
-    const options = [...(ratingRef.current?.querySelectorAll<HTMLElement>('.rate') ?? [])];
-    const at = options.findIndex((o) => o === document.activeElement);
+    const squares = [...(ratingRef.current?.querySelectorAll<HTMLElement>('.rate') ?? [])];
+    const at = squares.findIndex((o) => o === document.activeElement);
     const back = e.key === 'ArrowLeft' || e.key === 'ArrowUp';
-    const next = at < 0 ? 0 : back ? Math.max(0, at - 1) : Math.min(options.length - 1, at + 1);
-    options[next]?.focus();
+    const next = at < 0 ? 0 : back ? Math.max(0, at - 1) : Math.min(squares.length - 1, at + 1);
+    squares[next]?.focus();
   }
 
   if (!current) return null;
@@ -262,8 +275,12 @@ export function QuestionPage({
           <h2 className="qtext">{current.text}</h2>
 
           <div className="scale-hint">
-            <span>0 — {scaleLabels[0]}</span>
-            <span>5 — {scaleLabels[5]}</span>
+            <span>
+              {scale.min} — {scale.labels[0]}
+            </span>
+            <span>
+              {scale.max} — {scale.labels[scale.labels.length - 1]}
+            </span>
           </div>
 
           <div
@@ -272,28 +289,37 @@ export function QuestionPage({
             aria-label={`Rating for statement ${current.no}`}
             ref={ratingRef}
             onKeyDown={handleRatingKey}
+            // The column count is data, not design: five squares for a 0–4
+            // instrument, seven for a 0–6 one, and the narrow breakpoint wraps
+            // anything above five onto two rows.
+            style={
+              {
+                '--scale-n': options.length,
+                '--scale-n-sm': options.length <= 5 ? options.length : Math.ceil(options.length / 2),
+              } as React.CSSProperties
+            }
           >
-            {scaleLabels.map((label, v) => (
+            {options.map((v, i) => (
               <button
                 key={v}
                 type="button"
                 className={`rate${value === v ? ' is-on' : ''}`}
                 role="radio"
                 aria-checked={value === v}
-                aria-label={`${v} — ${label}`}
+                aria-label={`${v} — ${scale.labels[i] ?? String(v)}`}
                 // Roving tabindex: one stop for the whole scale.
-                tabIndex={value === v || (value === undefined && v === 0) ? 0 : -1}
+                tabIndex={value === v || (value === undefined && i === 0) ? 0 : -1}
                 onClick={() => pick(v)}
               >
                 <span className="v num">{v}</span>
-                <span className="k">{label}</span>
+                <span className="k">{scale.shortLabels[i] ?? scale.labels[i]}</span>
               </button>
             ))}
           </div>
 
           {nudge ? (
             <p className="qnudge" role="alert">
-              Pick a number from 0 to 5 to carry on.
+              Pick a number from {scale.min} to {scale.max} to carry on.
             </p>
           ) : null}
 
@@ -310,7 +336,8 @@ export function QuestionPage({
               {submitting ? 'Sending…' : isLast ? 'Finish and send' : 'Next'}
             </button>
             <span className="keyhint">
-              Press <kbd>0</kbd>–<kbd>5</kbd> to answer · <kbd>↵</kbd> next · <kbd>⌫</kbd> back
+              Press <kbd>{scale.min}</kbd>–<kbd>{scale.max}</kbd> to answer · <kbd>↵</kbd> next ·{' '}
+              <kbd>⌫</kbd> back
             </span>
           </div>
         </div>

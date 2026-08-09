@@ -15,8 +15,7 @@ import type { Env } from '../env.js';
 import { clientKey, rateLimit } from '../lib/ratelimit.js';
 import { getBranding } from '../lib/settings.js';
 import { hashToken, looksLikeToken } from '../lib/tokens.js';
-import { reportFromScores } from '../lib/report.js';
-import type { ScoreResult } from '../../shared/scoring.js';
+import { reportFromScores, type StoredScores } from '../lib/report.js';
 import type { ReportPayload } from '../../shared/types.js';
 
 export const reportRoutes = new Hono<{ Bindings: Env }>();
@@ -26,6 +25,7 @@ interface ReportRow {
   scores_json: string;
   pdf_bytes: number;
   completed_at: string | null;
+  assessment_id: string;
   assessment_name: string;
   first_name: string;
   last_name: string;
@@ -38,7 +38,7 @@ interface ReportRow {
 
 const SELECT_REPORT = `
   SELECT rp.id AS report_id, rp.scores_json, rp.pdf_bytes,
-         r.completed_at, a.name AS assessment_name,
+         r.completed_at, a.id AS assessment_id, a.name AS assessment_name,
          c.first_name, c.last_name, c.email, c.organisation,
          c.age_band, c.experience_band, c.gender
     FROM reports rp
@@ -68,9 +68,10 @@ async function byLinkToken(env: Env, token: string): Promise<ReportRow | null> {
 }
 
 function toPayload(row: ReportRow, reportToken: string, branding: Awaited<ReturnType<typeof getBranding>>): ReportPayload {
-  const scores = JSON.parse(row.scores_json) as ScoreResult;
+  const scores = JSON.parse(row.scores_json) as StoredScores;
   return reportFromScores({
     reportToken,
+    assessmentId: row.assessment_id,
     assessmentName: row.assessment_name,
     candidate: {
       firstName: row.first_name,

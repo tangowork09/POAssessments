@@ -305,6 +305,44 @@
 .bar-axis{ display:flex; justify-content:space-between; font-size:10.5px; color:var(--ink-4); margin-top:6px; padding-left:0; }
 @media (min-width:641px){ .bar-axis{ margin-left:calc(190px + 16px); margin-right:calc(96px + 16px); } }
 
+/* the instrument's own Push / Pull method descriptions, verbatim */
+.methods{ display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:22px; }
+@media (max-width:720px){ .methods{ grid-template-columns:1fr; } }
+.method{ padding:16px 18px; border-radius:var(--r-2); border:1px solid var(--line); background:var(--surface-2); }
+.method h4{
+  font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; font-weight:700;
+  display:flex; align-items:center; gap:8px;
+}
+.method h4::before{ content:""; width:14px; height:2px; border-radius:1px; }
+.method p{ margin-top:9px; font-size:13px; line-height:1.65; color:var(--ink-2); }
+.method-push{ border-color:var(--push-line); background:var(--push-soft); }
+.method-push h4{ color:var(--push); }
+.method-push h4::before{ background:var(--push); }
+.method-pull{ border-color:var(--accent-line); background:var(--accent-soft); }
+.method-pull h4{ color:var(--accent-3); }
+.method-pull h4::before{ background:var(--pull); }
+
+/* ego-gram */
+.egogram{ margin-top:20px; }
+.egogram svg{ display:block; width:100%; height:auto; }
+.egokey{
+  list-style:none; padding:0; margin:14px 0 0;
+  display:flex; flex-wrap:wrap; gap:8px 20px;
+  font-size:12px; color:var(--ink-3);
+}
+.egokey li{ display:inline-flex; align-items:center; gap:7px; }
+.egokey .swatch{ width:10px; height:10px; border-radius:2px; flex:none; }
+.egokey b{ color:var(--ink-2); font-weight:640; }
+
+/* a claim the report itself qualifies — never styled to look like a footnote
+   the reader can skip, because it changes how the labels should be read */
+.draft-note{
+  margin-top:16px; padding:11px 14px;
+  border:1px dashed var(--line-3); border-radius:var(--r-2);
+  background:var(--surface-2);
+  font-size:12px; line-height:1.6; color:var(--ink-3);
+}
+
 /* detail sections */
 .detail{
   margin-top:16px; border:1px solid var(--line); border-radius:var(--r-3); overflow:hidden;
@@ -318,7 +356,10 @@
   display:inline-flex; align-items:center; gap:10px;
 }
 .detail-rank .r{
-  width:22px; height:22px; border-radius:var(--r-1); display:grid; place-items:center;
+  /* The rank chip carries white text, so it needs a ground of its own — the
+     ego-states report overrides this with each state's colour. */
+  min-width:22px; height:22px; padding:0 5px; border-radius:var(--r-1);
+  display:grid; place-items:center; background:var(--ink-3);
   font-size:11px; font-weight:700; color:#fff;
 }
 .detail-name{ font-size:15px; font-weight:640; letter-spacing:-.012em; }
@@ -360,6 +401,6 @@
   .wrap{ padding:0; max-width:none; }
   .sheet{ box-shadow:none; border:0; border-radius:0; max-width:none; margin:0; padding:0 8mm; }
   .sec{ break-inside:avoid; page-break-inside:avoid; }
-  .detail,.dev-block,.headline{ break-inside:avoid; page-break-inside:avoid; }
+  .detail,.dev-block,.headline,.method,.egogram{ break-inside:avoid; page-break-inside:avoid; }
   .bar-fill,.cohort-fill,.split-bar .sp,.split-bar .su{ transition:none !important; }
 }

@@ -1,7 +1,6 @@
 /** Request schemas. Every public body is parsed through one of these. */
 
 import { z } from 'zod';
-import { MAX_ANSWER, MIN_ANSWER } from '../../shared/scoring.js';
 
 const trimmed = (max: number) => z.string().trim().max(max);
 
@@ -25,15 +24,32 @@ export const candidateDetailsSchema = z.object({
   gender: trimmed(40).min(1, 'This field is required'),
 });
 
-export const answerSchema = z.object({
-  no: z.number().int().min(1).max(200),
-  value: z.number().int().min(MIN_ANSWER).max(MAX_ANSWER),
-});
-
-export const answerBatchSchema = z.object({
-  answers: z.array(answerSchema).min(1).max(200),
-  resumePage: z.number().int().min(0).max(100).optional(),
-});
+/**
+ * Answer bounds are per-assessment — the Influencing Style Inventory is rated
+ * 0–4 and the Ego States Scale 0–6 — so the schema is built from the rating
+ * scale the link resolves to rather than from a single global constant. A
+ * value outside the instrument's own range is rejected at the edge, not
+ * clamped, because a 5 arriving for a 0–4 instrument means the client and the
+ * server disagree about the scale and silently absorbing it would hide that.
+ */
+export function answerBatchSchemaFor(min: number, max: number) {
+  return z.object({
+    answers: z
+      .array(
+        z.object({
+          no: z.number().int().min(1).max(200),
+          value: z
+            .number()
+            .int()
+            .min(min, `Rating must be at least ${min}`)
+            .max(max, `Rating must be at most ${max}`),
+        }),
+      )
+      .min(1)
+      .max(200),
+    resumePage: z.number().int().min(0).max(100).optional(),
+  });
+}
 
 export const loginSchema = z.object({
   email: emailSchema,

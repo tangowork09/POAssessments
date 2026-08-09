@@ -88,8 +88,8 @@ export function Completion({
           <span className="eyebrow">All {session.questions.length} answered</span>
           <h2 className="display">Nice work{firstName ? `, ${firstName}` : ''}.</h2>
           <p className="lede">
-            That is everything we needed. Your answers are in, and your influencing profile is being
-            put together right now — written in plain language, with nothing to decode.
+            That is everything we needed. Your answers are in, and your profile is being put together
+            right now — written in plain language, with nothing to decode.
           </p>
 
           <div className="mailrow">

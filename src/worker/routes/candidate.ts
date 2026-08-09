@@ -11,9 +11,9 @@ import { newId } from '../lib/ids.js';
 import { clientKey, rateLimit } from '../lib/ratelimit.js';
 import { getBranding } from '../lib/settings.js';
 import { generateToken, hashToken, looksLikeToken } from '../lib/tokens.js';
-import { answerBatchSchema, candidateDetailsSchema, fieldErrors } from '../lib/validation.js';
-import { SCALE_LABELS } from '../../shared/scoring.js';
-import type { CandidateSession, Question } from '../../shared/types.js';
+import { answerBatchSchemaFor, candidateDetailsSchema, fieldErrors } from '../lib/validation.js';
+import { ASSESSMENTS, kindForAssessment } from '../../shared/assessments.js';
+import type { CandidateSession, Question, ScaleInfo } from '../../shared/types.js';
 
 export const candidateRoutes = new Hono<{ Bindings: Env }>();
 
@@ -29,6 +29,36 @@ interface LinkRow {
   status: 'live' | 'planned' | 'retired';
   question_count: number;
   per_page: number;
+  min_answer: number;
+  max_answer: number;
+}
+
+/**
+ * The rating scale for a link's assessment. The registry is authoritative for
+ * the anchors (the words the candidate reads); the D1 columns are the bounds
+ * the API enforces, so a scale change is a migration and the two are asserted
+ * to agree here rather than drifting silently.
+ */
+function scaleForLink(link: LinkRow): ScaleInfo {
+  const config = configForLink(link);
+  if (config) {
+    return {
+      min: config.scale.min,
+      max: config.scale.max,
+      labels: config.scale.labels,
+      shortLabels: config.scale.shortLabels,
+    };
+  }
+  // An instrument seeded without a registry entry still gets a usable control.
+  const labels = Array.from({ length: link.max_answer - link.min_answer + 1 }, (_, i) =>
+    String(link.min_answer + i),
+  );
+  return { min: link.min_answer, max: link.max_answer, labels, shortLabels: labels };
+}
+
+function configForLink(link: LinkRow) {
+  const kind = kindForAssessment(link.assessment_id);
+  return kind ? ASSESSMENTS[kind] : null;
 }
 
 /**
@@ -40,7 +70,8 @@ async function resolveLink(env: Env, token: string): Promise<LinkRow | null> {
   const hash = await hashToken(token, env.LINK_TOKEN_SECRET);
   return env.DB.prepare(
     `SELECT l.id AS link_id, l.kind, l.active, l.assessment_id, l.candidate_id,
-            a.slug, a.name, a.description, a.status, a.question_count, a.per_page
+            a.slug, a.name, a.description, a.status, a.question_count, a.per_page,
+            a.min_answer, a.max_answer
        FROM links l
        JOIN assessments a ON a.id = l.assessment_id
       WHERE l.token_hash = ?1`,
@@ -164,6 +195,8 @@ candidateRoutes.get('/session/:token', async (c) => {
     }
   }
 
+  const config = configForLink(link);
+
   const session: CandidateSession = {
     linkKind: link.kind,
     assessment: {
@@ -173,11 +206,13 @@ candidateRoutes.get('/session/:token', async (c) => {
       description: link.description,
       status: link.status,
       questionCount: link.question_count,
+      kind: kindForAssessment(link.assessment_id),
     },
     questions,
     branding,
     perPage: link.per_page,
-    scaleLabels: SCALE_LABELS,
+    scale: scaleForLink(link),
+    intro: (config ?? ASSESSMENTS.isi).intro,
     response,
     reportAvailable: hasReport,
   };
@@ -308,8 +343,21 @@ candidateRoutes.post('/answers/:token', async (c) => {
   const rl = await rateLimit(c.env, `ans:${clientKey(c.req.raw)}`, 600, 60);
   if (!rl.allowed) return c.json({ error: 'Too many requests' }, 429);
 
-  const parsed = answerBatchSchema.safeParse(await c.req.json().catch(() => ({})));
-  if (!parsed.success) return c.json({ error: 'Invalid answers payload' }, 400);
+  // Bounds come from the instrument this link resolves to, so a 0–4 inventory
+  // rejects a 5 and a 0–6 inventory accepts one.
+  const scale = scaleForLink(link);
+  const parsed = answerBatchSchemaFor(scale.min, scale.max).safeParse(
+    await c.req.json().catch(() => ({})),
+  );
+  if (!parsed.success) {
+    return c.json(
+      {
+        error: `Each rating must be a whole number from ${scale.min} to ${scale.max}.`,
+        details: fieldErrors(parsed.error),
+      },
+      400,
+    );
+  }
 
   const responseId = c.req.query('response');
   if (!responseId) return c.json({ error: 'Missing response id' }, 400);

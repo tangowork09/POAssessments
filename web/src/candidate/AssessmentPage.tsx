@@ -11,19 +11,24 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { ApiError, api } from '../lib/api.js';
 import { Autosave, type SaveState } from '../lib/autosave.js';
-import { Centered, DEFAULT_BRANDING, Shell, useAccent } from './Shell.js';
+import { Centered, DEFAULT_BRANDING, LogoSlot, Shell, useAccent } from './Shell.js';
 import { DetailsForm } from './DetailsForm.js';
 import { QuestionPage } from './QuestionPage.js';
 import { Completion } from './Completion.js';
 import type { CandidateDetails, CandidateSession } from '../../../src/shared/types.js';
 
-type Step = 'welcome' | 'details' | 'questions' | 'done';
+/**
+ * 'begin' is the instrument's own begin-test screen: its title, its logo and
+ * its rating instructions, verbatim. It sits before the details form so the
+ * candidate knows what the numbers mean before they are asked for anything.
+ */
+type Step = 'begin' | 'details' | 'questions' | 'done';
 
 export function AssessmentPage() {
   const { token = '' } = useParams();
   const [session, setSession] = useState<CandidateSession | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [step, setStep] = useState<Step>('welcome');
+  const [step, setStep] = useState<Step>('begin');
   const [responseId, setResponseId] = useState<string>('');
   const [answers, setAnswers] = useState<Record<number, number>>({});
   const [page, setPage] = useState(0);
@@ -56,7 +61,7 @@ export function AssessmentPage() {
           } else if (s.response.details && s.response.answeredCount > 0) {
             setStep('questions');
           } else if (s.response.details) {
-            setStep('welcome');
+            setStep('begin');
           }
         }
       })
@@ -201,8 +206,8 @@ export function AssessmentPage() {
 
   return (
     <Shell branding={branding} subtitle={session.assessment.name} friendly>
-      {step === 'welcome' && (
-        <Welcome
+      {step === 'begin' && (
+        <BeginTest
           session={session}
           resuming={Boolean(session.response && session.response.answeredCount > 0)}
           onStart={() => setStep(session.response?.details ? 'questions' : 'details')}
@@ -214,14 +219,14 @@ export function AssessmentPage() {
           initial={session.response?.details ?? null}
           lockedEmail={session.linkKind === 'personal' ? (session.response?.details?.email ?? null) : null}
           onSubmit={handleDetails}
-          onBack={() => setStep('welcome')}
+          onBack={() => setStep('begin')}
         />
       )}
 
       {step === 'questions' && (
         <QuestionPage
           questions={questions}
-          scaleLabels={session.scaleLabels}
+          scale={session.scale}
           perPage={perPage}
           page={Math.min(page, pageCount - 1)}
           answers={answers}
@@ -247,9 +252,18 @@ export function AssessmentPage() {
   );
 }
 
-// ---------------------------------------------------------------- welcome
+// ------------------------------------------------------------- begin test
 
-function Welcome({
+/**
+ * The begin-test screen. Everything on it comes from the instrument's own
+ * registry entry (`session.intro`) rather than being written into the
+ * component, so the Influencing Styles Questionnaire and the Ego States Scale
+ * present their own titles and their own rating instructions verbatim.
+ *
+ * Zero-scroll: the `.stage-scroll` region is the only thing that gives on a
+ * short screen, and the primary button stays pinned in `.stage-pin`.
+ */
+function BeginTest({
   session,
   resuming,
   onStart,
@@ -258,83 +272,52 @@ function Welcome({
   resuming: boolean;
   onStart: () => void;
 }) {
+  const intro = session.intro;
   const total = session.questions.length;
   const answered = session.response?.answeredCount ?? 0;
-  const minutes = Math.max(5, Math.round(total / 4));
 
   return (
     <div className="stage">
       <div className="welcome rise">
         <div className="stage-scroll">
-          <span className="eyebrow">
-            {total} statements · about {minutes} minutes
-          </span>
+          <div className="intro-mark">
+            <LogoSlot branding={session.branding} size={54} />
+          </div>
 
-          <h1 className="display">
-            {resuming ? 'Welcome back — pick up where you left off.' : 'How do you influence people?'}
-          </h1>
+          <span className="eyebrow">{intro.eyebrow}</span>
+
+          <h1 className="display">{resuming ? 'Welcome back' : intro.title}</h1>
 
           <p className="lede">
             {resuming
-              ? `You have answered ${answered} of ${total} statements. Everything you did last time is saved, so carry straight on.`
-              : 'Rate each statement from 0 to 5 — one at a time, no right or wrong answers. At the end you get a plain-language report on the ten ways you influence others.'}
+              ? `You have answered ${answered} of ${total} statements. Everything from last time is saved, so carry straight on.`
+              : intro.lede}
           </p>
 
-          <div className="badges">
-            <span className="badge">
-              <span className="dot o" aria-hidden="true" />5 Push styles
-            </span>
-            <span className="badge">
-              <span className="dot t" aria-hidden="true" />5 Pull styles
-            </span>
-            <span className="badge">
-              <span className="dot g" aria-hidden="true" />
-              Report emailed as a PDF
-            </span>
-          </div>
-
           <div className="rulecard">
-            <h3>Three things before you begin</h3>
+            <h3>{intro.instructionsTitle}</h3>
             <ul className="rulelist">
-              <li>
-                <span className="tick" aria-hidden="true">
-                  1
-                </span>
-                <span>
-                  There are no right or wrong answers — answer as you are, not as you would like to
-                  be.
-                </span>
-              </li>
-              <li>
-                <span className="tick" aria-hidden="true">
-                  2
-                </span>
-                <span>
-                  Rate every statement from 0 (never like me) to 5 (always like me). Your first
-                  instinct is usually the honest one.
-                </span>
-              </li>
-              <li>
-                <span className="tick" aria-hidden="true">
-                  3
-                </span>
-                <span>
-                  Stop whenever you like. This link does not expire and it brings you back to exactly
-                  this spot.
-                </span>
-              </li>
+              {intro.instructions.map((line, i) => (
+                <li key={line}>
+                  <span className="tick" aria-hidden="true">
+                    {i + 1}
+                  </span>
+                  <span>{line}</span>
+                </li>
+              ))}
             </ul>
+            {intro.emphasis ? <p className="ruleemph">{intro.emphasis}</p> : null}
           </div>
         </div>
 
         <div className="stage-pin">
           <div className="cta-row">
             <button className="btn btn-primary btn-lg btn-block" onClick={onStart}>
-              {resuming ? 'Continue where I left off' : "Let's begin"}
+              {resuming ? intro.ctaResume : intro.cta}
             </button>
           </div>
           <p className="fineprint">
-            Takes about {minutes} minutes. Your answers save themselves as you go.
+            {total} statements · your answers save themselves as you go, and this link never expires.
           </p>
         </div>
       </div>

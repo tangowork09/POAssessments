@@ -119,6 +119,7 @@ export async function scoreAndDeliver(
 
   const report = buildReport({
     reportToken,
+    assessmentId: row.assessment_id,
     assessmentName: row.assessment_name,
     candidate,
     completedAt: row.completed_at ?? new Date().toISOString(),
@@ -127,6 +128,9 @@ export async function scoreAndDeliver(
   });
 
   const pdf = renderReportPdf(report);
+  // The stored scores are tagged with their instrument, so a report can be
+  // rebuilt years later without asking the assessments table what shape it is.
+  const storedScores = report.kind === 'ego' ? report.ego : report.scores;
 
   await env.DB.prepare(
     `INSERT INTO reports (id, response_id, token_hash, scores_json, pdf, pdf_bytes)
@@ -136,7 +140,7 @@ export async function scoreAndDeliver(
       newId('rpt'),
       responseId,
       await hashToken(reportToken, env.LINK_TOKEN_SECRET),
-      JSON.stringify(report.scores),
+      JSON.stringify(storedScores),
       pdf,
       pdf.length,
     )

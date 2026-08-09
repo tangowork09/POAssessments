@@ -1,5 +1,7 @@
 /** Wire types shared by the Worker API and both frontend shells. */
 
+import type { AssessmentIntro, AssessmentKind } from './assessments.js';
+import type { EgoBand, EgoResult } from './ego-scoring.js';
 import type { Band, ScoreResult } from './scoring.js';
 
 export interface Question {
@@ -14,14 +16,28 @@ export interface AssessmentSummary {
   description: string;
   status: 'live' | 'planned' | 'retired';
   questionCount: number;
+  /** null for an instrument seeded in D1 that has no scoring engine yet. */
+  kind: AssessmentKind | null;
 }
 
 export interface Branding {
   companyName: string;
   accentColor: string;
-  /** data: URI, or '' when no logo has been uploaded. */
+  /**
+   * A data: URI from the API — never empty, because an absent upload falls
+   * back to the house logo. The frontend's own pre-load placeholder uses a
+   * same-origin asset path instead, to keep the base64 out of the bundle.
+   */
   logoDataUrl: string;
   supportEmail: string;
+}
+
+/** The rating control's shape, sent with the session so it is never guessed. */
+export interface ScaleInfo {
+  min: number;
+  max: number;
+  labels: readonly string[];
+  shortLabels: readonly string[];
 }
 
 /** Everything a candidate shell needs on first paint of /t/:token. */
@@ -32,7 +48,10 @@ export interface CandidateSession {
   questions: Question[];
   branding: Branding;
   perPage: number;
-  scaleLabels: readonly string[];
+  /** Rating scale bounds and anchors for this instrument. */
+  scale: ScaleInfo;
+  /** Begin-test copy for this instrument. */
+  intro: AssessmentIntro;
   /** Present once a response row exists (personal link, or generic link resumed). */
   response: CandidateResponseState | null;
   /**
@@ -65,12 +84,28 @@ export interface CandidateDetails {
   gender: string;
 }
 
-export interface ReportPayload {
+// ------------------------------------------------------------------- reports
+
+/**
+ * Report payloads are a tagged union: the HTML report page, the PDF and the
+ * report email all switch on `kind`, so a new instrument cannot be rendered
+ * with another instrument's layout by accident.
+ */
+export type ReportPayload = IsiReportPayload | EgoReportPayload;
+
+interface ReportBase {
   reportToken: string;
+  assessmentId: string;
   assessmentName: string;
   candidate: CandidateDetails;
   completedAt: string;
   branding: Branding;
+  /** Plain-language headline paragraph, identical in every rendering. */
+  summary: string;
+}
+
+export interface IsiReportPayload extends ReportBase {
+  kind: 'isi';
   scores: ScoreResult;
   narratives: ReportNarrative[];
   development: {
@@ -81,7 +116,8 @@ export interface ReportPayload {
     low: string;
     action: string;
   };
-  summary: string;
+  /** Verbatim client copy describing the two influencing methods. */
+  methods: { push: string; pull: string };
 }
 
 export interface ReportNarrative {
@@ -95,10 +131,45 @@ export interface ReportNarrative {
   caution: string;
 }
 
+export interface EgoReportPayload extends ReportBase {
+  kind: 'ego';
+  ego: EgoResult;
+  /** One per state, in ego-gram order. */
+  states: EgoStateNarrative[];
+  highest: EgoStateNarrative;
+  lowest: EgoStateNarrative;
+  /** True while the state names and copy await client confirmation. */
+  labelsAreDraft: boolean;
+  draftNote: string;
+}
+
+export interface EgoStateNarrative {
+  stateKey: string;
+  name: string;
+  abbr: string;
+  color: string;
+  blurb: string;
+  score: number;
+  percent: number;
+  band: EgoBand;
+  description: string;
+  /** Shown when this state is the candidate's highest. */
+  high: string;
+  /** Shown when this state is the candidate's lowest. */
+  low: string;
+  /** Practice suggestion, shown for the lowest state. */
+  dev: string;
+}
+
+// --------------------------------------------------------------------- admin
+
+export type AdminRole = 'superadmin' | 'admin';
+
 export interface AdminUser {
   id: string;
   email: string;
   name: string;
+  role: AdminRole;
 }
 
 export interface ApiError {

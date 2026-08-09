@@ -439,6 +439,16 @@ body.fb-body {
   margin-top: 14px;
   font-weight: 600;
 }
+/* The instrument's mark, above its own title. */
+.fb .intro-mark {
+  display: flex;
+  justify-content: center;
+  margin-bottom: clamp(10px, 2.4vh, 22px);
+}
+.fb .intro-mark .logo-img {
+  max-width: 220px;
+}
+
 .fb .rulecard {
   margin: clamp(18px, 4vh, 40px) auto 0;
   max-width: 640px;
@@ -469,6 +479,17 @@ body.fb-body {
   color: var(--ink-2);
   line-height: 1.5;
 }
+/* The instrument's own emphasis line, set apart from the numbered anchors. */
+.fb .ruleemph {
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 2px solid var(--line);
+  font-size: 14.5px;
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--teal-ink);
+}
+
 .fb .tick {
   width: 26px;
   height: 26px;
@@ -736,10 +757,13 @@ body.fb-body {
   letter-spacing: 0.06em;
   margin-bottom: 10px;
 }
+/* The number of squares is set by the instrument, not by the stylesheet:
+   QuestionPage passes --scale-n (and --scale-n-sm for the narrow wrap) so a
+   0-4 scale renders five and a 0-6 scale renders seven. */
 .fb .rating {
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(var(--scale-n, 5), 1fr);
   gap: clamp(6px, 1.4vh, 10px);
 }
 .fb .rate {
@@ -1011,9 +1035,9 @@ body.fb-body {
   .fb .qstage {
     padding: var(--fb-pad-y) 16px;
   }
-  /* Two rows of three: six squares still fit above the fold on a phone. */
+  /* On a phone a short scale stays on one row; a long one wraps to two. */
   .fb .rating {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(var(--scale-n-sm, 3), 1fr);
   }
   .fb .rate {
     aspect-ratio: auto;
@@ -1065,9 +1089,42 @@ body.fb-body {
   .fb .badges {
     margin-top: 16px;
   }
-  /* Supporting cards go first — the instructions they carry are repeated in
-     the lede and on every question. */
-  .fb .rulecard,
+  /* The instruction card is not ornament any more: it carries the rating
+     anchors the candidate is about to answer against, so it compresses
+     instead of disappearing. */
+  .fb .intro-mark {
+    margin-bottom: 8px;
+  }
+  .fb .intro-mark .logo-img {
+    height: 34px !important;
+    max-width: 160px;
+  }
+  .fb .rulecard {
+    margin-top: 14px;
+    padding: 14px 16px;
+  }
+  .fb .rulecard h3 {
+    font-size: 13.5px;
+    margin-bottom: 8px;
+  }
+  .fb .rulelist {
+    gap: 7px;
+  }
+  .fb .rulelist li {
+    font-size: 13.5px;
+  }
+  .fb .tick {
+    width: 21px;
+    height: 21px;
+    flex-basis: 21px;
+    border-radius: 7px;
+    font-size: 11.5px;
+  }
+  .fb .ruleemph {
+    margin-top: 10px;
+    padding-top: 9px;
+    font-size: 13px;
+  }
   .fb .formcard .lede,
   .fb .done-receipt {
     display: none;
@@ -1118,12 +1175,25 @@ body.fb-body {
   .fb .milestone {
     display: none;
   }
-  /* Ornament only: the heading and the mail row carry the message. */
+  /* Ornament only: the heading and the mail row carry the message. The
+     numbered anchors stay — they are the thing being explained. */
   .fb .badges,
   .fb .seal,
   .fb .fineprint,
+  .fb .intro-mark,
+  .fb .ruleemph,
   .fb .done-receipt {
     display: none;
+  }
+  .fb .rulecard {
+    margin-top: 10px;
+    padding: 11px 14px;
+  }
+  .fb .rulelist {
+    gap: 5px;
+  }
+  .fb .rulelist li {
+    font-size: 12.5px;
   }
   .fb .welcome .display,
   .fb .formcard .display,
@@ -1181,8 +1251,9 @@ body.fb-body {
   .fb .qstage {
     padding: 8px 16px;
   }
+  /* Landscape: back to a single row whatever the scale length. */
   .fb .rating {
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(var(--scale-n, 5), 1fr);
     gap: 6px;
   }
   .fb .rate {
