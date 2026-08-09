@@ -15,6 +15,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import '../styles/base.css';
 import '../styles/candidate.css';
+import '../styles/candidate-friendly.css';
 import { Landing } from './Landing.js';
 import { AssessmentPage } from './AssessmentPage.js';
 import { ReportPage } from './ReportPage.js';

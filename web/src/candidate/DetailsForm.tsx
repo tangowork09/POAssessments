@@ -88,20 +88,18 @@ export function DetailsForm({
   }
 
   return (
-    <div style={{ maxWidth: 760, margin: '0 auto' }}>
-      <Stepper current={1} />
-
-      <div className="step-head">
-        <p className="eyebrow">Step 2 of 3</p>
-        <h2 className="display">About you</h2>
-        <p>
-          These details appear on your report and determine where it is sent. They are not shared
-          outside the organisation that invited you.
-        </p>
-      </div>
-
-      <form className="card" onSubmit={handleSubmit} noValidate>
+    <div className="stage">
+      <form className="card formcard rise" onSubmit={handleSubmit} noValidate>
         <div className="card-body">
+          <span className="eyebrow">Step 1 of 2</span>
+          <h2 className="display" style={{ fontSize: 30, margin: '14px 0 8px' }}>
+            A few details first
+          </h2>
+          <p className="lede" style={{ fontSize: 16 }}>
+            This is what appears on the front of your report and where we send it. Nothing is shared
+            outside the organisation that invited you.
+          </p>
+
           <div className="form-grid">
             <Field id="firstName" label={LABELS.firstName} error={errors.firstName}>
               <input
@@ -180,15 +178,15 @@ export function DetailsForm({
               <span>{formError}</span>
             </div>
           ) : null}
-        </div>
 
-        <div className="form-foot" style={{ padding: '0 20px 20px' }}>
-          <button type="button" className="btn btn-ghost" onClick={onBack}>
-            Back
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={busy}>
-            {busy ? 'Saving…' : 'Continue to the statements'}
-          </button>
+          <div className="form-foot">
+            <button type="button" className="btn btn-ghost" onClick={onBack}>
+              Back
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              {busy ? 'Saving…' : 'Start question 1'}
+            </button>
+          </div>
         </div>
       </form>
     </div>
@@ -218,7 +216,7 @@ function Field({
       </label>
       {children}
       {hint && !error ? (
-        <p className="hint" style={{ marginTop: 6, fontSize: 12 }}>
+        <p className="hint" style={{ fontSize: 13 }}>
           {hint}
         </p>
       ) : null}
@@ -249,24 +247,5 @@ function Select({
         </option>
       ))}
     </select>
-  );
-}
-
-export function Stepper({ current }: { current: 0 | 1 | 2 }) {
-  const steps = ['Introduction', 'About you', 'Statements'];
-  return (
-    <div className="stepper">
-      {steps.map((label, i) => (
-        <span key={label} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          <span
-            className={`stepper-item${i === current ? ' is-current' : ''}${i < current ? ' is-done' : ''}`}
-          >
-            <span className="stepper-dot">{i < current ? '✓' : i + 1}</span>
-            {label}
-          </span>
-          {i < steps.length - 1 ? <span className="stepper-line" /> : null}
-        </span>
-      ))}
-    </div>
   );
 }

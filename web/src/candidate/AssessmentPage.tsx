@@ -200,7 +200,7 @@ export function AssessmentPage() {
   }
 
   return (
-    <Shell branding={branding} subtitle={session.assessment.name}>
+    <Shell branding={branding} subtitle={session.assessment.name} friendly>
       {step === 'welcome' && (
         <Welcome
           session={session}
@@ -224,7 +224,6 @@ export function AssessmentPage() {
           scaleLabels={session.scaleLabels}
           perPage={perPage}
           page={Math.min(page, pageCount - 1)}
-          pageCount={pageCount}
           answers={answers}
           saveState={saveState}
           pendingCount={pendingCount}
@@ -260,108 +259,80 @@ function Welcome({
   onStart: () => void;
 }) {
   const total = session.questions.length;
+  const answered = session.response?.answeredCount ?? 0;
+  const minutes = Math.max(5, Math.round(total / 4));
+
   return (
-    <div className="welcome">
-      <div className="card welcome-card">
-        <p className="eyebrow">{session.assessment.name}</p>
+    <div className="stage">
+      <div className="welcome rise">
+        <span className="eyebrow">
+          {total} statements · about {minutes} minutes
+        </span>
+
         <h1 className="display">
-          {resuming ? 'Welcome back' : 'A short questionnaire about how you influence others'}
+          {resuming ? 'Welcome back — pick up where you left off.' : 'How do you influence people?'}
         </h1>
-        <p className="welcome-lede">
+
+        <p className="lede">
           {resuming
-            ? `You have answered ${session.response?.answeredCount ?? 0} of ${total} statements. Pick up exactly where you left off.`
-            : `${total} statements, rated on a six-point scale. There are no right or wrong answers — rate how you actually behave at work, not how you feel you ought to.`}
+            ? `You have answered ${answered} of ${total} statements. Everything you did last time is saved, so carry straight on.`
+            : 'Rate each statement from 0 to 5 — one at a time, no right or wrong answers. At the end you get a plain-language report on the ten ways you influence others.'}
         </p>
 
-        <div className="meta-row">
-          <span className="meta-chip">
-            <IconList /> {total} statements
+        <div className="badges">
+          <span className="badge">
+            <span className="dot o" aria-hidden="true" />5 Push styles
           </span>
-          <span className="meta-chip">
-            <IconClock /> ~10 minutes
+          <span className="badge">
+            <span className="dot t" aria-hidden="true" />5 Pull styles
           </span>
-          <span className="meta-chip">
-            <IconShield /> Confidential
-          </span>
-          <span className="meta-chip">
-            <IconMail /> PDF report by email
+          <span className="badge">
+            <span className="dot g" aria-hidden="true" />
+            Report emailed as a PDF
           </span>
         </div>
 
-        <ul className="expect">
-          <li>
-            <span className="idx">1</span>
-            <p>
-              <b>Tell us who you are.</b> A few details so your report can be addressed to you and sent
-              to the right inbox.
-            </p>
-          </li>
-          <li>
-            <span className="idx">2</span>
-            <p>
-              <b>Rate each statement from 0 to 5.</b> Eight at a time, with your progress saved as you
-              go.
-            </p>
-          </li>
-          <li>
-            <span className="idx">3</span>
-            <p>
-              <b>Receive your report.</b> Your ten influencing styles, your Push/Pull balance and a
-              development area.
-            </p>
-          </li>
-        </ul>
-
-        <div className="welcome-actions">
-          <button className="btn btn-primary btn-lg" onClick={onStart}>
-            {resuming ? 'Continue where I left off' : 'Begin'}
+        <div className="cta-row">
+          <button className="btn btn-primary btn-lg btn-block" onClick={onStart}>
+            {resuming ? 'Continue where I left off' : "Let's begin"}
           </button>
         </div>
-
-        <p className="welcome-note">
-          <IconShield />
-          <span>
-            Your answers are confidential and are used only to produce your report. You can stop at any
-            point — this link does not expire, and returning to it brings back your progress.
-          </span>
+        <p className="fineprint">
+          Takes about {minutes} minutes. Your answers save themselves as you go.
         </p>
+
+        <div className="rulecard">
+          <h3>Three things before you begin</h3>
+          <ul className="rulelist">
+            <li>
+              <span className="tick" aria-hidden="true">
+                1
+              </span>
+              <span>
+                There are no right or wrong answers — answer as you are, not as you would like to be.
+              </span>
+            </li>
+            <li>
+              <span className="tick" aria-hidden="true">
+                2
+              </span>
+              <span>
+                Rate every statement from 0 (never like me) to 5 (always like me). Your first instinct
+                is usually the honest one.
+              </span>
+            </li>
+            <li>
+              <span className="tick" aria-hidden="true">
+                3
+              </span>
+              <span>
+                Stop whenever you like. This link does not expire and it brings you back to exactly
+                this spot.
+              </span>
+            </li>
+          </ul>
+        </div>
       </div>
     </div>
-  );
-}
-
-// ------------------------------------------------------------------- icons
-
-const svg = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.4 } as const;
-
-function IconList() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 16 16" {...svg}>
-      <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
-      <path d="M5.5 6.5h5M5.5 9.5h3" />
-    </svg>
-  );
-}
-function IconClock() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 16 16" {...svg}>
-      <circle cx="8" cy="8" r="5.5" />
-      <path d="M8 5v3.2l2 1.3" strokeLinecap="round" />
-    </svg>
-  );
-}
-function IconShield() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 16 16" {...svg}>
-      <path d="M8 2.2l4.4 1.8v3.4c0 2.7-1.8 5-4.4 5.9C5.4 12.4 3.6 10.1 3.6 7.4V4z" />
-    </svg>
-  );
-}
-function IconMail() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 16 16" {...svg}>
-      <path d="M2.5 4.5h11v8h-11z" />
-      <path d="M2.8 5l5.2 4 5.2-4" />
-    </svg>
   );
 }
