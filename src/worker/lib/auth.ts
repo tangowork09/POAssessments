@@ -9,6 +9,7 @@ import { SignJWT, jwtVerify } from 'jose';
 import type { Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { Env } from '../env.js';
+import type { AdminRole } from '../../shared/types.js';
 
 export const SESSION_COOKIE = 'ap_admin';
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
@@ -18,6 +19,12 @@ export interface AdminClaims {
   sub: string;
   email: string;
   name: string;
+  role: AdminRole;
+}
+
+/** Anything not explicitly 'superadmin' is a plain admin. */
+export function toRole(value: unknown): AdminRole {
+  return value === 'superadmin' ? 'superadmin' : 'admin';
 }
 
 /** The Hono environment every authenticated admin route runs under. */
@@ -49,7 +56,7 @@ function secretKey(env: Env): Uint8Array {
 }
 
 export async function issueSession(c: Ctx, claims: AdminClaims): Promise<void> {
-  const token = await new SignJWT({ email: claims.email, name: claims.name })
+  const token = await new SignJWT({ email: claims.email, name: claims.name, role: claims.role })
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(claims.sub)
     .setIssuedAt()
@@ -81,6 +88,7 @@ export async function readSession(c: Ctx): Promise<AdminClaims | null> {
       sub: payload.sub,
       email: String(payload.email ?? ''),
       name: String(payload.name ?? 'Administrator'),
+      role: toRole(payload.role),
     };
   } catch {
     return null;

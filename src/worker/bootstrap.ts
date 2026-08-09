@@ -2,8 +2,8 @@
  * First-boot seeding.
  *
  * Creates the administrator from ADMIN_EMAIL / ADMIN_PASSWORD if no admin
- * exists, and issues the generic always-active link for every live assessment
- * that lacks one. Both are idempotent, and the whole thing short-circuits after
+ * exists — as a superadmin, since that account is the owner — and issues the
+ * generic always-active link for every live assessment that lacks one. Both are idempotent, and the whole thing short-circuits after
  * the first successful run in an isolate.
  */
 
@@ -37,14 +37,17 @@ async function seedAdmin(env: Env): Promise<void> {
   }
 
   const hash = await hashPassword(env.ADMIN_PASSWORD);
+  // The seeded account is the owner: it is the only one that can reach
+  // Branding. Client administrators are created as plain 'admin'.
   await env.DB.prepare(
-    `INSERT INTO admin_users (id, email, name, password_hash) VALUES (?1, ?2, ?3, ?4)
+    `INSERT INTO admin_users (id, email, name, password_hash, role)
+     VALUES (?1, ?2, ?3, ?4, 'superadmin')
      ON CONFLICT(email) DO NOTHING`,
   )
     .bind(newId('admin'), env.ADMIN_EMAIL.trim().toLowerCase(), 'Administrator', hash)
     .run();
 
-  console.log(`[bootstrap] seeded administrator ${env.ADMIN_EMAIL}`);
+  console.log(`[bootstrap] seeded superadmin ${env.ADMIN_EMAIL}`);
 }
 
 /**

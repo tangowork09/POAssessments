@@ -4,11 +4,12 @@
  */
 
 import { Hono } from 'hono';
-import type { MiddlewareHandler } from 'hono';
+import type { Context, MiddlewareHandler } from 'hono';
 import ExcelJS from 'exceljs';
+import { z } from 'zod';
 import type { Env } from '../env.js';
 import { baseUrl } from '../env.js';
-import { clearSession, issueSession, readSession, verifyPassword } from '../lib/auth.js';
+import { clearSession, issueSession, readSession, toRole, verifyPassword } from '../lib/auth.js';
 import type { AdminHono } from '../lib/auth.js';
 import { newId } from '../lib/ids.js';
 import { sendMail } from '../lib/mailer.js';
@@ -34,7 +35,10 @@ import {
 } from '../lib/validation.js';
 import { consumeSendAllowance, dispatch, ensureCandidateAndLink, sendsToday } from '../pipeline.js';
 import { inviteEmail } from '../email/templates.js';
-import { MAX_STYLE_SCORE } from '../../shared/scoring.js';
+import { kindForAssessment, type AssessmentKind } from '../../shared/assessments.js';
+import { EGO_STATES } from '../../shared/ego.js';
+import { EGO_MAX_STATE_SCORE, type EgoResult } from '../../shared/ego-scoring.js';
+import { MAX_SIDE_SCORE, MAX_STYLE_SCORE, type ScoreResult } from '../../shared/scoring.js';
 import { STYLES } from '../../shared/styles.js';
 
 export const adminRoutes = new Hono<AdminHono>();
@@ -48,9 +52,10 @@ adminRoutes.post('/login', async (c) => {
   const parsed = loginSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: 'Enter your email address and password.' }, 400);
 
-  const user = await c.env.DB.prepare('SELECT id, email, name, password_hash FROM admin_users WHERE email = ?1')
+  const user = await c.env.DB
+    .prepare('SELECT id, email, name, role, password_hash FROM admin_users WHERE email = ?1')
     .bind(parsed.data.email)
-    .first<{ id: string; email: string; name: string; password_hash: string }>();
+    .first<{ id: string; email: string; name: string; role: string; password_hash: string }>();
 
   // Same message and comparable work for unknown users and wrong passwords.
   const ok = user ? await verifyPassword(parsed.data.password, user.password_hash) : false;
@@ -60,8 +65,9 @@ adminRoutes.post('/login', async (c) => {
     .bind(user.id)
     .run();
 
-  await issueSession(c, { sub: user.id, email: user.email, name: user.name });
-  return c.json({ user: { id: user.id, email: user.email, name: user.name } });
+  const role = toRole(user.role);
+  await issueSession(c, { sub: user.id, email: user.email, name: user.name, role });
+  return c.json({ user: { id: user.id, email: user.email, name: user.name, role } });
 });
 
 adminRoutes.post('/logout', (c) => {
@@ -72,12 +78,30 @@ adminRoutes.post('/logout', (c) => {
 adminRoutes.get('/me', async (c) => {
   const claims = await readSession(c);
   if (!claims) return c.json({ error: 'Not signed in' }, 401);
-  return c.json({ user: { id: claims.sub, email: claims.email, name: claims.name } });
+  return c.json({
+    user: { id: claims.sub, email: claims.email, name: claims.name, role: claims.role },
+  });
 });
 
 const requireAdmin: MiddlewareHandler<AdminHono> = async (c, next) => {
   const claims = await readSession(c);
   if (!claims) return c.json({ error: 'Not signed in' }, 401);
+  c.set('admin', claims);
+  await next();
+};
+
+/**
+ * Branding reaches the candidate UI, the PDF and every outbound email at once,
+ * so it belongs to the account that owns the deployment rather than to a
+ * client administrator. The nav item is hidden in the console as well, but this
+ * is the check that actually enforces it.
+ */
+const requireSuperadmin: MiddlewareHandler<AdminHono> = async (c, next) => {
+  const claims = await readSession(c);
+  if (!claims) return c.json({ error: 'Not signed in' }, 401);
+  if (claims.role !== 'superadmin') {
+    return c.json({ error: 'Branding is managed by the platform owner.' }, 403);
+  }
   c.set('admin', claims);
   await next();
 };
@@ -90,7 +114,7 @@ adminRoutes.use('/candidates', requireAdmin);
 adminRoutes.use('/invites/*', requireAdmin);
 adminRoutes.use('/links/*', requireAdmin);
 adminRoutes.use('/links', requireAdmin);
-adminRoutes.use('/branding', requireAdmin);
+adminRoutes.use('/branding', requireSuperadmin);
 adminRoutes.use('/settings/*', requireAdmin);
 adminRoutes.use('/export/*', requireAdmin);
 adminRoutes.use('/outbox', requireAdmin);
@@ -146,9 +170,16 @@ adminRoutes.get('/dashboard', async (c) => {
           LIMIT 8`,
       )
       .all(),
-    db.prepare('SELECT scores_json FROM reports').all<{ scores_json: string }>(),
+    db
+      .prepare(
+        `SELECT rp.scores_json, r.assessment_id
+           FROM reports rp JOIN responses r ON r.id = rp.response_id`,
+      )
+      .all<{ scores_json: string; assessment_id: string }>(),
     getSettings(c.env),
   ]);
+
+  const reports = cohort.results ?? [];
 
   return c.json({
     totals: totals ?? { candidates: 0, invited: 0, in_progress: 0, completed: 0, started: 0 },
@@ -157,7 +188,13 @@ adminRoutes.get('/dashboard', async (c) => {
     trend: fillWeeks(trend.results ?? []),
     assessments: assessments.results ?? [],
     recent: recent.results ?? [],
-    cohort: cohortAverages(cohort.results ?? []),
+    // Two cohorts, because the two instruments are not on a common scale and
+    // averaging them together would produce a number that means nothing.
+    cohort: cohortAverages(reports),
+    egoCohort: egoCohortAverages(reports),
+    maxStyleScore: MAX_STYLE_SCORE,
+    maxSideScore: MAX_SIDE_SCORE,
+    maxEgoStateScore: EGO_MAX_STATE_SCORE,
     sendsToday: await sendsToday(c.env),
     dailySendCap: dailySendCap(settings),
   });
@@ -189,7 +226,13 @@ function isoWeekNumber(d: Date): number {
   return Math.floor((daysSinceJan1 + offset) / 7);
 }
 
-function cohortAverages(rows: { scores_json: string }[]): {
+interface CohortRow {
+  scores_json: string;
+  assessment_id: string;
+}
+
+/** Mean style score across every completed Influencing Style report. */
+function cohortAverages(rows: CohortRow[]): {
   key: string;
   name: string;
   side: string;
@@ -199,13 +242,12 @@ function cohortAverages(rows: { scores_json: string }[]): {
   const totals = new Map<string, number>();
   let n = 0;
   for (const row of rows) {
-    try {
-      const parsed = JSON.parse(row.scores_json) as { styles: { key: string; score: number }[] };
-      for (const s of parsed.styles) totals.set(s.key, (totals.get(s.key) ?? 0) + s.score);
-      n++;
-    } catch {
-      // A malformed historical row must not take the dashboard down.
-    }
+    if (kindForAssessment(row.assessment_id) !== 'isi') continue;
+    const parsed = parseScores(row.scores_json) as ScoreResult | null;
+    // A malformed historical row must not take the dashboard down.
+    if (!parsed?.styles) continue;
+    for (const s of parsed.styles) totals.set(s.key, (totals.get(s.key) ?? 0) + s.score);
+    n++;
   }
   return STYLES.map((s) => ({
     key: s.key,
@@ -214,6 +256,39 @@ function cohortAverages(rows: { scores_json: string }[]): {
     average: n === 0 ? 0 : Math.round(((totals.get(s.key) ?? 0) / n) * 10) / 10,
     n,
   }));
+}
+
+/** Mean ego-gram across every completed Ego States report. */
+function egoCohortAverages(rows: CohortRow[]): {
+  key: string;
+  name: string;
+  abbr: string;
+  color: string;
+  average: number;
+  percent: number;
+  n: number;
+}[] {
+  const totals = new Map<string, number>();
+  let n = 0;
+  for (const row of rows) {
+    if (kindForAssessment(row.assessment_id) !== 'ego') continue;
+    const parsed = parseScores(row.scores_json) as EgoResult | null;
+    if (!parsed?.states) continue;
+    for (const s of parsed.states) totals.set(s.key, (totals.get(s.key) ?? 0) + s.score);
+    n++;
+  }
+  return EGO_STATES.map((s) => {
+    const average = n === 0 ? 0 : Math.round(((totals.get(s.key) ?? 0) / n) * 10) / 10;
+    return {
+      key: s.key,
+      name: s.name,
+      abbr: s.abbr,
+      color: s.color,
+      average,
+      percent: Math.round((average / EGO_MAX_STATE_SCORE) * 1000) / 10,
+      n,
+    };
+  });
 }
 
 // --------------------------------------------------------------- assessments
@@ -231,10 +306,43 @@ adminRoutes.get('/assessments', async (c) => {
 
 // ---------------------------------------------------------------- candidates
 
+/**
+ * The filter vocabulary for the candidates grid. Organisations are whatever
+ * candidates have actually typed, so the list is derived rather than curated —
+ * a fixed list would go stale the first time someone joins from a new company.
+ */
+adminRoutes.get('/candidates/filters', async (c) => {
+  const [assessments, organisations] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT DISTINCT a.id, a.name
+         FROM assessments a JOIN responses r ON r.assessment_id = a.id
+        ORDER BY a.name`,
+    ).all<{ id: string; name: string }>(),
+    c.env.DB.prepare(
+      `SELECT DISTINCT organisation FROM candidates
+        WHERE TRIM(organisation) <> '' ORDER BY lower(organisation)`,
+    ).all<{ organisation: string }>(),
+  ]);
+
+  return c.json({
+    assessments: assessments.results ?? [],
+    organisations: (organisations.results ?? []).map((r) => r.organisation),
+    statuses: ['invited', 'in_progress', 'completed'],
+  });
+});
+
+/** YYYY-MM-DD or nothing — anything else is dropped rather than half-applied. */
+function dateParam(value: string | undefined): string | null {
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+}
+
 adminRoutes.get('/candidates', async (c) => {
   const q = (c.req.query('q') ?? '').trim().toLowerCase();
   const status = c.req.query('status') ?? '';
   const assessmentId = c.req.query('assessment') ?? '';
+  const organisation = (c.req.query('organisation') ?? '').trim();
+  const from = dateParam(c.req.query('from'));
+  const to = dateParam(c.req.query('to'));
 
   const where: string[] = [];
   const binds: unknown[] = [];
@@ -251,6 +359,22 @@ adminRoutes.get('/candidates', async (c) => {
   if (assessmentId) {
     binds.push(assessmentId);
     where.push(`r.assessment_id = ?${binds.length}`);
+  }
+  if (organisation) {
+    binds.push(organisation);
+    where.push(`c.organisation = ?${binds.length}`);
+  }
+  // The date filter reads the row's own most meaningful date — when it
+  // finished if it did, otherwise when it was issued — which is the same value
+  // the grid sorts and displays by.
+  const ACTIVITY_DATE = `date(COALESCE(r.completed_at, r.started_at, r.invited_at))`;
+  if (from) {
+    binds.push(from);
+    where.push(`${ACTIVITY_DATE} >= ?${binds.length}`);
+  }
+  if (to) {
+    binds.push(to);
+    where.push(`${ACTIVITY_DATE} <= ?${binds.length}`);
   }
 
   const sql = `
@@ -272,21 +396,47 @@ adminRoutes.get('/candidates', async (c) => {
   return c.json({ candidates: (results ?? []).map(decorate) });
 });
 
-function decorate(row: Record<string, unknown>): Record<string, unknown> {
-  const scoresJson = row.scores_json as string | null;
-  let push: number | null = null;
-  let pull: number | null = null;
-  if (scoresJson) {
-    try {
-      const parsed = JSON.parse(scoresJson) as { push: number; pull: number };
-      push = parsed.push;
-      pull = parsed.pull;
-    } catch {
-      /* ignore malformed historical rows */
-    }
+/** Parses a stored score object, tolerating a malformed historical row. */
+export function parseScores(scoresJson: string | null): ScoreResult | EgoResult | null {
+  if (!scoresJson) return null;
+  try {
+    return JSON.parse(scoresJson) as ScoreResult | EgoResult;
+  } catch {
+    return null;
   }
+}
+
+/**
+ * A one-line result for the grid. The two instruments report different things —
+ * a Push/Pull balance and an ego-gram peak — so the column carries a sentence
+ * rather than a number that would mean something different in each row.
+ */
+export function resultLabelFor(
+  kind: AssessmentKind | null,
+  scores: ScoreResult | EgoResult | null,
+): string | null {
+  if (!scores) return null;
+  if (kind === 'ego' || (scores as EgoResult).kind === 'ego') {
+    const ego = scores as EgoResult;
+    const top = ego.ranked?.[0] ?? ego.states?.[0];
+    return top ? `Top: ${top.name} (${top.percent}%)` : null;
+  }
+  const isi = scores as ScoreResult;
+  if (typeof isi.push !== 'number') return null;
+  return `Push ${isi.push} · Pull ${isi.pull} of ${MAX_SIDE_SCORE}`;
+}
+
+function decorate(row: Record<string, unknown>): Record<string, unknown> {
+  const scoresJson = (row.scores_json as string | null) ?? null;
+  const kind = kindForAssessment(String(row.assessment_id ?? ''));
+  const scores = parseScores(scoresJson);
   const { scores_json: _drop, ...rest } = row;
-  return { ...rest, push, pull, hasReport: scoresJson !== null };
+  return {
+    ...rest,
+    assessmentKind: kind,
+    resultLabel: resultLabelFor(kind, scores),
+    hasReport: scoresJson !== null,
+  };
 }
 
 /**
@@ -326,32 +476,42 @@ adminRoutes.post('/candidates/:responseId/link', async (c) => {
   return c.json({ url: `${baseUrl(c.env, c.req.raw)}/t/${token}`, rotated: Boolean(existing) });
 });
 
-adminRoutes.post('/candidates/:responseId/resend', async (c) => {
-  const row = await c.env.DB.prepare(
-    `SELECT r.assessment_id, r.candidate_id, a.name AS assessment_name, a.question_count,
-            c.email, c.first_name, c.last_name, c.organisation
-       FROM responses r
-       JOIN assessments a ON a.id = r.assessment_id
-       JOIN candidates c ON c.id = r.candidate_id
-      WHERE r.id = ?1`,
-  )
-    .bind(c.req.param('responseId'))
-    .first<{
-      assessment_id: string;
-      candidate_id: string;
-      assessment_name: string;
-      question_count: number;
-      email: string;
-      first_name: string;
-      last_name: string;
-      organisation: string;
-    }>();
-  if (!row) return c.json({ error: 'Unknown candidate' }, 404);
+interface ResendRow {
+  assessment_id: string;
+  candidate_id: string;
+  assessment_name: string;
+  question_count: number;
+  email: string;
+  first_name: string;
+  last_name: string;
+  organisation: string;
+}
 
-  const settings = await getSettings(c.env);
+const RESEND_SELECT = `
+  SELECT r.assessment_id, r.candidate_id, a.name AS assessment_name, a.question_count,
+         c.email, c.first_name, c.last_name, c.organisation
+    FROM responses r
+    JOIN assessments a ON a.id = r.assessment_id
+    JOIN candidates c ON c.id = r.candidate_id
+   WHERE r.id = ?1`;
+
+/**
+ * Reissues one candidate's invitation. Shared by the per-row action and the
+ * bulk action so the two cannot diverge — in particular so the bulk path draws
+ * on the same daily send ledger rather than bypassing it.
+ */
+async function resendOne(
+  c: Context<AdminHono>,
+  responseId: string,
+  settings: Record<string, string>,
+  origin: string,
+): Promise<{ status: string; error: string | null }> {
+  const row = await c.env.DB.prepare(RESEND_SELECT).bind(responseId).first<ResendRow>();
+  if (!row) return { status: 'failed', error: 'Unknown candidate' };
+
   const cap = dailySendCap(settings);
   if (!(await consumeSendAllowance(c.env, cap))) {
-    return c.json({ status: 'failed', error: `Daily send cap of ${cap} reached.` }, 429);
+    return { status: 'failed', error: `Daily send cap of ${cap} reached.` };
   }
 
   const { token } = await ensureCandidateAndLink(c.env, {
@@ -362,12 +522,11 @@ adminRoutes.post('/candidates/:responseId/resend', async (c) => {
     organisation: row.organisation,
   });
 
-  const branding = brandingFrom(settings);
   const mail = inviteEmail({
-    branding,
+    branding: brandingFrom(settings),
     firstName: row.first_name,
     assessmentName: row.assessment_name,
-    link: `${baseUrl(c.env, c.req.raw)}/t/${token}`,
+    link: `${origin}/t/${token}`,
     questionCount: row.question_count,
   });
   const result = await sendMail(c.env, {
@@ -378,7 +537,69 @@ adminRoutes.post('/candidates/:responseId/resend', async (c) => {
     kind: 'invite',
   });
 
-  return c.json({ status: result.status, error: result.error ?? null });
+  return { status: result.status, error: result.error ?? null };
+}
+
+adminRoutes.post('/candidates/:responseId/resend', async (c) => {
+  const settings = await getSettings(c.env);
+  const out = await resendOne(c, c.req.param('responseId'), settings, baseUrl(c.env, c.req.raw));
+  if (out.error === 'Unknown candidate') return c.json({ error: out.error }, 404);
+  if (out.status === 'failed' && out.error?.startsWith('Daily send cap')) {
+    return c.json(out, 429);
+  }
+  return c.json(out);
+});
+
+// ------------------------------------------------------------- bulk actions
+
+const bulkIdsSchema = z.object({
+  responseIds: z.array(z.string().min(1)).min(1).max(500),
+});
+
+/**
+ * Resends a selection one at a time rather than in parallel: each send has to
+ * consume a slot from the daily ledger, and a fan-out would race the cap.
+ * Every recipient's outcome is reported individually, so a partial failure is
+ * visible instead of being flattened into "something went wrong".
+ */
+adminRoutes.post('/candidates/bulk/resend', async (c) => {
+  const parsed = bulkIdsSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: 'Select at least one candidate.' }, 400);
+
+  const settings = await getSettings(c.env);
+  const origin = baseUrl(c.env, c.req.raw);
+  const results: { responseId: string; status: string; error: string | null }[] = [];
+
+  for (const responseId of parsed.data.responseIds) {
+    const out = await resendOne(c, responseId, settings, origin);
+    results.push({ responseId, ...out });
+  }
+
+  return c.json({
+    sent: results.filter((r) => r.status !== 'failed').length,
+    failed: results.filter((r) => r.status === 'failed').length,
+    results,
+  });
+});
+
+const bulkLinkSchema = bulkIdsSchema.extend({ active: z.boolean() });
+
+/** Enables or disables the personal links behind a selection, in one batch. */
+adminRoutes.post('/candidates/bulk/links', async (c) => {
+  const parsed = bulkLinkSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: 'Select at least one candidate.' }, 400);
+
+  const placeholders = parsed.data.responseIds.map((_, i) => `?${i + 2}`).join(',');
+  const res = await c.env.DB.prepare(
+    `UPDATE links SET active = ?1
+      WHERE kind = 'personal'
+        AND (assessment_id, candidate_id) IN (
+              SELECT assessment_id, candidate_id FROM responses WHERE id IN (${placeholders}))`,
+  )
+    .bind(parsed.data.active ? 1 : 0, ...parsed.data.responseIds)
+    .run();
+
+  return c.json({ changed: res.meta.changes ?? 0, active: parsed.data.active });
 });
 
 /** Per-link enable/disable — the only way a link ever stops working. */
@@ -695,6 +916,7 @@ adminRoutes.get('/outbox', async (c) => {
 // ------------------------------------------------------------------- exports
 
 interface ExportRow {
+  response_id: string;
   first_name: string;
   last_name: string;
   email: string;
@@ -702,6 +924,7 @@ interface ExportRow {
   age_band: string;
   experience_band: string;
   gender: string;
+  assessment_id: string;
   assessment_name: string;
   status: string;
   answered_count: number;
@@ -710,20 +933,38 @@ interface ExportRow {
   scores_json: string | null;
 }
 
-async function exportRows(env: Env): Promise<ExportRow[]> {
-  const { results } = await env.DB.prepare(
-    `SELECT c.first_name, c.last_name, c.email, c.organisation, c.age_band, c.experience_band, c.gender,
-            a.name AS assessment_name, r.status, r.answered_count, r.invited_at, r.completed_at,
-            rp.scores_json
-       FROM responses r
-       JOIN candidates c ON c.id = r.candidate_id
-       JOIN assessments a ON a.id = r.assessment_id
-       LEFT JOIN reports rp ON rp.response_id = r.id
-      ORDER BY COALESCE(r.completed_at, r.invited_at) DESC`,
-  ).all<ExportRow>();
+const EXPORT_SELECT = `
+  SELECT r.id AS response_id,
+         c.first_name, c.last_name, c.email, c.organisation, c.age_band, c.experience_band, c.gender,
+         a.id AS assessment_id, a.name AS assessment_name,
+         r.status, r.answered_count, r.invited_at, r.completed_at,
+         rp.scores_json
+    FROM responses r
+    JOIN candidates c ON c.id = r.candidate_id
+    JOIN assessments a ON a.id = r.assessment_id
+    LEFT JOIN reports rp ON rp.response_id = r.id`;
+
+const EXPORT_ORDER = ' ORDER BY COALESCE(r.completed_at, r.invited_at) DESC';
+
+async function exportRows(env: Env, responseIds?: string[]): Promise<ExportRow[]> {
+  if (responseIds && responseIds.length > 0) {
+    const placeholders = responseIds.map((_, i) => `?${i + 1}`).join(',');
+    const { results } = await env.DB
+      .prepare(`${EXPORT_SELECT} WHERE r.id IN (${placeholders})${EXPORT_ORDER}`)
+      .bind(...responseIds)
+      .all<ExportRow>();
+    return results ?? [];
+  }
+  const { results } = await env.DB.prepare(`${EXPORT_SELECT}${EXPORT_ORDER}`).all<ExportRow>();
   return results ?? [];
 }
 
+/**
+ * One sheet covers both instruments, so the score columns are the union of the
+ * two: a row only ever fills the block belonging to its own assessment and
+ * leaves the other blank. That keeps a single export usable in a pivot table
+ * without forcing the reader to reconcile two files.
+ */
 const EXPORT_HEADERS = [
   'First name',
   'Last name',
@@ -737,29 +978,31 @@ const EXPORT_HEADERS = [
   'Answered',
   'Invited',
   'Completed',
-  'Push /100',
-  'Pull /100',
+  'Result',
+  `Push /${MAX_SIDE_SCORE}`,
+  `Pull /${MAX_SIDE_SCORE}`,
   ...STYLES.map((s) => `${s.name} /${MAX_STYLE_SCORE}`),
+  ...EGO_STATES.map((s) => `${s.abbr} /${EGO_MAX_STATE_SCORE}`),
 ];
 
 function exportCells(row: ExportRow): (string | number | null)[] {
+  const kind = kindForAssessment(row.assessment_id);
+  const scores = parseScores(row.scores_json);
+
   let push: number | null = null;
   let pull: number | null = null;
   const styleScores = new Map<string, number>();
-  if (row.scores_json) {
-    try {
-      const parsed = JSON.parse(row.scores_json) as {
-        push: number;
-        pull: number;
-        styles: { key: string; score: number }[];
-      };
-      push = parsed.push;
-      pull = parsed.pull;
-      for (const s of parsed.styles) styleScores.set(s.key, s.score);
-    } catch {
-      /* leave the score columns empty for a malformed row */
-    }
+  const egoScores = new Map<string, number>();
+
+  if (scores && (scores as EgoResult).kind === 'ego') {
+    for (const s of (scores as EgoResult).states ?? []) egoScores.set(s.key, s.score);
+  } else if (scores) {
+    const isi = scores as ScoreResult;
+    push = isi.push ?? null;
+    pull = isi.pull ?? null;
+    for (const s of isi.styles ?? []) styleScores.set(s.key, s.score);
   }
+
   return [
     row.first_name,
     row.last_name,
@@ -773,29 +1016,48 @@ function exportCells(row: ExportRow): (string | number | null)[] {
     row.answered_count,
     row.invited_at,
     row.completed_at,
+    resultLabelFor(kind, scores),
     push,
     pull,
     ...STYLES.map((s) => styleScores.get(s.key) ?? null),
+    ...EGO_STATES.map((s) => egoScores.get(s.key) ?? null),
   ];
 }
 
-adminRoutes.get('/export/csv', async (c) => {
-  const rows = await exportRows(c.env);
-  const csv = [EXPORT_HEADERS, ...rows.map(exportCells)]
+function csvBody(rows: ExportRow[]): string {
+  return [EXPORT_HEADERS, ...rows.map(exportCells)]
     .map((cells) => cells.map(csvCell).join(','))
     .join('\r\n');
-  return new Response('﻿' + csv, {
+}
+
+function csvResponse(rows: ExportRow[], name: string): Response {
+  // A leading BOM so Excel opens the UTF-8 as UTF-8 rather than as Latin-1.
+  return new Response('\ufeff' + csvBody(rows), {
     headers: {
       'content-type': 'text/csv; charset=utf-8',
-      'content-disposition': `attachment; filename="candidates-${new Date().toISOString().slice(0, 10)}.csv"`,
+      'content-disposition': `attachment; filename="${name}-${new Date().toISOString().slice(0, 10)}.csv"`,
     },
   });
+}
+
+adminRoutes.get('/export/csv', async (c) => csvResponse(await exportRows(c.env), 'candidates'));
+
+/**
+ * The selected-rows export. It is a POST because the selection is a list of
+ * ids that would not survive a URL, and it answers with a file rather than
+ * JSON so the browser can save it directly.
+ */
+adminRoutes.post('/export/csv/selected', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const parsed = bulkIdsSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: 'Select at least one candidate.' }, 400);
+  return csvResponse(await exportRows(c.env, parsed.data.responseIds), 'candidates-selected');
 });
 
 adminRoutes.get('/export/xlsx', async (c) => {
   const rows = await exportRows(c.env);
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Assessment Platform';
+  wb.creator = 'PO Motivation';
   wb.created = new Date();
   const ws = wb.addWorksheet('Candidates', { views: [{ state: 'frozen', ySplit: 1 }] });
 
