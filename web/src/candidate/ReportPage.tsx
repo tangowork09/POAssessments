@@ -24,20 +24,36 @@ export function ReportPage({ source }: { source: 'report' | 'link' }) {
 
   useEffect(() => {
     let cancelled = false;
-    api
-      .get<ReportPayload>(base)
-      .then((r) => !cancelled && setReport(r))
-      .catch((err: unknown) => {
-        if (!cancelled) {
+    let timer: ReturnType<typeof setTimeout>;
+
+    // A candidate arriving straight from the completion screen can beat the
+    // pipeline here by a second or two, so a 404 is retried a few times before
+    // it is treated as a real failure.
+    const load = (attempt: number): void => {
+      api
+        .get<ReportPayload>(base)
+        .then((r) => {
+          if (!cancelled) setReport(r);
+        })
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          const notReady = err instanceof ApiError && err.status === 404;
+          if (notReady && attempt < 6) {
+            timer = setTimeout(() => load(attempt + 1), 2000);
+            return;
+          }
           setError(
             err instanceof ApiError
               ? err.message
               : 'This report could not be opened. Please try the link in your email.',
           );
-        }
-      });
+        });
+    };
+
+    load(0);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   }, [base]);
 
@@ -63,7 +79,7 @@ export function ReportPage({ source }: { source: 'report' | 'link' }) {
     return (
       <Shell branding={DEFAULT_BRANDING}>
         <p className="hint" style={{ marginTop: 48 }}>
-          Loading your report…
+          Preparing your report…
         </p>
       </Shell>
     );

@@ -35,7 +35,9 @@
       {
         "queue": "assessment-pipeline",
         "max_batch_size": 5,
-        "max_batch_timeout": 10,
+        // A candidate is watching for their report, so the batch window is
+        // short rather than throughput-optimal.
+        "max_batch_timeout": 2,
         "max_retries": 3,
         "dead_letter_queue": "assessment-pipeline-dlq"
       }
