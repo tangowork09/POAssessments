@@ -305,7 +305,7 @@ function BeginTest({
               {intro.instructions.map((line, i) => (
                 <li key={line}>
                   <span className="tick" aria-hidden="true">
-                    {i + 1}
+                    {intro.instructionBadges?.[i] ?? i + 1}
                   </span>
                   <span>{line}</span>
                 </li>

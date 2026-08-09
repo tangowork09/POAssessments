@@ -65,6 +65,13 @@ export interface AssessmentIntro {
    * verbatim, they are reproduced exactly.
    */
   instructions: readonly string[];
+  /**
+   * Badge text per instruction line. When the lines are a value legend rather
+   * than a sequence (ISI's "0 = …" anchors), sequential numbering would
+   * contradict the values, so the badge shows the value itself. Absent = 1-based
+   * step numbers.
+   */
+  instructionBadges?: readonly string[];
   /** A single emphasised line under the card, or '' for none. */
   emphasis: string;
   /** Label of the primary button. */
@@ -111,6 +118,7 @@ export const ASSESSMENTS: Readonly<Record<AssessmentKind, AssessmentConfig>> = {
         '3 = I often do this',
         '4 = I always do this',
       ],
+      instructionBadges: ['0', '1', '2', '3', '4'],
       emphasis:
         'Answer with your first instinct. Your progress saves itself, so you can stop at any point and pick up exactly where you left off.',
       cta: 'Begin Test',
