@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { ApiError, api } from '../lib/api.js';
 import {
   EmptyState,
@@ -104,7 +105,14 @@ function activeFilterCount(f: Filters): number {
 export function Candidates() {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  // Read once, on mount: this is what makes a Dashboard tile ("Completed" etc.)
+  // land here pre-filtered. Not kept in sync afterwards — a candidate clearing
+  // filters by hand shouldn't fight the URL that got them here.
+  const [searchParams] = useSearchParams();
+  const [filters, setFilters] = useState<Filters>(() => {
+    const status = searchParams.get('status');
+    return status && status in STATUS_LABELS ? { ...EMPTY_FILTERS, status } : EMPTY_FILTERS;
+  });
   const [options, setOptions] = useState<FilterOptions | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [confirmDisable, setConfirmDisable] = useState(false);

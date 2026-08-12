@@ -93,24 +93,28 @@ export function Dashboard() {
           label="Candidates"
           value={t.candidates}
           foot="People on the platform"
+          linkTo="/admin/candidates"
           empty={{ foot: 'Nobody has been invited yet', to: '/admin/invites', label: 'Send an invite' }}
         />
         <Tile
           label="Invited"
           value={t.invited}
           foot="Assessment invitations issued"
+          linkTo="/admin/candidates"
           empty={{ foot: 'No invitations issued yet', to: '/admin/invites', label: 'Send an invite' }}
         />
         <Tile
           label="In progress"
           value={t.in_progress}
           foot="Started, not yet submitted"
+          linkTo="/admin/candidates?status=in_progress"
           empty={{ foot: 'Nobody is mid-assessment right now' }}
         />
         <Tile
           label="Completed"
           value={t.completed}
           foot={data.completionRate === null ? 'No starts yet' : `${data.completionRate}% of those started`}
+          linkTo="/admin/candidates?status=completed"
           empty={{ foot: 'No assessment has been submitted yet' }}
         />
       </div>
@@ -339,16 +343,24 @@ function Tile({
   label,
   value,
   foot,
+  linkTo,
   empty,
 }: {
   label: string;
   value: number;
   foot: string;
+  /** Where the whole card goes when it has something to show. */
+  linkTo?: string;
   empty?: { foot: string; to?: string; label?: string };
 }) {
   const isZero = value === 0 && empty !== undefined;
-  return (
-    <div className={`card tile${isZero ? ' is-zero' : ''}`}>
+  // A zero tile's own CTA ("Send an invite") takes priority over the generic
+  // filtered view — there's nothing to filter to yet. Either way the whole
+  // card is one target, never a link nested inside another.
+  const href = isZero ? empty.to : linkTo;
+  const className = `card tile${isZero ? ' is-zero' : ''}${href ? ' tile-link' : ''}`;
+  const content = (
+    <>
       <div className="tile-top">
         <span className="tile-label">{label}</span>
       </div>
@@ -357,10 +369,10 @@ function Tile({
         {isZero ? (
           <span className="inline-note">
             {empty.foot}
-            {empty.to && empty.label ? (
+            {empty.label ? (
               <>
-                {' · '}
-                <Link to={empty.to}>{empty.label}</Link>
+                {' '}
+                · <b>{empty.label}</b>
               </>
             ) : null}
           </span>
@@ -368,7 +380,14 @@ function Tile({
           <span className="inline-note">{foot}</span>
         )}
       </div>
-    </div>
+    </>
+  );
+  return href ? (
+    <Link to={href} className={className}>
+      {content}
+    </Link>
+  ) : (
+    <div className={className}>{content}</div>
   );
 }
 
