@@ -75,6 +75,10 @@ export function Invites() {
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [assessmentId, setAssessmentId] = useState('');
   const [toast, showToast] = useToast();
+  // Bumped after anything that sends mail, so the outbox below reflects the
+  // send that just happened instead of waiting for a page reload.
+  const [mailSentAt, setMailSentAt] = useState(0);
+  const onMailSent = useCallback(() => setMailSentAt((n) => n + 1), []);
 
   useEffect(() => {
     api
@@ -97,10 +101,11 @@ export function Invites() {
           assessmentId={assessmentId}
           onAssessment={setAssessmentId}
           onToast={showToast}
+          onMailSent={onMailSent}
         />
-        <BulkInvite assessmentId={assessmentId} onToast={showToast} />
+        <BulkInvite assessmentId={assessmentId} onToast={showToast} onMailSent={onMailSent} />
         <MailSettings onToast={showToast} />
-        <Outbox />
+        <Outbox refreshKey={mailSentAt} />
       </div>
 
       <Toast message={toast} />
@@ -120,7 +125,9 @@ function SingleInvite({
   assessmentId: string;
   onAssessment: (id: string) => void;
   onToast: (msg: string) => void;
+  onMailSent: () => void;
 }) {
+  const firstRef = useRef<HTMLInputElement>(null);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -147,10 +154,15 @@ function SingleInvite({
         const copied = await copyToClipboard(res.url);
         onToast(copied ? 'Personal link copied to the clipboard' : res.url);
       }
+      // Identity fields clear, organisation and assessment stay. Inviting a
+      // cohort means repeating the company and the instrument while the person
+      // changes every time — and keeping an email that was just invited is how
+      // the same person gets invited twice by a stray second submit.
       setFirstName('');
       setLastName('');
       setEmail('');
-      setOrganisation('');
+      firstRef.current?.focus();
+      if (send) onMailSent();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not create the invitation');
     } finally {
@@ -167,6 +179,7 @@ function SingleInvite({
             <label htmlFor="inv-first">First name</label>
             <input
               id="inv-first"
+              ref={firstRef}
               className="control"
               value={firstName}
               onChange={(e) => setFirstName(e.target.value)}
@@ -243,7 +256,15 @@ function SingleInvite({
 
 // --------------------------------------------------------------------- bulk
 
-function BulkInvite({ assessmentId, onToast }: { assessmentId: string; onToast: (msg: string) => void }) {
+function BulkInvite({
+  assessmentId,
+  onToast,
+  onMailSent,
+}: {
+  assessmentId: string;
+  onToast: (msg: string) => void;
+  onMailSent: () => void;
+}) {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -287,6 +308,7 @@ function BulkInvite({ assessmentId, onToast }: { assessmentId: string; onToast: 
       setPreview(null);
       if (fileRef.current) fileRef.current.value = '';
       onToast(`${res.queued} invitations queued`);
+      onMailSent();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not queue the batch');
     } finally {
@@ -595,7 +617,7 @@ function sentenceCase(value: string): string {
  * Several actions report "the message is in the outbox". Without this card
  * that sentence names a place the operator cannot reach.
  */
-function Outbox() {
+function Outbox({ refreshKey }: { refreshKey: number }) {
   const [messages, setMessages] = useState<OutboxMessage[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -607,7 +629,9 @@ function Outbox() {
       .catch((e: Error) => setError(e.message));
   }, []);
 
-  useEffect(load, [load]);
+  // `refreshKey` changes whenever something on this page sends mail, so a send
+  // and the row proving it happened no longer need a page reload between them.
+  useEffect(load, [load, refreshKey]);
 
   return (
     <section className="card">

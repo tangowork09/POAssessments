@@ -41,6 +41,8 @@ interface Row {
   resultLabel: string | null;
   assessmentKind: 'isi' | 'ego' | null;
   hasReport: boolean;
+  /** False when the report exists but its email has never gone out. */
+  reportSent: boolean;
 }
 
 interface FilterOptions {
@@ -242,6 +244,28 @@ export function Candidates() {
       );
     } catch (err) {
       showToast(err instanceof ApiError ? err.message : 'Could not resend');
+    } finally {
+      setBusyRow(null);
+    }
+  }
+
+  /** The manual counterpart to auto-send: emails a report already generated. */
+  async function sendReport(row: Row): Promise<void> {
+    setBusyRow(row.response_id);
+    try {
+      const res = await api.post<{ status: string; error: string | null; resent: boolean }>(
+        `/api/admin/candidates/${row.response_id}/send-report`,
+      );
+      showToast(
+        res.status === 'sent'
+          ? `Report ${res.resent ? 'resent' : 'sent'} to ${row.email}`
+          : res.status === 'logged'
+            ? 'No mail provider configured — the message is in the outbox'
+            : `Send failed: ${res.error ?? 'unknown error'}`,
+      );
+      load();
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : 'Could not send the report');
     } finally {
       setBusyRow(null);
     }
@@ -636,7 +660,10 @@ export function Candidates() {
                       </td>
                       <td className="cell-result">
                         {r.resultLabel ? (
-                          <span className="result-label num">{r.resultLabel}</span>
+                          <>
+                            <span className="result-label num">{r.resultLabel}</span>
+                            {!r.reportSent ? <span className="cell-sub">Report not emailed</span> : null}
+                          </>
                         ) : (
                           <span className="muted">
                             {r.status === 'completed' ? 'Report pending' : 'Not yet'}
@@ -664,6 +691,21 @@ export function Candidates() {
                           >
                             Resend
                           </button>
+                          {r.hasReport ? (
+                            <button
+                              className="link-btn"
+                              type="button"
+                              onClick={() => sendReport(r)}
+                              disabled={busyRow === r.response_id}
+                              aria-label={
+                                r.reportSent
+                                  ? `Send the report to ${name} again`
+                                  : `Send the report to ${name}`
+                              }
+                            >
+                              {r.reportSent ? 'Resend report' : 'Send report'}
+                            </button>
+                          ) : null}
                           {r.link_id ? (
                             <button
                               className="link-btn"

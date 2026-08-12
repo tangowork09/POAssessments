@@ -82,6 +82,10 @@ export const singleInviteSchema = z.object({
   send: z.boolean().default(true),
 });
 
+export const autoSendSchema = z.object({
+  autoSend: z.boolean(),
+});
+
 export const bulkRowSchema = z.object({
   firstName: trimmed(80).default(''),
   lastName: trimmed(80).default(''),

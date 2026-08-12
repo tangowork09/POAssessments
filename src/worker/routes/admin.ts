@@ -23,6 +23,7 @@ import {
 } from '../lib/settings.js';
 import { generateToken, hashToken } from '../lib/tokens.js';
 import {
+  autoSendSchema,
   brandingSchema,
   bulkConfirmSchema,
   bulkPreviewSchema,
@@ -33,7 +34,13 @@ import {
   mailSettingsSchema,
   singleInviteSchema,
 } from '../lib/validation.js';
-import { consumeSendAllowance, dispatch, ensureCandidateAndLink, sendsToday } from '../pipeline.js';
+import {
+  consumeSendAllowance,
+  deliverReportEmail,
+  dispatch,
+  ensureCandidateAndLink,
+  sendsToday,
+} from '../pipeline.js';
 import { inviteEmail } from '../email/templates.js';
 import { kindForAssessment, type AssessmentKind } from '../../shared/assessments.js';
 import { EGO_STATES } from '../../shared/ego.js';
@@ -295,13 +302,96 @@ function egoCohortAverages(rows: CohortRow[]): {
 
 adminRoutes.get('/assessments', async (c) => {
   const { results } = await c.env.DB.prepare(
-    `SELECT a.id, a.slug, a.name, a.description, a.status, a.question_count,
+    `SELECT a.id, a.slug, a.name, a.description, a.status, a.question_count, a.auto_send_report,
             (SELECT COUNT(*) FROM responses r WHERE r.assessment_id = a.id) AS invited,
             (SELECT COUNT(*) FROM responses r WHERE r.assessment_id = a.id AND r.status <> 'invited') AS started,
-            (SELECT COUNT(*) FROM responses r WHERE r.assessment_id = a.id AND r.status = 'completed') AS completed
+            (SELECT COUNT(*) FROM responses r WHERE r.assessment_id = a.id AND r.status = 'completed') AS completed,
+            (SELECT COUNT(*) FROM reports rep
+               JOIN responses r2 ON r2.id = rep.response_id
+              WHERE r2.assessment_id = a.id AND rep.sent_at IS NULL) AS unsent_reports
        FROM assessments a ORDER BY a.status DESC, a.name`,
   ).all();
   return c.json({ assessments: results ?? [], maxStyleScore: MAX_STYLE_SCORE });
+});
+
+/**
+ * Sends a stored report to its candidate by hand — the counterpart to turning
+ * auto-send off.
+ *
+ * A fresh report token is minted here rather than recovering the original,
+ * which is not recoverable by design: only its keyed hash is stored. That is
+ * safe precisely because the token's one use is the emailed /r/ URL, so an
+ * unsent report's token has never left the server. The candidate's own
+ * on-screen link is their /t/ link token and is unaffected.
+ */
+adminRoutes.post('/candidates/:responseId/send-report', async (c) => {
+  const responseId = c.req.param('responseId');
+  const row = await c.env.DB.prepare(
+    `SELECT rep.id AS report_id, rep.sent_at, rep.pdf,
+            a.name AS assessment_name,
+            c.email, c.first_name
+       FROM reports rep
+       JOIN responses r ON r.id = rep.response_id
+       JOIN assessments a ON a.id = r.assessment_id
+       JOIN candidates c ON c.id = r.candidate_id
+      WHERE rep.response_id = ?1`,
+  )
+    .bind(responseId)
+    .first<{
+      report_id: string;
+      sent_at: string | null;
+      pdf: number[] | ArrayBuffer | null;
+      assessment_name: string;
+      email: string;
+      first_name: string;
+    }>();
+
+  if (!row) return c.json({ error: 'No report exists for this candidate yet.' }, 404);
+
+  const settings = await getSettings(c.env);
+  const cap = dailySendCap(settings);
+  if (!(await consumeSendAllowance(c.env, cap))) {
+    return c.json({ error: `Daily send cap of ${cap} reached.` }, 429);
+  }
+
+  const token = generateToken();
+  await c.env.DB.prepare('UPDATE reports SET token_hash = ?2 WHERE id = ?1')
+    .bind(row.report_id, await hashToken(token, c.env.LINK_TOKEN_SECRET))
+    .run();
+
+  const result = await deliverReportEmail(c.env, {
+    reportId: row.report_id,
+    reportToken: token,
+    assessmentName: row.assessment_name,
+    firstName: row.first_name,
+    email: row.email,
+    pdf: row.pdf ? new Uint8Array(row.pdf as ArrayBuffer) : new Uint8Array(),
+    settings,
+    branding: brandingFrom(settings),
+  });
+
+  return c.json({
+    status: result.status,
+    error: result.error ?? null,
+    resent: row.sent_at !== null,
+  });
+});
+
+/**
+ * Turns automatic report delivery on or off for one assessment. Off means a
+ * completed assessment is still scored and its report still stored — only the
+ * email waits for an administrator.
+ */
+adminRoutes.post('/assessments/:id/auto-send', async (c) => {
+  const parsed = autoSendSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: 'Expected { autoSend: boolean }' }, 400);
+
+  const res = await c.env.DB.prepare('UPDATE assessments SET auto_send_report = ?2 WHERE id = ?1')
+    .bind(c.req.param('id'), parsed.data.autoSend ? 1 : 0)
+    .run();
+  if (!res.meta.changes) return c.json({ error: 'Unknown assessment' }, 404);
+
+  return c.json({ autoSend: parsed.data.autoSend });
 });
 
 // ---------------------------------------------------------------- candidates
@@ -381,7 +471,7 @@ adminRoutes.get('/candidates', async (c) => {
     SELECT r.id AS response_id, r.status, r.answered_count, r.invited_at, r.started_at, r.completed_at,
            c.id AS candidate_id, c.first_name, c.last_name, c.email, c.organisation,
            a.id AS assessment_id, a.name AS assessment_name, a.question_count,
-           rp.scores_json,
+           rp.scores_json, rp.sent_at AS report_sent_at,
            l.id AS link_id, l.active AS link_active
       FROM responses r
       JOIN candidates c ON c.id = r.candidate_id
@@ -436,6 +526,9 @@ function decorate(row: Record<string, unknown>): Record<string, unknown> {
     assessmentKind: kind,
     resultLabel: resultLabelFor(kind, scores),
     hasReport: scoresJson !== null,
+    // Distinguishes "no report yet" from "report ready but never emailed" —
+    // the second is the one the console offers a send button for.
+    reportSent: scoresJson !== null && row.report_sent_at !== null,
   };
 }
 

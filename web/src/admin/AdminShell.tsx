@@ -21,7 +21,11 @@ const NAV: NavItem[] = [
   { to: '/admin/candidates', label: 'Candidates', icon: IconPeople },
   { to: '/admin/invites', label: 'Invites', icon: IconSend },
   { to: '/admin/links', label: 'Assessment Link', icon: IconLink },
-  { to: '/admin/branding', label: 'Branding', icon: IconBrush, superadminOnly: true },
+  // Branding is hidden for now at the client's request — the identity is fixed
+  // to PO Assessments and the panel only invites accidental changes to what
+  // every candidate, report and email carries. The route itself still works,
+  // so restoring this one line brings it back with nothing else to change.
+  // { to: '/admin/branding', label: 'Branding', icon: IconBrush, superadminOnly: true },
 ];
 
 export function AdminShell({

@@ -5,8 +5,8 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { api } from '../lib/api.js';
-import { CardHead, EmptyState, ErrorState, Head, Loading, StatusPill } from './ui.js';
+import { ApiError, api } from '../lib/api.js';
+import { CardHead, EmptyState, ErrorState, Head, Loading, StatusPill, Toast, useToast } from './ui.js';
 import { STYLES } from '../../../src/shared/styles.js';
 import { MAX_STYLE_SCORE } from '../../../src/shared/scoring.js';
 
@@ -20,6 +20,9 @@ interface Row {
   invited: number;
   started: number;
   completed: number;
+  auto_send_report: number;
+  /** Reports generated but never emailed — what the manual send acts on. */
+  unsent_reports: number;
 }
 
 export function Assessments() {
@@ -27,6 +30,8 @@ export function Assessments() {
   // The API owns the scale; the shared constant is only a floor.
   const [maxStyleScore, setMaxStyleScore] = useState(MAX_STYLE_SCORE);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [toast, showToast] = useToast();
 
   const load = useCallback(() => {
     setError(null);
@@ -41,8 +46,35 @@ export function Assessments() {
 
   useEffect(load, [load]);
 
+  async function toggleAutoSend(row: Row): Promise<void> {
+    const next = row.auto_send_report !== 1;
+    setBusy(row.id);
+    // Optimistic: the switch is the control, so it should move under the
+    // pointer rather than after a round trip. Reverted below if the call fails.
+    setRows((prev) =>
+      (prev ?? []).map((r) => (r.id === row.id ? { ...r, auto_send_report: next ? 1 : 0 } : r)),
+    );
+    try {
+      await api.post(`/api/admin/assessments/${row.id}/auto-send`, { autoSend: next });
+      showToast(
+        next
+          ? 'Reports will be emailed automatically on completion'
+          : 'Reports will be held — send them from Candidates',
+      );
+      load();
+    } catch (err) {
+      setRows((prev) =>
+        (prev ?? []).map((r) => (r.id === row.id ? { ...r, auto_send_report: next ? 0 : 1 } : r)),
+      );
+      showToast(err instanceof ApiError ? err.message : 'Could not change that setting');
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <>
+      <Toast message={toast} />
       <Head
         title="Assessments"
         sub="Every instrument on the platform, with its funnel. Adding one is a data change, not a deploy."
@@ -70,6 +102,7 @@ export function Assessments() {
                   <th className="right">Started</th>
                   <th className="right">Completed</th>
                   <th className="right">Completed of started</th>
+                  <th>Report email</th>
                 </tr>
               </thead>
               <tbody>
@@ -88,6 +121,22 @@ export function Assessments() {
                     <td className="right num">{a.completed}</td>
                     <td className="right num">
                       {a.started > 0 ? `${Math.round((a.completed / a.started) * 100)}%` : '—'}
+                    </td>
+                    <td>
+                      <label className="check-label">
+                        <input
+                          type="checkbox"
+                          checked={a.auto_send_report === 1}
+                          disabled={busy === a.id}
+                          onChange={() => toggleAutoSend(a)}
+                        />
+                        <span>{a.auto_send_report === 1 ? 'Automatic' : 'Manual'}</span>
+                      </label>
+                      {a.auto_send_report === 0 && a.unsent_reports > 0 ? (
+                        <span className="cell-sub">
+                          {a.unsent_reports} waiting to be sent
+                        </span>
+                      ) : null}
                     </td>
                   </tr>
                 ))}

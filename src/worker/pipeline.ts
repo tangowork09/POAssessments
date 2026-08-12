@@ -8,7 +8,7 @@
 
 import type { Env, PipelineMessage } from './env.js';
 import { newId } from './lib/ids.js';
-import { sendMail } from './lib/mailer.js';
+import { sendMail, type MailResult } from './lib/mailer.js';
 import { buildReport } from './lib/report.js';
 import { attachPdf, dailySendCap, getSettings, brandingFrom } from './lib/settings.js';
 import { generateToken, hashToken } from './lib/tokens.js';
@@ -16,7 +16,7 @@ import { inviteEmail, reportEmail } from './email/templates.js';
 import { renderReportPdf } from './pdf/report.js';
 import { toBase64 } from './pdf/writer.js';
 import { baseUrl } from './env.js';
-import type { CandidateDetails } from '../shared/types.js';
+import type { Branding, CandidateDetails } from '../shared/types.js';
 
 /** Anything that can keep work alive past the response — Hono's executionCtx. */
 interface WaitUntil {
@@ -62,6 +62,8 @@ interface ResponseRow {
   age_band: string;
   experience_band: string;
   gender: string;
+  /** 0 withholds the report email until an administrator sends it by hand. */
+  auto_send_report: number;
 }
 
 /**
@@ -75,7 +77,7 @@ export async function scoreAndDeliver(
 ): Promise<{ reportToken: string } | null> {
   const row = await env.DB.prepare(
     `SELECT r.id, r.assessment_id, r.candidate_id, r.completed_at,
-            a.name AS assessment_name,
+            a.name AS assessment_name, a.auto_send_report,
             c.email, c.first_name, c.last_name, c.organisation,
             c.age_band, c.experience_band, c.gender
        FROM responses r
@@ -132,12 +134,13 @@ export async function scoreAndDeliver(
   // rebuilt years later without asking the assessments table what shape it is.
   const storedScores = report.kind === 'ego' ? report.ego : report.scores;
 
+  const reportId = newId('rpt');
   await env.DB.prepare(
     `INSERT INTO reports (id, response_id, token_hash, scores_json, pdf, pdf_bytes)
      VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
   )
     .bind(
-      newId('rpt'),
+      reportId,
       responseId,
       await hashToken(reportToken, env.LINK_TOKEN_SECRET),
       JSON.stringify(storedScores),
@@ -146,19 +149,60 @@ export async function scoreAndDeliver(
     )
     .run();
 
-  const url = `${baseUrl(env)}/r/${reportToken}`;
-  const attach = attachPdf(settings);
-  const mail = reportEmail({
-    branding,
-    logoUrl: `${baseUrl(env)}/api/logo`,
-    firstName: candidate.firstName,
+  // Scoring and the stored report are unconditional; only delivery is gated.
+  // A withheld report is complete and openable by its link — the administrator
+  // is choosing when the candidate hears about it, not whether it exists.
+  if (row.auto_send_report === 0) {
+    console.log('[pipeline] auto-send off for', row.assessment_name, '— report held for manual send');
+    return { reportToken };
+  }
+
+  await deliverReportEmail(env, {
+    reportId,
+    reportToken,
     assessmentName: row.assessment_name,
-    reportUrl: url,
+    firstName: candidate.firstName,
+    email: candidate.email,
+    pdf,
+    settings,
+    branding,
+  });
+
+  return { reportToken };
+}
+
+/**
+ * Sends one report email and stamps `reports.sent_at`.
+ *
+ * Shared by the completion pipeline and the admin console's manual send, so a
+ * hand-sent report is byte-for-byte the mail an auto-sent one would have been —
+ * same template, same cc, same attachment policy.
+ */
+export async function deliverReportEmail(
+  env: Env,
+  input: {
+    reportId: string;
+    reportToken: string;
+    assessmentName: string;
+    firstName: string;
+    email: string;
+    pdf: Uint8Array;
+    settings: Record<string, string>;
+    branding: Branding;
+  },
+): Promise<MailResult> {
+  const attach = attachPdf(input.settings);
+  const mail = reportEmail({
+    branding: input.branding,
+    logoUrl: `${baseUrl(env)}/api/logo`,
+    firstName: input.firstName,
+    assessmentName: input.assessmentName,
+    reportUrl: `${baseUrl(env)}/r/${input.reportToken}`,
     attached: attach,
   });
 
-  await sendMail(env, {
-    to: candidate.email,
+  const result = await sendMail(env, {
+    to: input.email,
     // A fixed operational cc on every report, not a per-candidate choice —
     // unset in dev on purpose, so local testing never sends to a real inbox.
     ...(env.REPORT_CC_EMAIL ? { cc: [env.REPORT_CC_EMAIL] } : {}),
@@ -170,8 +214,8 @@ export async function scoreAndDeliver(
       ? {
           attachments: [
             {
-              filename: `${slug(row.assessment_name)}-report.pdf`,
-              content: toBase64(pdf),
+              filename: `${slug(input.assessmentName)}-report.pdf`,
+              content: toBase64(input.pdf),
               contentType: 'application/pdf',
             },
           ],
@@ -179,7 +223,15 @@ export async function scoreAndDeliver(
       : {}),
   });
 
-  return { reportToken };
+  // Only a real send marks it sent: 'logged' means no provider is configured
+  // and 'failed' means it bounced, and both must stay re-sendable.
+  if (result.status === 'sent') {
+    await env.DB.prepare("UPDATE reports SET sent_at = datetime('now') WHERE id = ?1")
+      .bind(input.reportId)
+      .run();
+  }
+
+  return result;
 }
 
 // ------------------------------------------------------------- bulk invites

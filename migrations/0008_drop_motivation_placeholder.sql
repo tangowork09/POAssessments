@@ -1,0 +1,13 @@
+-- The Motivation Need Assessment row has been a placeholder since 0002: status
+-- 'planned', a declared question_count of 69, and zero actual questions. It has
+-- never been answerable, so it shows up in the admin console as an instrument
+-- with an all-zero funnel that nobody can do anything about.
+--
+-- Removing it rather than hiding it, because "hidden but present" is how a
+-- planned row later gets a generic link issued against it and starts an
+-- assessment with no questions. When the client supplies the workbook it comes
+-- back the way the other two did: a seed migration with its real statements.
+--
+-- Safe to delete: verified 0 questions and 0 responses in production. The one
+-- generic link pointing at it goes with it via ON DELETE CASCADE.
+DELETE FROM assessments WHERE id = 'asm_motivation_need';
