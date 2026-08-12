@@ -22,6 +22,10 @@
     {
       "binding": "DB",
       "database_name": "assessment_platform",
+      // Deliberately not the production id. `wrangler dev` keys its local
+      // SQLite file by this string, so changing it silently rebinds local
+      // development to a new empty database; the production id lives only in
+      // `env.production` below, where nothing local reads it.
       "database_id": "REPLACE_WITH_D1_DATABASE_ID",
       "migrations_dir": "migrations"
     }
@@ -44,6 +48,10 @@
     ]
   },
 
+  // Development values only. `wrangler dev` reads these; a deployed Worker does
+  // not, because `env.production.vars` below replaces the whole block and the
+  // three secrets are set with `wrangler secret put` instead of living here.
+  // Nothing in this file is a production credential.
   "vars": {
     "APP_NAME": "Assessment Platform",
     "APP_ENV": "development",
@@ -54,5 +62,58 @@
     "ADMIN_PASSWORD": "ChangeMe!2026",
     "LINK_TOKEN_SECRET": "dev-only-link-secret-change-me",
     "JWT_SECRET": "dev-only-jwt-secret-change-me"
+  },
+
+  "env": {
+    "production": {
+      // Explicit, because a named environment otherwise deploys as
+      // "assessment-platform-production" and every link in every invite email
+      // would carry a hostname that does not match the one set below.
+      "name": "assessment-platform",
+      "vars": {
+        "APP_NAME": "PO Motivation",
+        "APP_ENV": "production",
+        // Every invite and report link in every email is built from this, so it
+        // must be the hostname candidates will actually be given. Attach the
+        // custom domain before the first request reaches the Worker and there
+        // is never a window where a generated link points nowhere.
+        "PUBLIC_BASE_URL": "https://poassessments.com",
+        // Sender and links share a domain on purpose: DMARC alignment is what
+        // stops a report email that links to poassessments.com from being read
+        // as spoofed. Resend accepts the display-name form.
+        "MAIL_FROM": "PO Motivation <no-reply@poassessments.com>",
+        // Candidates do reply to these — a report they cannot read, a link that
+        // will not open. Point it at an address a human actually reads.
+        "MAIL_REPLY_TO": "",
+        "ADMIN_EMAIL": "admin@pomotivation.com"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "assessment_platform",
+          "database_id": "773e86c9-858f-4b70-a784-e28be20c2df0",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "queues": {
+        "producers": [{ "binding": "PIPELINE", "queue": "assessment-pipeline" }],
+        "consumers": [
+          {
+            "queue": "assessment-pipeline",
+            "max_batch_size": 5,
+            "max_batch_timeout": 2,
+            "max_retries": 3,
+            "dead_letter_queue": "assessment-pipeline-dlq"
+          }
+        ]
+      },
+      "assets": {
+        "directory": "./dist/client",
+        "binding": "ASSETS",
+        "not_found_handling": "none",
+        "run_worker_first": true
+      },
+      "observability": { "enabled": true }
+    }
   }
 }
