@@ -246,8 +246,8 @@ describe('reportFromScores', () => {
 });
 
 describe('house branding', () => {
-  it('ships a PO Motivation logo as an embeddable PNG data URI', () => {
-    expect(BRAND_COMPANY_NAME).toBe('PO Motivation');
+  it('ships a house logo as an embeddable PNG data URI', () => {
+    expect(BRAND_COMPANY_NAME).toBe('PO Assessments');
     expect(BRAND_LOGO_DATA_URL.startsWith('data:image/png;base64,')).toBe(true);
     expect(BRAND_LOGO_DATA_URL.length).toBeGreaterThan(10_000);
     expect(BRAND_ACCENT).toMatch(/^#[0-9A-F]{6}$/);

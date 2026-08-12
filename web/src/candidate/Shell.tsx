@@ -24,9 +24,9 @@ export const DEFAULT_BRANDING: Branding = {
 const FRIENDLY_PRIMARY = '#0BA5C8';
 
 /**
- * A logo wider than this contains its own wordmark — the PO Motivation mark
- * does — so repeating the company name beside it would say the same thing
- * twice. Narrower marks are icons and keep the name.
+ * A logo wider than this contains its own wordmark — the house mark does —
+ * so repeating the company name beside it would say the same thing twice.
+ * Narrower marks are icons and keep the name.
  */
 const LOCKUP_RATIO = 1.8;
 

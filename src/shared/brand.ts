@@ -1,18 +1,20 @@
 /**
- * PO Motivation house brand.
+ * PO Assessments house brand.
  *
  * The logo is embedded as a data URI rather than fetched, because every place
  * it appears — the candidate header, the report sheet, the PDF header and the
  * transactional emails — is rendered somewhere a relative URL would not
  * resolve (a mail client, a downloaded PDF, an offline print). The bytes are
- * the transparent PNG in `public/logo-po-motivation.png`; `npm run brand:logo`
- * (scripts/gen-logo.mjs) regenerates this file from it.
+ * the transparent PNG in `public/logo-po-motivation.png` — the filename
+ * predates the rename and the image itself still carries the old wordmark
+ * pending a replacement asset; `npm run brand:logo` (scripts/gen-logo.mjs)
+ * regenerates the embedded copy from whatever PNG is at that path.
  *
  * A tenant that uploads its own logo in the Branding panel overrides this; the
  * default is what an untouched installation shows.
  */
 
-export const BRAND_COMPANY_NAME = 'PO Motivation';
+export const BRAND_COMPANY_NAME = 'PO Assessments';
 export const BRAND_TAGLINE = 'Potential, Possibilities';
 
 /**

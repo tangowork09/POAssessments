@@ -1057,7 +1057,7 @@ adminRoutes.post('/export/csv/selected', async (c) => {
 adminRoutes.get('/export/xlsx', async (c) => {
   const rows = await exportRows(c.env);
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'PO Motivation';
+  wb.creator = 'PO Assessments';
   wb.created = new Date();
   const ws = wb.addWorksheet('Candidates', { views: [{ state: 'frozen', ySplit: 1 }] });
 

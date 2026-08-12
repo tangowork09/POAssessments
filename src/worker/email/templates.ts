@@ -23,8 +23,8 @@ const esc = (s: string): string =>
 
 function logoBlock(b: Branding): string {
   if (b.logoDataUrl) {
-    // A wordmark logo is wider than it is tall; 150px keeps the PO Motivation
-    // lockup legible in a 600px shell without dominating the header.
+    // A wordmark logo is wider than it is tall; 150px keeps the house lockup
+    // legible in a 600px shell without dominating the header.
     return `<img src="${esc(b.logoDataUrl)}" alt="${esc(b.companyName)}" width="150" style="display:block;max-width:150px;height:auto;border:0;" />`;
   }
   const initial = esc((b.companyName || 'A').trim().charAt(0).toUpperCase());

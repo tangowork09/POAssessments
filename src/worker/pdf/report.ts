@@ -8,7 +8,7 @@
  *
  * Both instruments share the cover, the executive summary, the running header,
  * the footer and the chart vocabulary; only the chapters differ. Everything is
- * vector — including the PO Motivation lockup, which is reconstructed from
+ * vector — including the house lockup, which is reconstructed from
  * primitives rather than embedded as a raster, so the file stays a few
  * kilobytes, is deterministic, and needs no zlib on workerd.
  */
@@ -59,7 +59,7 @@ const HEADER_BOTTOM = M.top + 48;
 
 const BODY = { size: 9.8, leading: 15.4 } as const;
 
-/** Ratio of the PO Motivation lockup, in its own 331 x 140 design space. */
+/** Ratio of the house lockup, in its own 331 x 140 design space. */
 const LOGO_W = 331;
 const LOGO_H = 140;
 /** The ribbon mark alone occupies the first 160 units of that design space. */
@@ -1335,7 +1335,7 @@ function pillRight(doc: PdfDoc, right: number, y: number, label: string, color: 
 // ---------------------------------------------------------------- the lockup
 
 /**
- * The PO Motivation mark: a lemniscate ribbon built from two rotated elliptical
+ * The house mark: a lemniscate ribbon built from two rotated elliptical
  * rings, each an even-odd path filled with an axial gradient — green/yellow to
  * deep red on the left lobe, brand blue to red on the right.
  *

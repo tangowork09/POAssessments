@@ -38,7 +38,7 @@ export async function setSetting(env: Env, key: string, value: string): Promise<
  * Resolves the stored settings into the Branding every surface renders.
  *
  * An empty `branding.logo_data_url` is not "no logo" — it is "no upload", and
- * falls back to the PO Motivation house mark that ships in the bundle. That is
+ * falls back to the house mark that ships in the bundle. That is
  * what makes clearing an uploaded logo restore the default rather than leaving
  * the product unbranded, and it means the header, report, PDF and emails all
  * carry a mark out of the box.

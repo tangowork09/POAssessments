@@ -30,7 +30,7 @@ export const EGO_LABELS_ARE_DRAFT = true;
 
 /** Shown wherever the state names appear, until the client confirms them. */
 export const EGO_DRAFT_NOTE =
-  'Ego state names and descriptions are a draft pending confirmation by PO Motivation. The scores themselves are final.';
+  'Ego state names and descriptions are a draft pending confirmation by PO Assessments. The scores themselves are final.';
 
 export interface EgoState {
   /** Stable identifier — also the scoring-config key stored in D1. */

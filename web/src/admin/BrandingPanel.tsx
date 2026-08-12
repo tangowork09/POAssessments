@@ -150,7 +150,7 @@ export function BrandingPanel() {
                   ) : (
                     <>
                       <b>No logo set</b>
-                      <span>Saving now restores the house PO Motivation mark.</span>
+                      <span>Saving now restores the house mark.</span>
                     </>
                   )}
                   <input
@@ -169,14 +169,14 @@ export function BrandingPanel() {
                         if (fileRef.current) fileRef.current.value = '';
                       }}
                     >
-                      Reset to the PO Motivation logo
+                      Reset to the house logo
                     </button>
                   ) : null}
                 </div>
                 <p className="inline-note mt-2">
                   PNG, JPEG, SVG or WebP up to 1 MB, stored in the database as a data URL. A wide lockup
                   works best — the house mark is 331 × 140. There is never no logo: clearing yours restores
-                  the PO Motivation one.
+                  the house one.
                 </p>
               </div>
             </div>

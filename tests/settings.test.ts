@@ -17,14 +17,14 @@ import { BRAND_ACCENT, BRAND_COMPANY_NAME, BRAND_LOGO_DATA_URL } from '../src/sh
 
 /** The settings rows a freshly migrated database actually holds. */
 const SEEDED = {
-  'branding.company_name': 'PO Motivation',
+  'branding.company_name': 'PO Assessments',
   'branding.accent_color': '#0B6FB4',
   'branding.logo_data_url': '',
   'branding.support_email': '',
 };
 
 describe('brandingFrom', () => {
-  it('resolves a freshly migrated database to the PO Motivation identity', () => {
+  it('resolves a freshly migrated database to the PO Assessments identity', () => {
     const b = brandingFrom({ ...DEFAULTS, ...SEEDED });
     expect(b.companyName).toBe(BRAND_COMPANY_NAME);
     expect(b.accentColor).toBe(BRAND_ACCENT);
