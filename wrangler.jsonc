@@ -91,7 +91,7 @@
         // Candidates do reply to these — a report they cannot read, a link that
         // will not open. Point it at an address a human actually reads.
         "MAIL_REPLY_TO": "",
-        "ADMIN_EMAIL": "admin@pomotivation.com",
+        "ADMIN_EMAIL": "admin@poassessments.com",
         "REPORT_CC_EMAIL": "niveditasaxena12@gmail.com"
       },
       "d1_databases": [
