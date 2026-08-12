@@ -19,6 +19,7 @@ export interface MailAttachment {
 
 export interface MailMessage {
   to: string;
+  cc?: string[];
   subject: string;
   html: string;
   text?: string;
@@ -40,10 +41,10 @@ export async function sendMail(env: Env, msg: MailMessage): Promise<MailResult> 
   const text = msg.text ?? stripHtml(msg.html);
 
   await env.DB.prepare(
-    `INSERT INTO mail_outbox (id, to_email, subject, html, text, kind, status, attempts)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'queued', 0)`,
+    `INSERT INTO mail_outbox (id, to_email, cc_email, subject, html, text, kind, status, attempts)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'queued', 0)`,
   )
-    .bind(id, msg.to, msg.subject, msg.html, text, msg.kind ?? 'generic')
+    .bind(id, msg.to, msg.cc?.join(', ') ?? null, msg.subject, msg.html, text, msg.kind ?? 'generic')
     .run();
 
   if (!env.RESEND_API_KEY || !env.MAIL_FROM) {
@@ -65,6 +66,7 @@ export async function sendMail(env: Env, msg: MailMessage): Promise<MailResult> 
       body: JSON.stringify({
         from: env.MAIL_FROM,
         to: [msg.to],
+        ...(msg.cc?.length ? { cc: msg.cc } : {}),
         subject: msg.subject,
         html: msg.html,
         text,

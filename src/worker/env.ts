@@ -14,6 +14,8 @@ export interface Env {
   MAIL_REPLY_TO: string;
   /** Secret. When unset, mail is logged to the console and stored in the outbox. */
   RESEND_API_KEY?: string;
+  /** Cc'd on every report email. A fixed operational address, not per-candidate. */
+  REPORT_CC_EMAIL?: string;
 
   /** Seeded into admin_users on first boot if the table is empty. */
   ADMIN_EMAIL: string;

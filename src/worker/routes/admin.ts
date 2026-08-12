@@ -524,6 +524,7 @@ async function resendOne(
 
   const mail = inviteEmail({
     branding: brandingFrom(settings),
+    logoUrl: `${origin}/api/logo`,
     firstName: row.first_name,
     assessmentName: row.assessment_name,
     link: `${origin}/t/${token}`,
@@ -648,15 +649,15 @@ adminRoutes.post('/links/generic/:assessmentId', async (c) => {
     .first<{ id: string }>();
 
   if (existing) {
-    await c.env.DB.prepare('UPDATE links SET token_hash = ?2, active = 1 WHERE id = ?1')
-      .bind(existing.id, hash)
+    await c.env.DB.prepare('UPDATE links SET token_hash = ?2, token_plain = ?3, active = 1 WHERE id = ?1')
+      .bind(existing.id, hash, token)
       .run();
   } else {
     await c.env.DB.prepare(
-      `INSERT INTO links (id, token_hash, kind, assessment_id, candidate_id, active)
-       VALUES (?1, ?2, 'generic', ?3, NULL, 1)`,
+      `INSERT INTO links (id, token_hash, token_plain, kind, assessment_id, candidate_id, active)
+       VALUES (?1, ?2, ?3, 'generic', ?4, NULL, 1)`,
     )
-      .bind(newId('link'), hash, assessmentId)
+      .bind(newId('link'), hash, token, assessmentId)
       .run();
   }
 
@@ -701,6 +702,7 @@ adminRoutes.post('/invites/single', async (c) => {
   const branding = brandingFrom(settings);
   const mail = inviteEmail({
     branding,
+    logoUrl: `${baseUrl(c.env, c.req.raw)}/api/logo`,
     firstName: d.firstName,
     assessmentName: assessment.name,
     link: url,

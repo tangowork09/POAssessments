@@ -63,11 +63,15 @@ async function seedGenericLinks(env: Env): Promise<void> {
 
   for (const assessment of results ?? []) {
     const token = generateToken();
+    // token_plain is what lets the short-slug redirect (/influencing, etc.)
+    // resolve to whichever generic token is current, including after a
+    // rotation — a generic link has no per-candidate secrecy to protect, so
+    // retaining it here is not the exception personal links make hashing for.
     await env.DB.prepare(
-      `INSERT INTO links (id, token_hash, kind, assessment_id, candidate_id, active)
-       VALUES (?1, ?2, 'generic', ?3, NULL, 1)`,
+      `INSERT INTO links (id, token_hash, token_plain, kind, assessment_id, candidate_id, active)
+       VALUES (?1, ?2, ?3, 'generic', ?4, NULL, 1)`,
     )
-      .bind(newId('link'), await hashToken(token, env.LINK_TOKEN_SECRET), assessment.id)
+      .bind(newId('link'), await hashToken(token, env.LINK_TOKEN_SECRET), token, assessment.id)
       .run();
     console.log(`[bootstrap] generic link for "${assessment.name}": /t/${token}`);
   }

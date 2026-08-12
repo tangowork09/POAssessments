@@ -11,6 +11,8 @@ import type { Branding } from '../../shared/types.js';
 
 interface Shell {
   branding: Branding;
+  /** Absolute https URL, not the branding data URI — see logoBlock. */
+  logoUrl: string;
   preheader: string;
   heading: string;
   body: string;
@@ -21,11 +23,18 @@ interface Shell {
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-function logoBlock(b: Branding): string {
+/**
+ * A real fetchable URL rather than `branding.logoDataUrl` embedded inline:
+ * Gmail (and other clients) silently refuse to render `data:` image sources
+ * in HTML mail, so the header would show a broken-image glyph with only the
+ * alt text visible — correct in a browser, broken in an inbox. The web app
+ * and the PDF are unaffected and keep using the data URI/vector directly.
+ */
+function logoBlock(b: Branding, logoUrl: string): string {
   if (b.logoDataUrl) {
     // A wordmark logo is wider than it is tall; 150px keeps the house lockup
     // legible in a 600px shell without dominating the header.
-    return `<img src="${esc(b.logoDataUrl)}" alt="${esc(b.companyName)}" width="150" style="display:block;max-width:150px;height:auto;border:0;" />`;
+    return `<img src="${esc(logoUrl)}" alt="${esc(b.companyName)}" width="150" style="display:block;max-width:150px;height:auto;border:0;" />`;
   }
   const initial = esc((b.companyName || 'A').trim().charAt(0).toUpperCase());
   return (
@@ -36,7 +45,7 @@ function logoBlock(b: Branding): string {
   );
 }
 
-function shell({ branding, preheader, heading, body, cta, footNote }: Shell): string {
+function shell({ branding, logoUrl, preheader, heading, body, cta, footNote }: Shell): string {
   const accent = esc(branding.accentColor);
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -46,7 +55,7 @@ function shell({ branding, preheader, heading, body, cta, footNote }: Shell): st
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F5F7FA;">
   <tr><td align="center" style="padding:32px 16px;">
     <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#FFFFFF;border:1px solid #E4E8EE;border-radius:10px;">
-      <tr><td style="padding:24px 32px;border-bottom:1px solid #E4E8EE;">${logoBlock(branding)}</td></tr>
+      <tr><td style="padding:24px 32px;border-bottom:1px solid #E4E8EE;">${logoBlock(branding, logoUrl)}</td></tr>
       <tr><td style="padding:32px;">
         <h1 style="margin:0 0 16px;font:680 22px/1.25 -apple-system,'Segoe UI',Roboto,Arial,sans-serif;letter-spacing:-0.5px;color:#0C1421;">${esc(heading)}</h1>
         <div style="font:400 15px/1.6 -apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#3D4859;">${body}</div>
@@ -80,6 +89,7 @@ function shell({ branding, preheader, heading, body, cta, footNote }: Shell): st
 
 export function inviteEmail(input: {
   branding: Branding;
+  logoUrl: string;
   firstName: string;
   assessmentName: string;
   link: string;
@@ -88,6 +98,7 @@ export function inviteEmail(input: {
   const greeting = input.firstName ? `Hello ${esc(input.firstName)},` : 'Hello,';
   const html = shell({
     branding: input.branding,
+    logoUrl: input.logoUrl,
     preheader: `Your ${input.assessmentName} is ready — about 10 minutes.`,
     heading: `Your ${input.assessmentName}`,
     body:
@@ -118,6 +129,7 @@ export function inviteEmail(input: {
 
 export function reportEmail(input: {
   branding: Branding;
+  logoUrl: string;
   firstName: string;
   assessmentName: string;
   reportUrl: string;
@@ -126,6 +138,7 @@ export function reportEmail(input: {
   const greeting = input.firstName ? `Hello ${esc(input.firstName)},` : 'Hello,';
   const html = shell({
     branding: input.branding,
+    logoUrl: input.logoUrl,
     preheader: `Your ${input.assessmentName} report is ready.`,
     heading: 'Your report is ready',
     body:

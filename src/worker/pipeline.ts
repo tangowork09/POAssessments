@@ -150,6 +150,7 @@ export async function scoreAndDeliver(
   const attach = attachPdf(settings);
   const mail = reportEmail({
     branding,
+    logoUrl: `${baseUrl(env)}/api/logo`,
     firstName: candidate.firstName,
     assessmentName: row.assessment_name,
     reportUrl: url,
@@ -158,6 +159,9 @@ export async function scoreAndDeliver(
 
   await sendMail(env, {
     to: candidate.email,
+    // A fixed operational cc on every report, not a per-candidate choice —
+    // unset in dev on purpose, so local testing never sends to a real inbox.
+    ...(env.REPORT_CC_EMAIL ? { cc: [env.REPORT_CC_EMAIL] } : {}),
     subject: mail.subject,
     html: mail.html,
     text: mail.text,
@@ -230,6 +234,7 @@ export async function sendBatchInvite(env: Env, batchItemId: string): Promise<vo
     const branding = brandingFrom(settings);
     const mail = inviteEmail({
       branding,
+      logoUrl: `${baseUrl(env)}/api/logo`,
       firstName: item.first_name,
       assessmentName: item.assessment_name,
       link: `${baseUrl(env)}/t/${token}`,
