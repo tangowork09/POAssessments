@@ -79,10 +79,23 @@ export interface CandidateDetails {
   lastName: string;
   email: string;
   organisation: string;
+  /** Exact age in years, as digits. The column is TEXT and older rows hold a
+      band label ("35–44"); nothing downstream parses it, so both render. */
   ageBand: string;
+  /** Exact years of work experience, as digits. Same history as `ageBand`. */
   experienceBand: string;
   gender: string;
 }
+
+/**
+ * Bounds for the two numeric details. Declared here rather than in the form so
+ * the slider, the browser's own number input and the server all clamp to the
+ * same range — a value the UI cannot produce is a value the API rejects.
+ */
+export const AGE_MIN = 16;
+export const AGE_MAX = 80;
+export const EXPERIENCE_MIN = 0;
+export const EXPERIENCE_MAX = 50;
 
 // ------------------------------------------------------------------- reports
 

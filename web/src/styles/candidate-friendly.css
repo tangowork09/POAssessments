@@ -561,15 +561,25 @@ body.fb-body {
   background-size: 100% 20px, 100% 10px;
   background-attachment: local, scroll;
 }
+/* The card holds seven fields and must not scroll on a laptop, so the space
+   between things is costed: every value below was measured against the height
+   the grid actually needs, not chosen for looks alone. */
+.fb .formcard .card-body {
+  padding-block: 20px 22px;
+}
 .fb .formcard .display {
   font-size: clamp(22px, 4.4vw, 30px);
-  margin: 14px 0 8px;
+  margin: 10px 0 6px;
+}
+.fb .formcard .lede {
+  font-size: 15.5px;
+  line-height: 1.45;
 }
 .fb .form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: clamp(10px, 1.8vh, 16px);
-  margin-top: clamp(14px, 2.4vh, 22px);
+  gap: clamp(9px, 1.5vh, 14px);
+  margin-top: clamp(10px, 1.6vh, 16px);
 }
 /* One column on a phone held upright, where there is height to spend. A short
    screen keeps the two-column grid instead: narrower fields beat a scroll. */
@@ -581,7 +591,7 @@ body.fb-body {
 .fb .field {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
 }
 .fb .field label {
@@ -598,8 +608,11 @@ body.fb-body {
 .fb .control {
   width: 100%;
   height: auto;
-  min-height: 52px;
-  padding: 13px 15px;
+  /* 50, not 52: four of these stack in the details grid, and 8px of reclaimed
+     height is most of what keeps that card off a scrollbar. Still clear of the
+     48px tap floor. */
+  min-height: 50px;
+  padding: 12px 15px;
   background: var(--white);
   border: 2px solid var(--line-strong);
   border-radius: 15px;
@@ -635,6 +648,115 @@ body.fb-body {
   font-weight: 700;
   color: var(--red);
   margin-top: 0;
+}
+/* A per-field line of reserved space for an error that is almost never there
+   costs a row of height across the grid, and height is what decides whether
+   this card scrolls. The message takes its space when it has something to say.
+   The shift that causes is the smaller harm: it happens on submit, next to the
+   field that caused it, on a card that is allowed to scroll once it is wrong. */
+.fb .field-err:empty {
+  display: none;
+}
+
+/* ------------------------------------------------ age / experience in years */
+/* Box and slider on one line: a typed answer and a dragged one, same value. */
+.fb .yearsfield {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.fb .control.years-num {
+  flex: 0 0 clamp(64px, 22%, 84px);
+  width: clamp(64px, 22%, 84px);
+  padding-inline: 10px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  /* The spinner arrows are redundant next to a slider and eat the width the
+     digits need at this size. */
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.fb .control.years-num::-webkit-outer-spin-button,
+.fb .control.years-num::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+.fb .years-max {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.fb .years-range {
+  flex: 1 1 auto;
+  min-width: 0;
+  appearance: none;
+  background: transparent;
+  height: 28px;
+  margin: 0;
+  cursor: pointer;
+}
+.fb .years-range::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--teal) 0 var(--fill, 0%),
+    var(--line-strong) var(--fill, 0%) 100%
+  );
+}
+.fb .years-range::-moz-range-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--line-strong);
+}
+.fb .years-range::-moz-range-progress {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--teal);
+}
+.fb .years-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  margin-top: -8px;
+  border-radius: 50%;
+  background: var(--white);
+  border: 3px solid var(--teal);
+  box-shadow: 0 1px 3px rgba(21, 36, 46, 0.28);
+}
+.fb .years-range::-moz-range-thumb {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--white);
+  border: 3px solid var(--teal);
+  box-shadow: 0 1px 3px rgba(21, 36, 46, 0.28);
+}
+.fb .years-range:focus-visible {
+  outline: none;
+}
+.fb .years-range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px var(--teal-soft);
+}
+.fb .years-range:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 4px var(--teal-soft);
+}
+/* Nothing chosen yet: the thumb parks at the minimum, so it must not look like
+   the minimum was chosen. */
+.fb .yearsfield.is-unset .years-range::-webkit-slider-thumb {
+  border-color: var(--line-3);
+}
+.fb .yearsfield.is-unset .years-range::-moz-range-thumb {
+  border-color: var(--line-3);
+}
+.fb .yearsfield.is-unset .years-range::-webkit-slider-runnable-track {
+  background: var(--line-strong);
+}
+.fb .yearsfield.is-unset .years-range::-moz-range-progress {
+  background: transparent;
 }
 .fb .form-foot {
   flex: 0 0 auto;
@@ -803,7 +925,7 @@ body.fb-body {
   gap: 10px;
   font-size: 12.5px;
   font-weight: 800;
-  color: var(--ink-3);
+  color: var(--ink-2);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   margin-bottom: 10px;
@@ -836,10 +958,10 @@ body.fb-body {
   justify-content: center;
   gap: 2px;
   background: var(--white);
-  color: var(--ink-2);
-  border: 2px solid var(--line-strong);
+  color: var(--ink);
+  border: 2px solid var(--line-3);
   border-radius: var(--r-btn);
-  box-shadow: 0 var(--depth) 0 var(--line-strong);
+  box-shadow: 0 var(--depth) 0 var(--line-3);
   font-weight: 900;
   transition: transform 150ms ease-out, background-color 150ms ease-out,
     border-color 150ms ease-out, color 150ms ease-out, box-shadow 150ms ease-out,
@@ -848,12 +970,14 @@ body.fb-body {
 .fb .rate .v {
   font-size: clamp(18px, min(4vw, 3vh), 26px);
   line-height: 1;
+  color: var(--ink);
 }
 .fb .rate .k {
   font-size: 10.5px;
   font-weight: 800;
   letter-spacing: 0.04em;
-  color: var(--ink-3);
+  /* --ink-3 is 3.77:1 on white, under AA for text this size. --ink-2 is 7.30:1. */
+  color: var(--ink-2);
   text-transform: uppercase;
   text-align: center;
   line-height: 1.15;
@@ -871,19 +995,26 @@ body.fb-body {
   transform: translateY(var(--depth));
   box-shadow: 0 0 0 var(--line-strong);
 }
-.fb .rating.has-pick .rate {
-  opacity: 0.55;
+/* `:not(.is-on)` is load-bearing, not decoration. This selector is (0,3,0) and
+   `.rate.is-on` below is only (0,2,0), so without the exclusion the dim meant
+   for the unpicked squares wins on the picked one too and renders the accent at
+   55% over white — #0B6FB4 becomes #79b0d6, and the answer the candidate just
+   gave reads as the palest thing on screen. The dim is also gentler now: 0.55
+   pushed the anchor words under AA, and these words are the scale. */
+.fb .rating.has-pick .rate:not(.is-on) {
+  opacity: 0.9;
 }
 .fb .rate.is-on {
   opacity: 1;
   background: var(--teal);
-  border-color: var(--teal);
+  border-color: var(--teal-edge);
   color: var(--white);
-  box-shadow: 0 var(--depth) 0 var(--teal-edge);
+  box-shadow: 0 var(--depth) 0 var(--teal-edge), 0 0 0 3px var(--teal-soft);
   transform: translateY(var(--depth));
 }
+.fb .rate.is-on .v,
 .fb .rate.is-on .k {
-  color: rgba(255, 255, 255, 0.86);
+  color: var(--white);
 }
 .fb .rating.is-nudged {
   animation: fb-nudge 320ms ease-out;
@@ -1304,6 +1435,37 @@ body.fb-body {
     min-height: 52px;
     padding: 13px 24px;
     font-size: 16px;
+  }
+}
+
+/* The details card is the tallest thing in the flow — seven fields, and the
+   four-row grid is already as short as the grid can be made. Between 601px and
+   700px of viewport there is no longer room for the explanatory line as well,
+   so from here the copy goes and the fields stay: a candidate who cannot see
+   the Gender field is worse off than one who cannot read the reassurance. The
+   1024x768-class laptop lands in this band, so it is not an edge case.
+   Measured: the base card needs 534px of body; this band offers about 458px. */
+@media (max-height: 700px) {
+  .fb .formcard .lede {
+    display: none;
+  }
+  .fb .formcard .display {
+    margin: 6px 0 4px;
+  }
+  .fb .formcard .card-body {
+    padding-block: 16px 18px;
+  }
+  .fb .formcard .form-grid {
+    gap: 10px;
+    margin-top: 10px;
+  }
+  .fb .formcard .field {
+    gap: 5px;
+  }
+  .fb .formcard .control {
+    /* The tap-target floor. Nothing below this, whatever the height budget. */
+    min-height: 48px;
+    padding-block: 11px;
   }
 }
 

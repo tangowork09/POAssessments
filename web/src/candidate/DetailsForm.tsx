@@ -2,17 +2,14 @@
 
 import { useState } from 'react';
 import { ApiError } from '../lib/api.js';
-import type { CandidateDetails } from '../../../src/shared/types.js';
+import {
+  AGE_MAX,
+  AGE_MIN,
+  EXPERIENCE_MAX,
+  EXPERIENCE_MIN,
+  type CandidateDetails,
+} from '../../../src/shared/types.js';
 
-const AGE_BANDS = ['Under 25', '25–34', '35–44', '45–54', '55–64', '65 or over', 'Prefer not to say'];
-const EXPERIENCE_BANDS = [
-  'Less than 1 year',
-  '1–5 years',
-  '6–10 years',
-  '11–15 years',
-  '16–20 years',
-  'More than 20 years',
-];
 const GENDERS = ['Female', 'Male', 'Non-binary', 'Prefer to self-describe', 'Prefer not to say'];
 
 const EMPTY: CandidateDetails = {
@@ -64,6 +61,16 @@ export function DetailsForm({
     if (values.email.trim() && !/^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/.test(values.email.trim())) {
       next.email = 'Enter a valid email address';
     }
+    // The slider cannot leave the range, but the number input it is paired with
+    // can be typed into, so the bound is checked rather than assumed.
+    const inRange = (v: string, min: number, max: number): boolean =>
+      /^\d+$/.test(v) && Number(v) >= min && Number(v) <= max;
+    if (values.ageBand.trim() && !inRange(values.ageBand, AGE_MIN, AGE_MAX)) {
+      next.ageBand = `Enter an age between ${AGE_MIN} and ${AGE_MAX}`;
+    }
+    if (values.experienceBand.trim() && !inRange(values.experienceBand, EXPERIENCE_MIN, EXPERIENCE_MAX)) {
+      next.experienceBand = `Enter a number between ${EXPERIENCE_MIN} and ${EXPERIENCE_MAX}`;
+    }
     setErrors(next);
     return Object.keys(next).length === 0;
   }
@@ -93,7 +100,7 @@ export function DetailsForm({
         <div className="card-body">
           <span className="eyebrow">Step 1 of 2</span>
           <h2 className="display">A few details first</h2>
-          <p className="lede" style={{ fontSize: 16 }}>
+          <p className="lede">
             This is what appears on the front of your report and where we send it. Nothing is shared
             outside the organisation that invited you.
           </p>
@@ -123,7 +130,6 @@ export function DetailsForm({
               id="email"
               label={LABELS.email}
               error={errors.email}
-              full
               hint={lockedEmail ? 'Your report will be sent to this address.' : undefined}
             >
               <input
@@ -138,7 +144,7 @@ export function DetailsForm({
               />
             </Field>
 
-            <Field id="organisation" label={LABELS.organisation} error={errors.organisation} full>
+            <Field id="organisation" label={LABELS.organisation} error={errors.organisation}>
               <input
                 id="organisation"
                 className="control"
@@ -149,18 +155,22 @@ export function DetailsForm({
             </Field>
 
             <Field id="ageBand" label={LABELS.ageBand} error={errors.ageBand}>
-              <Select
+              <YearsInput
                 id="ageBand"
-                options={AGE_BANDS}
+                label={LABELS.ageBand}
+                min={AGE_MIN}
+                max={AGE_MAX}
                 value={values.ageBand}
                 onChange={(v) => set('ageBand', v)}
               />
             </Field>
 
             <Field id="experienceBand" label={LABELS.experienceBand} error={errors.experienceBand}>
-              <Select
+              <YearsInput
                 id="experienceBand"
-                options={EXPERIENCE_BANDS}
+                label={LABELS.experienceBand}
+                min={EXPERIENCE_MIN}
+                max={EXPERIENCE_MAX}
                 value={values.experienceBand}
                 onChange={(v) => set('experienceBand', v)}
               />
@@ -223,6 +233,78 @@ function Field({
       <p className="field-err" role="alert">
         {error}
       </p>
+    </div>
+  );
+}
+
+/**
+ * An exact number, offered two ways at once: a box to type into and a slider to
+ * drag. They are one value, so neither is authoritative — whichever the
+ * candidate touches writes the same state and the other follows.
+ *
+ * The two sit on one line rather than stacked because this field shares a row
+ * with its twin and the card must not scroll; a stacked slider would add a
+ * whole row of height to the form for a control the select it replaced did not
+ * need.
+ */
+function YearsInput({
+  id,
+  label,
+  min,
+  max,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  min: number;
+  max: number;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  // Empty is a real state — nothing has been chosen yet, and the form requires
+  // a choice. The slider has no way to express it, so it parks at `min` and is
+  // greyed until the value exists; it must not read as "16 is already picked".
+  const unset = value.trim() === '';
+  const numeric = unset ? min : Number(value);
+  const slider = Number.isFinite(numeric) ? Math.min(Math.max(numeric, min), max) : min;
+  const pct = max > min ? ((slider - min) / (max - min)) * 100 : 0;
+
+  return (
+    <div className={`yearsfield${unset ? ' is-unset' : ''}`}>
+      <input
+        id={id}
+        type="number"
+        className="control years-num"
+        inputMode="numeric"
+        min={min}
+        max={max}
+        step={1}
+        value={value}
+        placeholder="–"
+        onChange={(e) => onChange(e.target.value.replace(/[^\d]/g, '').slice(0, 3))}
+        onBlur={(e) => {
+          const raw = e.target.value.trim();
+          if (raw === '') return;
+          onChange(String(Math.min(Math.max(Number(raw), min), max)));
+        }}
+      />
+      <input
+        type="range"
+        className="years-range"
+        // The number box already carries the field's label; this is the same
+        // value by another handle, so it is named rather than labelled twice.
+        aria-label={`${label} slider`}
+        min={min}
+        max={max}
+        step={1}
+        value={slider}
+        style={{ ['--fill' as string]: `${pct}%` }}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <span className="years-max" aria-hidden="true">
+        {max}
+      </span>
     </div>
   );
 }

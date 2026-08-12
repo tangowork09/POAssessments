@@ -1,8 +1,25 @@
 /** Request schemas. Every public body is parsed through one of these. */
 
 import { z } from 'zod';
+import { AGE_MAX, AGE_MIN, EXPERIENCE_MAX, EXPERIENCE_MIN } from '../../shared/types.js';
 
 const trimmed = (max: number) => z.string().trim().max(max);
+
+/**
+ * Age and experience are collected as exact years now, not as a band picked
+ * from a list, so the server checks the number rather than accepting any short
+ * string. The value stays TEXT on the way to D1: the column already holds band
+ * labels from before the change and nothing downstream does arithmetic on it.
+ */
+const years = (min: number, max: number, label: string) =>
+  z
+    .string()
+    .trim()
+    // The length cap lives in the pattern rather than in a separate `.max()` so
+    // a legacy band label ("35-44") fails with "must be a number" instead of
+    // zod's own character-count wording.
+    .regex(/^\d{1,3}$/, `${label} must be a number`)
+    .refine((v) => Number(v) >= min && Number(v) <= max, `${label} must be between ${min} and ${max}`);
 
 export const emailSchema = z
   .string()
@@ -19,8 +36,8 @@ export const candidateDetailsSchema = z.object({
   lastName: trimmed(80).min(1, 'Last name is required'),
   email: emailSchema,
   organisation: trimmed(120).min(1, 'Organisation is required'),
-  ageBand: trimmed(40).min(1, 'Age range is required'),
-  experienceBand: trimmed(40).min(1, 'Experience is required'),
+  ageBand: years(AGE_MIN, AGE_MAX, 'Age'),
+  experienceBand: years(EXPERIENCE_MIN, EXPERIENCE_MAX, 'Experience'),
   gender: trimmed(40).min(1, 'This field is required'),
 });
 
