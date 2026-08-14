@@ -13,6 +13,7 @@ import { buildReport } from './lib/report.js';
 import { attachPdf, dailySendCap, getSettings, brandingFrom } from './lib/settings.js';
 import { generateToken, hashToken } from './lib/tokens.js';
 import { inviteEmail, reportEmail } from './email/templates.js';
+import { decodeImageDataUrl } from './pdf/image.js';
 import { renderReportPdf } from './pdf/report.js';
 import { toBase64 } from './pdf/writer.js';
 import { baseUrl } from './env.js';
@@ -129,7 +130,13 @@ export async function scoreAndDeliver(
     answers,
   });
 
-  const pdf = renderReportPdf(report);
+  // The PDF embeds whatever logo `brandingFrom` resolved — a tenant upload or
+  // the house default — so the mark on the report is the same one the
+  // candidate saw in the app and in their email. The vector lockup in
+  // report.ts is now only a fallback for a logo a PDF cannot carry (SVG,
+  // WebP, a corrupt upload), which decodes to null rather than failing.
+  const logo = await decodeImageDataUrl(branding.logoDataUrl);
+  const pdf = renderReportPdf(report, logo);
   // The stored scores are tagged with their instrument, so a report can be
   // rebuilt years later without asking the assessments table what shape it is.
   const storedScores = report.kind === 'ego' ? report.ego : report.scores;

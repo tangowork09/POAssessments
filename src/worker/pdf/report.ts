@@ -8,9 +8,17 @@
  *
  * Both instruments share the cover, the executive summary, the running header,
  * the footer and the chart vocabulary; only the chapters differ. Everything is
- * vector — including the house lockup, which is reconstructed from
- * primitives rather than embedded as a raster, so the file stays a few
- * kilobytes, is deterministic, and needs no zlib on workerd.
+ * vector except the logo, which the caller decodes (see `./image.ts`) and
+ * passes in.
+ *
+ * The logo used to be vector too — a lemniscate rebuilt from primitives — and
+ * that was the bug: it ignored `branding.logoDataUrl` entirely, so a tenant
+ * that had uploaded its own mark got the house one on the cover of every
+ * report it handed a client, and even an untouched installation disagreed
+ * with itself, because the drawn lemniscate and the shipped PNG are not the
+ * same artwork. The PDF now embeds the same bytes the app header and the
+ * emails render. `drawLogoLockup` survives only as the fallback for a logo a
+ * PDF cannot carry: SVG, WebP, or a corrupt upload.
  */
 
 import { BRAND_ACCENT, BRAND_COMPANY_NAME, BRAND_TAGLINE } from '../../shared/brand.js';
@@ -22,6 +30,7 @@ import type {
   IsiReportPayload,
   ReportPayload,
 } from '../../shared/types.js';
+import type { EmbeddedImage } from './image.js';
 import { A4, PdfDoc, measure, wrap, type StdFont } from './writer.js';
 
 // ------------------------------------------------------------------- tokens
@@ -69,12 +78,19 @@ interface Ctx {
   doc: PdfDoc;
   report: ReportPayload;
   accent: string;
+  /** A tenant's decoded logo, or null to draw the house lockup. */
+  logo: EmbeddedImage | null;
   y: number;
 }
 
 // ------------------------------------------------------------------ entry
 
-export function renderReportPdf(report: ReportPayload): Uint8Array {
+/**
+ * `logo` is the tenant's uploaded mark, already decoded by the caller because
+ * inflating a PNG is async and this layer is not. Pass null — the default —
+ * for an installation still on the house branding.
+ */
+export function renderReportPdf(report: ReportPayload, logo: EmbeddedImage | null = null): Uint8Array {
   const accent = normaliseHex(report.branding.accentColor) || BRAND_ACCENT;
   const doc = new PdfDoc(A4, {
     title: `${report.assessmentName} — ${fullName(report)}`,
@@ -82,7 +98,7 @@ export function renderReportPdf(report: ReportPayload): Uint8Array {
     subject: 'Confidential assessment report',
   });
 
-  const ctx: Ctx = { doc, report, accent, y: M.top };
+  const ctx: Ctx = { doc, report, accent, logo, y: M.top };
 
   drawCover(ctx);
   newPage(ctx);
@@ -115,7 +131,7 @@ function ensure(ctx: Ctx, needed: number): void {
 function drawRunningHeader(ctx: Ctx): void {
   const { doc, report } = ctx;
   const y = M.top - 12;
-  const markW = drawRibbon(doc, M.left, y, 22);
+  const markW = drawMark(ctx, M.left, y, 22);
   const company = report.branding.companyName || BRAND_COMPANY_NAME;
   doc.text(company, M.left + markW + 9, y + 3, {
     font: 'Helvetica-Bold',
@@ -165,7 +181,7 @@ function drawCover(ctx: Ctx): void {
   drawCoverGeometry(doc, accent);
 
   // Lockup, top-left.
-  drawLogoLockup(doc, M.left, 74, 54);
+  drawLockup(ctx, M.left, 74, 54);
 
   // Kicker rule bleeding off the left edge.
   const kickY = 268;
@@ -227,20 +243,26 @@ function drawCover(ctx: Ctx): void {
     doc.hr(M.left, y + rowH, CONTENT_W, T.line, 0.55);
   });
 
-  // Closing strap.
+  // Closing strap. The tagline belongs to the house brand, so it is set only
+  // while the report is still carrying the house name — printing "Potential,
+  // Possibilities" under a tenant's own company is the same leak as printing
+  // the house logo over theirs.
+  const company = report.branding.companyName || BRAND_COMPANY_NAME;
   const strapY = metaTop + rows.length * rowH + 34;
   doc.rect(M.left, strapY + 1, 22, 2, accent);
-  doc.text(
-    (report.branding.companyName || BRAND_COMPANY_NAME).toUpperCase(),
-    M.left + 32,
-    strapY - 3,
-    { font: 'Helvetica-Bold', size: 8, color: T.ink2, charSpacing: 1.2 },
-  );
-  doc.text(BRAND_TAGLINE.toUpperCase(), M.left + 32, strapY + 10, {
-    size: 7.4,
-    color: T.ink4,
+  doc.text(company.toUpperCase(), M.left + 32, strapY - 3, {
+    font: 'Helvetica-Bold',
+    size: 8,
+    color: T.ink2,
     charSpacing: 1.2,
   });
+  if (company === BRAND_COMPANY_NAME) {
+    doc.text(BRAND_TAGLINE.toUpperCase(), M.left + 32, strapY + 10, {
+      size: 7.4,
+      color: T.ink4,
+      charSpacing: 1.2,
+    });
+  }
 }
 
 /**
@@ -1333,6 +1355,54 @@ function pillRight(doc: PdfDoc, right: number, y: number, label: string, color: 
 }
 
 // ---------------------------------------------------------------- the lockup
+
+/**
+ * Widest a tenant's logo may run at each size, so a banner-shaped upload
+ * cannot collide with the type set beside it. Anything wider is scaled down
+ * about its top-left corner rather than cropped.
+ */
+const HEADER_LOGO_MAX_W = 132;
+const COVER_LOGO_MAX_W = CONTENT_W * 0.5;
+
+/**
+ * The mark used in the running header: the tenant's logo when there is one,
+ * the house ribbon otherwise. Returns the width consumed.
+ */
+function drawMark(ctx: Ctx, x: number, y: number, height: number): number {
+  if (ctx.logo) return drawRasterLogo(ctx.doc, ctx.logo, x, y, height, HEADER_LOGO_MAX_W);
+  return drawRibbon(ctx.doc, x, y, height);
+}
+
+/** The cover lockup: the tenant's logo when there is one, else the house one. */
+function drawLockup(ctx: Ctx, x: number, y: number, height: number): number {
+  if (ctx.logo) return drawRasterLogo(ctx.doc, ctx.logo, x, y, height, COVER_LOGO_MAX_W);
+  return drawLogoLockup(ctx.doc, x, y, height);
+}
+
+/**
+ * Places an uploaded logo at the given height, preserving its aspect ratio and
+ * shrinking both dimensions if that would make it wider than `maxWidth`. The
+ * box stays top-anchored so a squat logo does not drift away from the type it
+ * sits beside.
+ */
+function drawRasterLogo(
+  doc: PdfDoc,
+  logo: EmbeddedImage,
+  x: number,
+  y: number,
+  height: number,
+  maxWidth: number,
+): number {
+  const ratio = logo.width / logo.height;
+  let h = height;
+  let w = h * ratio;
+  if (w > maxWidth) {
+    w = maxWidth;
+    h = w / ratio;
+  }
+  doc.image(logo, x, y, w, h);
+  return w;
+}
 
 /**
  * The house mark: a lemniscate ribbon built from two rotated elliptical

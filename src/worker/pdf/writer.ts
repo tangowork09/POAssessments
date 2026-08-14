@@ -11,9 +11,14 @@
  * Helvetica text with real Adobe advance widths, word wrapping, filled
  * rectangles and straight lines. No fonts are embedded, so output is small
  * (~10 KB) and generation is a few milliseconds of pure CPU.
+ *
+ * The one raster it can carry is an image XObject, used for a tenant's
+ * uploaded logo. Decoding lives in `./image.ts`; this file only writes the
+ * object and the placement operator.
  */
 
 import { FIRST_CHAR, LAST_CHAR, WIDTHS, type StdFont } from './afm.js';
+import type { EmbeddedImage } from './image.js';
 
 export type { StdFont } from './afm.js';
 
@@ -382,6 +387,8 @@ export class PdfDoc {
   private current: Page;
   private readonly usedFonts = new Set<StdFont>();
   private readonly gradients: GradientDef[] = [];
+  /** Keyed by identity so the same logo drawn on every page is stored once. */
+  private readonly images = new Map<EmbeddedImage, string>();
 
   constructor(
     readonly size: PageSize = A4,
@@ -599,6 +606,31 @@ export class PdfDoc {
     this.path().rect(x, y, w, h).shade(ref);
   }
 
+  // ------------------------------------------------------------------ images
+
+  /**
+   * Draws a decoded raster into the box (x, y, w, h) given in the same
+   * top-down coordinates as everything else. The image is registered on first
+   * use and shared by every later placement, so drawing a logo on twenty pages
+   * costs one copy of the bytes.
+   */
+  image(img: EmbeddedImage, x: number, y: number, w: number, h: number): void {
+    if (w <= 0 || h <= 0) return;
+    let name = this.images.get(img);
+    if (!name) {
+      name = `Im${this.images.size + 1}`;
+      this.images.set(img, name);
+    }
+    const flippedY = this.current.size.height - y - h;
+    // The image space is a unit square, so the CTM is the placement box.
+    this.current.ops.push(
+      'q',
+      `${fmt(w)} 0 0 ${fmt(h)} ${fmt(x)} ${fmt(flippedY)} cm`,
+      `/${name} Do`,
+      'Q',
+    );
+  }
+
   build(): Uint8Array {
     const objects: string[] = [];
     const addObject = (body: string): number => {
@@ -654,6 +686,27 @@ export class PdfDoc {
       shadingRefs.push(`/${g.name} ${shadingNum} 0 R`);
     }
 
+    // Image XObjects. The soft mask is its own image object, so it has to be
+    // written before the one that points at it.
+    const xobjectRefs: string[] = [];
+    for (const [img, name] of this.images) {
+      let smaskNum: number | null = null;
+      if (img.smask) {
+        smaskNum = addObject(
+          `<< /Type /XObject /Subtype /Image /Width ${img.width} /Height ${img.height} ` +
+            `/ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode ` +
+            `/Length ${img.smask.length} >>\nstream\n${latin1String(img.smask)}\nendstream`,
+        );
+      }
+      const imgNum = addObject(
+        `<< /Type /XObject /Subtype /Image /Width ${img.width} /Height ${img.height} ` +
+          `/ColorSpace /${img.colorSpace} /BitsPerComponent ${img.bitsPerComponent} ` +
+          `/Filter /${img.filter}${smaskNum ? ` /SMask ${smaskNum} 0 R` : ''} ` +
+          `/Length ${img.data.length} >>\nstream\n${latin1String(img.data)}\nendstream`,
+      );
+      xobjectRefs.push(`/${name} ${imgNum} 0 R`);
+    }
+
     const resources =
       '<< /Font << ' +
       (Object.entries(fontObjects) as [StdFont, number][])
@@ -661,6 +714,7 @@ export class PdfDoc {
         .join(' ') +
       ' >>' +
       (shadingRefs.length ? ` /Shading << ${shadingRefs.join(' ')} >>` : '') +
+      (xobjectRefs.length ? ` /XObject << ${xobjectRefs.join(' ')} >>` : '') +
       ' >>';
 
     const pageNumbers: number[] = [];
@@ -715,6 +769,16 @@ export class PdfDoc {
 /** The document is written entirely in Latin-1, one char == one byte. */
 function byteLength(s: string): number {
   return s.length;
+}
+
+/** The inverse of {@link latin1Bytes}: raw bytes as a one-char-per-byte string. */
+function latin1String(bytes: Uint8Array): string {
+  let out = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    out += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return out;
 }
 
 function latin1Bytes(s: string): Uint8Array {

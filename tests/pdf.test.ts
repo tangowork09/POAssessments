@@ -532,7 +532,9 @@ describe('renderReportPdf — Ego States Scale', () => {
     expect(Buffer.from(renderReportPdf(report)).equals(Buffer.from(renderReportPdf(report)))).toBe(true);
   });
 
-  it('stays small — the lockup is vector, not an embedded raster', () => {
+  // The fallback path: production always passes a decoded logo, but a format a
+  // PDF cannot carry decodes to null and must still produce a usable document.
+  it('falls back to the vector lockup, and stays small, when no logo decodes', () => {
     const bytes = renderReportPdf(report);
     expect(bytes.length).toBeLessThan(120_000);
     expect(latin1(bytes)).not.toContain('/XObject');

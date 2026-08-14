@@ -54,8 +54,8 @@ app.get('/api/health', (c) => c.json({ ok: true, env: c.env.APP_ENV }));
  * candidate's inbox, which is exactly the shape of bug that is easy to ship
  * unnoticed. Every email links here instead of embedding the bytes; the
  * candidate header and the PDF are unaffected — the header is a normal
- * browser `<img>` (data URIs work there) and the PDF draws its own vector
- * mark rather than embedding a raster at all.
+ * browser `<img>` (data URIs work there) and the PDF embeds the decoded bytes
+ * directly as an image XObject.
  */
 app.get('/api/logo', async (c) => {
   const branding = await getBranding(c.env);
