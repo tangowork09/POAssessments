@@ -89,8 +89,9 @@
         // as spoofed. Resend accepts the display-name form.
         "MAIL_FROM": "PO Assessments <no-reply@poassessments.com>",
         // Candidates do reply to these — a report they cannot read, a link that
-        // will not open. Point it at an address a human actually reads.
-        "MAIL_REPLY_TO": "",
+        // will not open. Routed by Cloudflare Email Routing to a real mailbox;
+        // the no-reply sender is a machine address and nothing reads it.
+        "MAIL_REPLY_TO": "support@poassessments.com",
         "ADMIN_EMAIL": "admin@poassessments.com",
         "REPORT_CC_EMAIL": "niveditasaxena12@gmail.com"
       },
