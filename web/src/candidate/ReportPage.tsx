@@ -103,9 +103,6 @@ export function ReportPage({ source }: { source: 'report' | 'link' }) {
         <a className="btn btn-primary btn-sm" href={`${base}/pdf`} target="_blank" rel="noreferrer">
           Download PDF
         </a>
-        <button className="btn btn-secondary btn-sm" onClick={() => window.print()}>
-          Print
-        </button>
       </div>
 
       <article className="sheet">
