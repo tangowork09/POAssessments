@@ -1,0 +1,17 @@
+/*
+ * The browser app, typechecked.
+ *
+ * `vite build` transpiles and never typechecks, and the root tsconfig sweeps in
+ * the worker and the tests under DOM lib, so nothing in CI ever read the React
+ * code's types. A prop declared in a component's props type but left out of its
+ * destructuring pattern therefore shipped: `onMailSent` resolved to no binding
+ * at all, threw a ReferenceError after a successful send, and reported a
+ * delivered invitation as "Could not create the invitation".
+ *
+ * This config covers exactly the browser sources and is wired into `npm run
+ * build`.
+ */
+{
+  "extends": "./tsconfig.json",
+  "include": ["web/src", "src/shared"]
+}

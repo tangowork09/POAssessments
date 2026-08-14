@@ -6,8 +6,9 @@
   "scripts": {
     "dev:web": "vite",
     "build:web": "vite build",
+    "build:app": "tsc -p tsconfig.web.json --noEmit",
     "build:worker": "tsc -p tsconfig.worker.json --noEmit",
-    "build": "npm run build:web && npm run build:worker",
+    "build": "npm run build:app && npm run build:worker && npm run build:web",
     "dev": "npm run build:web && wrangler dev",
     "test": "vitest run",
     "test:watch": "vitest",
