@@ -168,14 +168,6 @@ function IconLink() {
     </svg>
   );
 }
-function IconBrush() {
-  return (
-    <svg width="15" height="15" {...svg}>
-      <path d="M11 2.5l2.5 2.5-6 6-2.5-2.5z" />
-      <path d="M5 8.5c-1.5.6-2 2-2 5 3 0 4.4-.5 5-2" />
-    </svg>
-  );
-}
 function IconExit() {
   return (
     <svg width="15" height="15" {...svg}>

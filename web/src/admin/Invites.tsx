@@ -120,6 +120,7 @@ function SingleInvite({
   assessmentId,
   onAssessment,
   onToast,
+  onMailSent,
 }: {
   assessments: Assessment[];
   assessmentId: string;
