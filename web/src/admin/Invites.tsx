@@ -140,11 +140,19 @@ function SingleInvite({
     setBusy(true);
     setError(null);
     try {
-      const res = await api.post<{ url: string; sent: boolean; status?: string }>(
+      const res = await api.post<{ url: string; sent: boolean; status?: string; error?: string | null }>(
         '/api/admin/invites/single',
         { assessmentId, firstName, lastName, email, organisation, send },
       );
       if (send) {
+        // A refused send comes back 200 with `status: 'failed'` — the link was
+        // still created, so the request did not fail. Reporting it as sent is
+        // how an administrator ends up waiting on an email that never left.
+        if (res.status === 'failed') {
+          setError(`The invitation link was created, but the email was not sent: ${res.error ?? 'unknown error'}`);
+          onMailSent();
+          return;
+        }
         onToast(
           res.status === 'logged'
             ? 'No mail provider configured — the invitation is in the outbox'

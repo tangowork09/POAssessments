@@ -14,6 +14,7 @@ import type { AdminHono } from '../lib/auth.js';
 import { newId } from '../lib/ids.js';
 import { sendMail } from '../lib/mailer.js';
 import { clientKey, rateLimit } from '../lib/ratelimit.js';
+import { renderReportForResponse } from '../lib/report-render.js';
 import {
   attachPdf,
   brandingFrom,
@@ -327,7 +328,7 @@ adminRoutes.get('/assessments', async (c) => {
 adminRoutes.post('/candidates/:responseId/send-report', async (c) => {
   const responseId = c.req.param('responseId');
   const row = await c.env.DB.prepare(
-    `SELECT rep.id AS report_id, rep.sent_at, rep.pdf,
+    `SELECT rep.id AS report_id, rep.sent_at,
             a.name AS assessment_name,
             c.email, c.first_name
        FROM reports rep
@@ -340,13 +341,17 @@ adminRoutes.post('/candidates/:responseId/send-report', async (c) => {
     .first<{
       report_id: string;
       sent_at: string | null;
-      pdf: number[] | ArrayBuffer | null;
       assessment_name: string;
       email: string;
       first_name: string;
     }>();
 
   if (!row) return c.json({ error: 'No report exists for this candidate yet.' }, 404);
+
+  // Rendered now, not read from the copy stored at completion: a hand-sent
+  // report must carry the same artwork as the one the candidate downloads.
+  const pdf = await renderReportForResponse(c.env, responseId);
+  if (!pdf) return c.json({ error: 'No report exists for this candidate yet.' }, 404);
 
   const settings = await getSettings(c.env);
   const cap = dailySendCap(settings);
@@ -365,7 +370,7 @@ adminRoutes.post('/candidates/:responseId/send-report', async (c) => {
     assessmentName: row.assessment_name,
     firstName: row.first_name,
     email: row.email,
-    pdf: row.pdf ? new Uint8Array(row.pdf as ArrayBuffer) : new Uint8Array(),
+    pdf,
     settings,
     branding: brandingFrom(settings),
   });
