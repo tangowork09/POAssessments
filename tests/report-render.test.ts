@@ -153,3 +153,39 @@ describe('renderStoredReportPdf', () => {
     expect(Buffer.from(a).equals(Buffer.from(b))).toBe(true);
   });
 });
+
+/**
+ * The document information dictionary is not a content stream.
+ *
+ * `escapeText` folds to WinAnsi, which is right for a page — the fonts declare
+ * that encoding — and wrong for /Title, which a reader decodes as
+ * PDFDocEncoding. The em dash in "<instrument> — <candidate>" is 0x97 in one
+ * and Scaron in the other, so the title bar read "Inventory Š Priya Sharma".
+ */
+describe('document title', () => {
+  it('survives the em dash the title is built with', async () => {
+    const s = latin1(await renderStoredReportPdf(row, house));
+    // UTF-16BE, BOM-marked: 'I' is 0049, the em dash 2014.
+    expect(s).toContain('/Title <FEFF');
+    expect(s).toMatch(/\/Title <FEFF[0-9A-F]*2014[0-9A-F]*>/);
+    expect(s).not.toContain('/Title (Influencing');
+  });
+
+  it('carries a non-Latin-1 candidate name intact', async () => {
+    const s = latin1(await renderStoredReportPdf({ ...row, first_name: 'Zoë' }, house));
+    // 'ë' is U+00EB — mangled to a bare byte under the old path.
+    expect(s).toMatch(/\/Title <FEFF[0-9A-F]*00EB[0-9A-F]*>/);
+  });
+
+  it('leaves a plain ASCII title as a readable literal', async () => {
+    const s = latin1(
+      await renderStoredReportPdf(
+        { ...row, assessment_name: 'ISI', first_name: 'Priya', last_name: 'Sharma' },
+        house,
+      ),
+    );
+    // The name is still joined with an em dash, so this one stays hex; the
+    // author field is the company name and is plain ASCII.
+    expect(s).toContain('/Author (PO Assessments)');
+  });
+});

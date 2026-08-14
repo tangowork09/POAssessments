@@ -153,6 +153,29 @@ function escapeText(text: string): string {
   return out;
 }
 
+/**
+ * A string for the document information dictionary, not for a content stream.
+ *
+ * `escapeText` folds to WinAnsi because that is the encoding the page fonts
+ * declare — but a literal string outside a content stream is read as
+ * PDFDocEncoding, whose upper half disagrees. An em dash is 0x97 in WinAnsi and
+ * Scaron in PDFDocEncoding, so "Inventory — Priya Sharma" reached the title bar
+ * as "Inventory Š Priya Sharma", and any candidate whose name carries an accent
+ * was mangled the same way.
+ *
+ * Anything outside printable ASCII therefore goes out as a UTF-16BE hex string
+ * with the byte-order mark that marks it as Unicode; plain ASCII stays a
+ * literal so the file remains readable.
+ */
+function textString(text: string): string {
+  if (/^[\x20-\x7e]*$/.test(text)) return `(${escapeText(text)})`;
+  let hex = 'FEFF';
+  for (let i = 0; i < text.length; i++) {
+    hex += text.charCodeAt(i).toString(16).toUpperCase().padStart(4, '0');
+  }
+  return `<${hex}>`;
+}
+
 const fmt = (n: number): string => {
   const r = Math.round(n * 100) / 100;
   return Object.is(r, -0) ? '0' : String(r);
@@ -736,9 +759,9 @@ export class PdfDoc {
 
     const infoNum = addObject(
       '<< ' +
-        (this.meta.title ? `/Title (${escapeText(this.meta.title)}) ` : '') +
-        (this.meta.author ? `/Author (${escapeText(this.meta.author)}) ` : '') +
-        (this.meta.subject ? `/Subject (${escapeText(this.meta.subject)}) ` : '') +
+        (this.meta.title ? `/Title ${textString(this.meta.title)} ` : '') +
+        (this.meta.author ? `/Author ${textString(this.meta.author)} ` : '') +
+        (this.meta.subject ? `/Subject ${textString(this.meta.subject)} ` : '') +
         '/Producer (Assessment Platform) >>',
     );
 
