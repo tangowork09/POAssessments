@@ -11,7 +11,7 @@
     "dev": "npm run build:web && wrangler dev",
     "test": "vitest run",
     "test:watch": "vitest",
-    "deploy": "npm run build && wrangler deploy",
+    "deploy": "npm run build && wrangler deploy --env production",
     "db:migrate:local": "wrangler d1 migrations apply assessment_platform --local",
     "db:migrate:remote": "wrangler d1 migrations apply assessment_platform --remote"
   },

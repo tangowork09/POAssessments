@@ -15,37 +15,14 @@ import type { Env } from '../env.js';
 import { clientKey, rateLimit } from '../lib/ratelimit.js';
 import { getBranding } from '../lib/settings.js';
 import { hashToken, looksLikeToken } from '../lib/tokens.js';
-import { reportFromScores, type StoredScores } from '../lib/report.js';
-import type { ReportPayload } from '../../shared/types.js';
+import {
+  REPORT_SELECT as SELECT_REPORT,
+  renderStoredReportPdf,
+  toPayload,
+  type ReportRow,
+} from '../lib/report-render.js';
 
 export const reportRoutes = new Hono<{ Bindings: Env }>();
-
-interface ReportRow {
-  report_id: string;
-  scores_json: string;
-  pdf_bytes: number;
-  completed_at: string | null;
-  assessment_id: string;
-  assessment_name: string;
-  first_name: string;
-  last_name: string;
-  email: string;
-  organisation: string;
-  age_band: string;
-  experience_band: string;
-  gender: string;
-}
-
-const SELECT_REPORT = `
-  SELECT rp.id AS report_id, rp.scores_json, rp.pdf_bytes,
-         r.completed_at, a.id AS assessment_id, a.name AS assessment_name,
-         c.first_name, c.last_name, c.email, c.organisation,
-         c.age_band, c.experience_band, c.gender
-    FROM reports rp
-    JOIN responses r  ON r.id = rp.response_id
-    JOIN assessments a ON a.id = r.assessment_id
-    JOIN candidates c  ON c.id = r.candidate_id
-`;
 
 async function byReportToken(env: Env, token: string): Promise<ReportRow | null> {
   if (!looksLikeToken(token)) return null;
@@ -65,27 +42,6 @@ async function byLinkToken(env: Env, token: string): Promise<ReportRow | null> {
     )
     .bind(hash)
     .first<ReportRow>();
-}
-
-function toPayload(row: ReportRow, reportToken: string, branding: Awaited<ReturnType<typeof getBranding>>): ReportPayload {
-  const scores = JSON.parse(row.scores_json) as StoredScores;
-  return reportFromScores({
-    reportToken,
-    assessmentId: row.assessment_id,
-    assessmentName: row.assessment_name,
-    candidate: {
-      firstName: row.first_name,
-      lastName: row.last_name,
-      email: row.email,
-      organisation: row.organisation,
-      ageBand: row.age_band,
-      experienceBand: row.experience_band,
-      gender: row.gender,
-    },
-    completedAt: row.completed_at ?? '',
-    branding,
-    scores,
-  });
 }
 
 reportRoutes.get('/:token', async (c) => {
@@ -112,19 +68,20 @@ reportRoutes.get('/by-link/:token', async (c) => {
   return c.json(toPayload(row, '', await getBranding(c.env)));
 });
 
+/**
+ * Renders the PDF on request rather than serving the copy taken at completion.
+ *
+ * The stored copy is a snapshot of the branding, the logo and the layout as
+ * they stood the moment the candidate finished, and nothing ever refreshes it —
+ * so a logo upload or a fix to the report reached new candidates only, and
+ * every report already issued kept the old artwork for good. Rendering here
+ * costs a few tens of milliseconds per download and removes that whole class of
+ * staleness: there is one renderer, and every report goes through it.
+ */
 async function pdfResponse(c: Context<{ Bindings: Env }>, row: ReportRow | null): Promise<Response> {
   if (!row) return c.json({ error: 'Report not found.' }, 404);
-  // D1 returns a BLOB as a plain array of byte values, not an ArrayBuffer —
-  // handing that straight to Response() yields an empty body.
-  const rec = await c.env.DB.prepare('SELECT pdf FROM reports WHERE id = ?1')
-    .bind(row.report_id)
-    .first<{ pdf: number[] | ArrayBuffer | null }>();
-  if (!rec?.pdf) return c.json({ error: 'The PDF for this report is not available.' }, 404);
 
-  const bytes = Array.isArray(rec.pdf) ? new Uint8Array(rec.pdf) : new Uint8Array(rec.pdf);
-  if (bytes.byteLength === 0) {
-    return c.json({ error: 'The PDF for this report is not available.' }, 404);
-  }
+  const bytes = await renderStoredReportPdf(row, await getBranding(c.env));
 
   const name = `${row.first_name}-${row.last_name}-report`.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
   return new Response(bytes, {
