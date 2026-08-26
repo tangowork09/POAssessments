@@ -165,6 +165,10 @@ export function CohortNetworkCard({
   const [respondedOnly, setRespondedOnly] = useState(false);
   const [reciprocalOnly, setReciprocalOnly] = useState(false);
   const [showLabels, setShowLabels] = useState(true);
+  /** The floating card at the pointer. Off by default — it is a lot of ink. */
+  const [hoverCard, setHoverCard] = useState(false);
+  /** Hover-to-focus: pointing at a person dims everyone else. */
+  const [hoverFocus, setHoverFocus] = useState(true);
   const [sizeBy, setSizeBy] = useState<'in' | 'out'>('in');
   const [colorBy, setColorBy] = useState<'function' | 'role'>('function');
   /** For a selected person: which of their ties to draw. */
@@ -435,13 +439,16 @@ export function CohortNetworkCard({
     return { positions, maxSize: Math.max(0, ...layoutNodes.map((n) => n.inTies)) };
   }, [box, layoutDegree, net, view]);
 
+  const focusHover = hoverFocus ? hoveredNo : null;
+
   const { nodes, edges } = useMemo((): { nodes: Node<PersonData>[]; edges: Edge<RatingData>[] } => {
     if (!net) return { nodes: [], edges: [] };
     const { positions, maxSize } = layout;
 
-    // Focus is hover first, then click. Its neighbourhood stays lit; everyone
-    // else drops far back. With nothing focused the graph is a calm overview.
-    const focus = hoveredNo ?? selectedNo;
+    // Focus is hover first (when the switch allows it), then click. Its
+    // neighbourhood stays lit; everyone else drops far back. With nothing
+    // focused the graph is a calm overview.
+    const focus = focusHover ?? selectedNo;
     const ego = focus !== null ? neighboursOf.get(focus) ?? new Set<number>() : null;
     const shown = net.nodes.filter((n) => visibleNos.has(n.no));
 
@@ -538,7 +545,7 @@ export function CohortNetworkCard({
     colorBy,
     drawEdges,
     groupColor,
-    hoveredNo,
+    focusHover,
     layout,
     matches,
     meanOf,
@@ -784,6 +791,10 @@ export function CohortNetworkCard({
               setReciprocalOnly={setReciprocalOnly}
               showLabels={showLabels}
               setShowLabels={setShowLabels}
+              hoverCard={hoverCard}
+              setHoverCard={setHoverCard}
+              hoverFocus={hoverFocus}
+              setHoverFocus={setHoverFocus}
               sizeBy={sizeBy}
               setSizeBy={setSizeBy}
               colorBy={colorBy}
@@ -890,6 +901,8 @@ export function CohortNetworkCard({
               setSizeBy('in');
               setColorBy('function');
               setEgoDir('both');
+              setHoverCard(false);
+              setHoverFocus(true);
               setFiltersOpen(false);
               rfRef.current?.fitView({ padding: 0.05, duration: 400 });
             }}
@@ -961,7 +974,7 @@ export function CohortNetworkCard({
             </div>
           ) : null}
 
-          {hoveredNo !== null && tipPos
+          {hoverCard && hoveredNo !== null && tipPos
             ? (() => {
                 const n = net.nodes.find((x) => x.no === hoveredNo);
                 if (!n) return null;
@@ -1214,6 +1227,10 @@ function FilterDrawer(props: {
   setReciprocalOnly: (b: boolean) => void;
   showLabels: boolean;
   setShowLabels: (b: boolean) => void;
+  hoverCard: boolean;
+  setHoverCard: (b: boolean) => void;
+  hoverFocus: boolean;
+  setHoverFocus: (b: boolean) => void;
   sizeBy: 'in' | 'out';
   setSizeBy: (s: 'in' | 'out') => void;
   colorBy: 'function' | 'role';
@@ -1415,6 +1432,14 @@ function FilterDrawer(props: {
             <label className="nx-toggle">
               <input type="checkbox" checked={p.showLabels} onChange={(e) => p.setShowLabels(e.target.checked)} />
               Always show names
+            </label>
+            <label className="nx-toggle">
+              <input type="checkbox" checked={p.hoverFocus} onChange={(e) => p.setHoverFocus(e.target.checked)} />
+              Hover focuses a person
+            </label>
+            <label className="nx-toggle">
+              <input type="checkbox" checked={p.hoverCard} onChange={(e) => p.setHoverCard(e.target.checked)} />
+              Hover card with their numbers
             </label>
             <label className="nx-toggle">
               <input type="checkbox" checked={p.hideIsolates} onChange={(e) => p.setHideIsolates(e.target.checked)} />
