@@ -36,6 +36,7 @@ import {
   type NodeProps,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { toPng } from 'html-to-image';
 import { api, ApiError } from '../../lib/api.js';
 import type { CohortNetwork, CohortNetworkEdge } from '../../../../src/shared/types.js';
 import type { SocioBlockNetwork, SocioMemberResult } from '../../../../src/shared/socio-scoring.js';
@@ -150,6 +151,8 @@ export function CohortNetworkCard({
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
     hoverTimer.current = setTimeout(() => setHoveredNo(null), 180);
   }, []);
+  /** Where the hover card sits, in canvas coordinates. */
+  const [tipPos, setTipPos] = useState<{ x: number; y: number } | null>(null);
 
   // --- the full filter set ---
   const [query, setQuery] = useState('');
@@ -819,8 +822,19 @@ export function CohortNetworkCard({
               inst.fitView({ padding: 0.05 });
             }}
             onNodeClick={(_, node) => setSelectedNo((cur) => (cur === Number(node.id) ? null : Number(node.id)))}
-            onNodeMouseEnter={(_, node) => hoverEnter(Number(node.id))}
-            onNodeMouseLeave={hoverLeave}
+            onNodeMouseEnter={(e, node) => {
+              hoverEnter(Number(node.id));
+              const r = canvasEl?.getBoundingClientRect();
+              if (r) setTipPos({ x: e.clientX - r.left, y: e.clientY - r.top });
+            }}
+            onNodeMouseMove={(e) => {
+              const r = canvasEl?.getBoundingClientRect();
+              if (r) setTipPos({ x: e.clientX - r.left, y: e.clientY - r.top });
+            }}
+            onNodeMouseLeave={() => {
+              hoverLeave();
+              setTipPos(null);
+            }}
             onPaneClick={() => setSelectedNo(null)}
             fitView
             minZoom={0.15}
@@ -889,6 +903,38 @@ export function CohortNetworkCard({
           </button>
           <button
             className="nx-iconbtn"
+            title="Export this view as a PNG"
+            aria-label="Export as image"
+            onClick={() => {
+              if (!canvasEl) return;
+              void toPng(canvasEl, {
+                pixelRatio: 2,
+                backgroundColor: '#FAFBFD',
+                filter: (el) => {
+                  const c = (el as HTMLElement).classList;
+                  return !(
+                    c?.contains('nx-corner') ||
+                    c?.contains('react-flow__controls') ||
+                    c?.contains('nx-drawer') ||
+                    c?.contains('nx-tip') ||
+                    c?.contains('react-flow__attribution')
+                  );
+                },
+              }).then((url) => {
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `network-round${net.roundNo}.png`;
+                a.click();
+              });
+            }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 3v12M7 10l5 5 5-5" />
+              <path d="M4 21h16" />
+            </svg>
+          </button>
+          <button
+            className="nx-iconbtn"
             onClick={() => setIsFull((v) => !v)}
             title={isFull ? 'Exit full screen (Esc)' : 'Full screen'}
             aria-pressed={isFull}
@@ -914,6 +960,50 @@ export function CohortNetworkCard({
               </div>
             </div>
           ) : null}
+
+          {hoveredNo !== null && tipPos
+            ? (() => {
+                const n = net.nodes.find((x) => x.no === hoveredNo);
+                if (!n) return null;
+                const d = degreeMap.get(n.no);
+                const role = n.responded ? roleMap.get(n.no) ?? 'member' : 'member';
+                const flipX = tipPos.x > box.w - 240;
+                const flipY = tipPos.y > box.h - 150;
+                return (
+                  <div
+                    className="nx-tip"
+                    style={{
+                      left: flipX ? tipPos.x - 232 : tipPos.x + 16,
+                      top: flipY ? tipPos.y - 130 : tipPos.y + 14,
+                    }}
+                  >
+                    <div className="nx-tip-head">
+                      <span className="nx-tip-dot" style={{ background: groupColor.get(n.func.trim() || '—') ?? GROUP_OTHER }} />
+                      <b>{n.name}</b>
+                      {role !== 'member' ? (
+                        <span className={`emp-role is-${role}`}>{ROLE_STYLE[role].label.split(' (')[0]}</span>
+                      ) : null}
+                    </div>
+                    <div className="nx-tip-sub">
+                      {n.func || 'No department'}
+                      {n.responded ? '' : ' · not yet responded'}
+                    </div>
+                    <div className="nx-tip-stats">
+                      <span>
+                        <b style={{ color: POLARITY_STYLE.positive.color }}>{d?.posIn ?? 0}</b> positive in
+                      </span>
+                      <span>
+                        <b style={{ color: (d?.negIn ?? 0) > 0 ? POLARITY_STYLE.negative.color : undefined }}>{d?.negIn ?? 0}</b> negative in
+                      </span>
+                      <span>
+                        <b>{(d?.posOut ?? 0) + (d?.negOut ?? 0)}</b> given
+                      </span>
+                    </div>
+                    <div className="nx-tip-foot">Click for full profile</div>
+                  </div>
+                );
+              })()
+            : null}
 
           <InteractiveLegend
             allFuncs={allFuncs}

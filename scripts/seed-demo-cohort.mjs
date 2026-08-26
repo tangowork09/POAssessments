@@ -99,13 +99,28 @@ console.log(`imported cohort ${imported.name} (${imported.size} people) → ${co
 const detail = await call('GET', `/api/admin/cohorts/${cohortId}`);
 const members = detail.roster.filter((m) => m.active);
 
-// 4. uneven assignment map: person i rates the next K colleagues around the
-// ring, K cycling 3..12 — the client's "one rates ten, another rates three".
+// 4. an org-shaped assignment map, not a ring: mostly your own department,
+// a couple of org-wide hub leaders everyone rates, and a sprinkle of random
+// cross-department pairs. A ring lattice renders as a donut with an empty
+// middle — true to the data, wrong as a demo of a real organisation.
+const HUBS = [members[7], members[23], members[41]]; // three org-wide figures
 const assignments = members.map((m, i) => {
   const k = 3 + ((i * 7) % 10);
-  const targets = [];
-  for (let j = 1; j <= k; j++) targets.push(members[(i + j) % members.length].memberId);
-  return { raterMemberId: m.memberId, targetMemberIds: targets };
+  const dept = people[i].func;
+  const sameDept = members.filter((x, j) => j !== i && people[j].func === dept);
+  const targets = new Set();
+  for (const h of HUBS) if (h.memberId !== m.memberId) targets.add(h.memberId);
+  // One bounded pass over the department, then bounded random fill — a hub
+  // inside the rater's own department shrinks the union, so open-ended loops
+  // here can never be trusted to terminate.
+  for (let step = 1; step <= sameDept.length && targets.size < k; step++) {
+    targets.add(sameDept[(i + step) % sameDept.length].memberId);
+  }
+  for (let tries = 0; tries < 400 && targets.size < k; tries++) {
+    const r = members[Math.floor(rand() * members.length)];
+    if (r.memberId !== m.memberId) targets.add(r.memberId);
+  }
+  return { raterMemberId: m.memberId, targetMemberIds: [...targets] };
 });
 await call('PUT', `/api/admin/cohorts/${cohortId}/assignments`, { assignments });
 console.log(`assignment map set: ${assignments.reduce((n, a) => n + a.targetMemberIds.length, 0)} pairs`);
