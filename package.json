@@ -14,7 +14,7 @@
     "test:watch": "vitest",
     "deploy": "npm run build && wrangler deploy --env production",
     "db:migrate:local": "wrangler d1 migrations apply assessment_platform --local",
-    "db:migrate:remote": "wrangler d1 migrations apply assessment_platform --remote"
+    "db:migrate:remote": "wrangler d1 migrations apply assessment_platform --remote --env production"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260809.1",

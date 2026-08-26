@@ -4,12 +4,16 @@ A psychometric assessment platform on Cloudflare Workers. One deploy serves the
 candidate experience, the admin console and the API from a single `workers.dev`
 subdomain — no domain, no separate frontend host, no build server.
 
-Ships with two instruments, both live:
+Ships with three instruments, all live:
 
 - **Influencing Style Inventory** — 40 statements rated 0–4, ten styles, a
   Push/Pull split and a banded report.
 - **Ego States Scale** — 66 statements rated 0–6, six transactional-analysis ego
   states scored by column, and an ego-gram.
+- **Collaboration Sociometry** — a cohort exercise: a named group of colleagues
+  rate one another on a 1–5 collaboration matrix, and the console maps the
+  group's structure — warm and cool ties, stars, isolates — in real time,
+  round over round.
 
 House branding is **PO Motivation** (*Potential, Possibilities*), and a tenant
 can override the name, accent and logo from the console.
@@ -40,6 +44,7 @@ shells** with no shared layout, router or bundle:
 | `/` | Candidate — a neutral landing page |
 | `/t/:token` | Candidate — the assessment |
 | `/r/:token` | Candidate — a report |
+| `/:instrument/:cohort` | 302 → the cohort round's open `/t/…` link (e.g. `/sociometry/leadership-2026`) |
 | `/admin`, `/admin/*` | Admin console |
 
 The Worker is the only place that maps a URL to a document, so this cannot drift
@@ -91,6 +96,69 @@ by accident.
 
 The account seeded from `ADMIN_EMAIL` on first boot is the `superadmin` — it owns
 the deployment. Client administrators are created as plain `admin`.
+
+---
+
+## Collaboration Sociometry — cohort exercises
+
+The third instrument is not a solo questionnaire. A **cohort** — a named group
+inside one organisation, up to sixty people — rates one another on a 1–5
+collaboration matrix, and the console draws what the group has made of itself.
+
+### Setting a cohort up
+
+- **Excel-first.** The create card takes a roster workbook and maps names,
+  emails and functions automatically; the cohort's name and organisation are
+  read from label rows in the sheet, or the filename, or typed by hand.
+- **Assignments.** Sixty people cannot each rate fifty-nine. A mapping sheet
+  (or the roster's leader column) assigns each rater the handful of colleagues
+  they actually work with; the mapping is editable per rater in the console,
+  and a rater with no mapping rates everyone.
+- **Rounds.** The same cohort runs the exercise repeatedly, and every number in
+  the console reads per round or as a trend across rounds.
+- **Links.** One open link per cohort round (with a pretty alias such as
+  `/sociometry/leadership-2026`), plus idempotent per-member **magic links**
+  the console can issue and email in bulk. Tokens are shown once.
+
+### Who is asking, and who answers
+
+- **Identity is the enrolled work email.** There is no name picker: a
+  respondent types their email, and only if it is on the roster does the
+  exercise open — already filtered to the colleagues they were assigned.
+  Before identification the API sends no names at all, only the roster's size;
+  an unenrolled email gets a plain "contact the cohort admin".
+- **Optional OTP.** Per cohort, the admin can require a mailed six-digit code
+  before the exercise opens. Codes are stored only as keyed hashes, live ten
+  minutes, allow five attempts and die on first use.
+- **Per-leader all-or-nothing.** A respondent may skip a colleague entirely,
+  but a colleague they begin they must finish — partial rows are rejected at
+  review with the offending names listed, and the server enforces the same
+  floor.
+- **A completed response is closed.** Re-claiming an already-submitted link
+  returns a completion notice — never the answers, never a fresh token.
+- **Completion is a plain thank-you.** Nothing about reports is shown or
+  promised to the respondent unless the cohort's *share reports* toggle is on.
+
+### The map
+
+The cohort's Overview tab is a full-page interactive sociogram (React Flow laid
+out by d3-force). Edges carry polarity — warm, cool or neutral, derived from
+the ratings rather than declared (`web/src/admin/network/model.ts`) — and each
+node carries the role the group has given it: **star**, **rejected**,
+**isolate** or member. Four layouts (force, circle, layered,
+grouped-by-function); every filter stacks with every other (search, function,
+role, polarity, tie threshold, minimum in-degree, reciprocated-only,
+responded-only); an ego lens shows one person's world; fullscreen mode carries
+a floating, hideable panel; the whole canvas exports to PNG. The people table
+beneath opens a per-person dossier: tie composition, block means, the trend
+across rounds, and the actual name-pairs behind every number — who rated them
+and whom they rated, warmest first, each name clickable through to its own
+dossier.
+
+### Audit
+
+Every administrative write on the cohort routes is recorded — who, what, when —
+and readable in the console's Activity panel.
 
 ---
 
@@ -158,7 +226,8 @@ fixture.
 - **Resend** — optional; without it, mail is logged and stored in a D1 outbox
 - **jose + bcryptjs** — admin JWT in an httpOnly cookie
 - **zod** — every public request body
-- **exceljs** — Excel export
+- **exceljs** — Excel export, and roster/assignment import
+- **@xyflow/react + d3-force** — the sociometry graph explorer
 
 ### PDF generation
 
@@ -240,6 +309,13 @@ node scripts/gen-logo.mjs
 `npm run dev:web` starts Vite with HMR on port 5173, proxying `/api` to a
 `wrangler dev` on 8787.
 
+To explore the sociometry console with data, seed a demo cohort against the
+running dev server — sixty people, fifty-five of whom have responded:
+
+```bash
+node scripts/seed-demo-cohort.mjs
+```
+
 ### Smoke test
 
 ```bash
@@ -315,8 +391,12 @@ Copy the `database_id` it prints into `wrangler.jsonc`, replacing
 `REPLACE_WITH_D1_DATABASE_ID`, then:
 
 ```bash
-npx wrangler d1 migrations apply assessment_platform --remote
+npx wrangler d1 migrations apply assessment_platform --remote --env production
 ```
+
+Run this from the repo root. The production database id lives under
+`env.production` in `wrangler.jsonc` — without `--env production`, wrangler
+sees only the development placeholder and refuses.
 
 ### 3. Queues
 
@@ -331,11 +411,11 @@ Never commit these. `wrangler.jsonc` holds development placeholders only; a
 `secret` of the same name overrides the `var` in production.
 
 ```bash
-openssl rand -base64 32 | npx wrangler secret put LINK_TOKEN_SECRET
-openssl rand -base64 32 | npx wrangler secret put JWT_SECRET
-npx wrangler secret put ADMIN_EMAIL
-npx wrangler secret put ADMIN_PASSWORD      # used once, on first boot
-npx wrangler secret put RESEND_API_KEY      # optional — see below
+openssl rand -base64 32 | npx wrangler secret put LINK_TOKEN_SECRET --env production
+openssl rand -base64 32 | npx wrangler secret put JWT_SECRET --env production
+npx wrangler secret put ADMIN_EMAIL --env production
+npx wrangler secret put ADMIN_PASSWORD --env production   # used once, on first boot
+npx wrangler secret put RESEND_API_KEY --env production   # optional — see below
 ```
 
 > Rotating `LINK_TOKEN_SECRET` invalidates every existing link and report URL,
@@ -428,22 +508,26 @@ data/                Source question JSON (the extract this repo was seeded from
 public/              Brand assets (the PO Motivation logo)
 scripts/gen-afm.mjs  Regenerates the Helvetica metric tables
 scripts/gen-logo.mjs Regenerates the embedded logo data URI from the PNG
-src/shared/          Assessment registry, both scoring engines, brand, wire types
+scripts/seed-demo-cohort.mjs  Seeds a 60-person demo cohort against a local dev server
+src/shared/          Assessment registry, all three scoring engines, brand, wire types
 src/worker/
   index.ts           Entry: routing, shell selection, queue consumer
   bootstrap.ts       First-boot admin and generic-link seeding
   pipeline.ts        score → PDF → email, queued or inline
-  routes/            candidate, report, admin
+  routes/            candidate, report, admin, cohorts
   lib/               tokens, auth, mailer, settings, rate limiting, validation
-  pdf/               PDF writer, report layout, Adobe metrics
+  pdf/               PDF writer, report layouts (solo + sociometry), Adobe metrics
   email/             Branded HTML templates
 web/
   index.html         Candidate shell
   admin.html         Admin shell
-  src/candidate/     Welcome, details, statements, completion, report
-  src/admin/         Login, console shell, six panels
+  src/candidate/     Welcome, details, statements, completion, report,
+                     and the cohort identity + matrix flow
+  src/admin/         Login, console shell, the panels (incl. Cohorts and Activity)
+  src/admin/network/ The sociogram: graph explorer, sociometric model, layouts, dossier
   src/styles/        base.css (shared tokens) + candidate.css + admin.css
-tests/               Both scoring engines, the registry, tokens, CSV, PDF
+tests/               All scoring engines, the sociometry model, the registry,
+                     tokens, CSV, PDF
 ```
 
 ## Security
@@ -463,5 +547,12 @@ tests/               Both scoring engines, the registry, tokens, CSV, PDF
   and admin sign-in.
 - CSV exports prefix cells beginning `=`, `+`, `-` or `@` to defuse spreadsheet
   formula injection from candidate-supplied text.
+- The cohort roster is never disclosed before identification — the session API
+  returns only its size — and afterwards only the respondent's own assigned
+  targets.
+- Cohort OTP codes are stored as keyed hashes with a ten-minute life, five
+  attempts and single use; a submitted cohort response cannot be reopened or
+  read back by re-claiming its link.
+- Every administrative write on the cohort routes is audit-logged.
 - `X-Frame-Options: DENY`, `nosniff`, a strict referrer policy, and
   `noindex, nofollow` on every document.

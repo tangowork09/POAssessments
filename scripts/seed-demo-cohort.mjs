@@ -7,7 +7,7 @@
  *
  *   node scripts/seed-demo-cohort.mjs [base-url]
  *
- * Defaults to http://localhost:8788. Safe to run twice: each run creates a
+ * Defaults to http://localhost:8787. Safe to run twice: each run creates a
  * fresh cohort. Local development only — it signs in with the dev credentials
  * from wrangler.jsonc and simulates candidates, neither of which belongs
  * anywhere near production.
@@ -15,7 +15,7 @@
 
 import ExcelJS from 'exceljs';
 
-const BASE = process.argv[2] ?? 'http://localhost:8788';
+const BASE = process.argv[2] ?? 'http://localhost:8787';
 const ADMIN = { email: 'admin@example.com', password: 'ChangeMe!2026' };
 const RESPONDENTS = 55; // 55 of 60 respond; each uses a distinct client IP so
 // the per-IP rate limits on /start and /submit never trip (local dev only).
