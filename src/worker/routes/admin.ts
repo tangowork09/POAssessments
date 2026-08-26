@@ -810,6 +810,37 @@ adminRoutes.get('/links', async (c) => {
 });
 
 /**
+ * The current open link, read back for a copy shortcut. Reads the stored
+ * plaintext rather than minting — copying a link must never rotate the copies
+ * already distributed.
+ */
+adminRoutes.get('/links/generic/:assessmentId', async (c) => {
+  const assessmentId = c.req.param('assessmentId');
+  if (isCohortAssessment(assessmentId)) {
+    return c.json(
+      { error: 'This instrument is run per group — its links live on each cohort.' },
+      400,
+    );
+  }
+  const row = await c.env.DB.prepare(
+    `SELECT token_plain, active FROM links
+      WHERE kind = 'generic' AND assessment_id = ?1 AND cohort_id IS NULL`,
+  )
+    .bind(assessmentId)
+    .first<{ token_plain: string | null; active: number }>();
+  if (!row) {
+    return c.json({ error: 'No open link yet — issue one from the Assessment Link panel.' }, 404);
+  }
+  if (!row.token_plain || row.active !== 1) {
+    return c.json(
+      { error: 'This link cannot be shown again — re-issue it from the Assessment Link panel.' },
+      404,
+    );
+  }
+  return c.json({ url: `${baseUrl(c.env, c.req.raw)}/t/${row.token_plain}` });
+});
+
+/**
  * Issues (or reissues) the always-active generic link for one assessment. Every
  * assessment has exactly one, enforced by a partial unique index.
  */

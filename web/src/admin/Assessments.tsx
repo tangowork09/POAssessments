@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ApiError, api } from '../lib/api.js';
 import {
   CardHead,
+  copyToClipboard,
   DataTable,
   EmptyState,
   ErrorState,
@@ -20,6 +21,7 @@ import {
 import type { Column } from './ui.js';
 import { STYLES } from '../../../src/shared/styles.js';
 import { MAX_STYLE_SCORE } from '../../../src/shared/scoring.js';
+import { isCohortAssessment } from '../../../src/shared/assessments.js';
 
 interface Row {
   id: string;
@@ -56,6 +58,20 @@ export function Assessments() {
   }, []);
 
   useEffect(load, [load]);
+
+  /** The open link for this instrument, copied without rotating it. */
+  async function copyLink(row: Row): Promise<void> {
+    setBusy(`link:${row.id}`);
+    try {
+      const res = await api.get<{ url: string }>(`/api/admin/links/generic/${row.id}`);
+      const copied = await copyToClipboard(res.url);
+      showToast(copied ? 'Link copied to the clipboard' : res.url);
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : 'Could not fetch the link');
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function toggleAutoSend(row: Row): Promise<void> {
     const next = row.auto_send_report !== 1;
@@ -195,6 +211,23 @@ export function Assessments() {
                     ) : null}
                   </>
                 ),
+              },
+              {
+                key: 'copy',
+                header: '',
+                width: '90px',
+                className: 'row-actions',
+                cell: (a) =>
+                  isCohortAssessment(a.id) ? null : (
+                    <button
+                      className="link-btn"
+                      type="button"
+                      disabled={busy === `link:${a.id}`}
+                      onClick={() => void copyLink(a)}
+                    >
+                      Copy link
+                    </button>
+                  ),
               },
             ] as Column<Row>[])}
           />
