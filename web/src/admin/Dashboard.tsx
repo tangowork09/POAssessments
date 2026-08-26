@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
-import { CardHead, EmptyState, ErrorState, Head, Loading, StatusPill } from './ui.js';
+import {
+  DataTable, CardHead, EmptyState, ErrorState, Head, Loading, StatusPill } from './ui.js';
 import { MAX_STYLE_SCORE } from '../../../src/shared/scoring.js';
 
 interface DashboardData {
@@ -227,31 +228,42 @@ export function Dashboard() {
               action={{ label: 'Send your first invite', to: '/admin/invites' }}
             />
           ) : (
-            <div className="table-scroll">
-              <table className="table-recent">
-                <thead>
-                  <tr>
-                    <th>Candidate</th>
-                    <th>Organisation</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.recent.map((r) => (
-                    <tr key={r.id}>
-                      <td className="name">
-                        {`${r.first_name} ${r.last_name}`.trim() || r.email}
-                        <span className="cell-sub">{r.email}</span>
-                      </td>
-                      <td className="cell-truncate">{r.organisation || <span className="muted">—</span>}</td>
-                      <td>
-                        <StatusPill status={r.status} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              rows={data.recent}
+              rowKey={(r) => String(r.id)}
+              pageSize={10}
+              minWidth={520}
+              className="table-recent"
+              columns={[
+                {
+                  key: 'candidate',
+                  header: 'Candidate',
+                  className: 'name',
+                  filterHint: 'Name or email',
+                  value: (r) => `${r.first_name} ${r.last_name} ${r.email}`,
+                  cell: (r) => (
+                    <>
+                      {`${r.first_name} ${r.last_name}`.trim() || r.email}
+                      <span className="cell-sub">{r.email}</span>
+                    </>
+                  ),
+                },
+                {
+                  key: 'org',
+                  header: 'Organisation',
+                  className: 'cell-truncate',
+                  value: (r) => r.organisation ?? '',
+                  cell: (r) => r.organisation || <span className="muted">—</span>,
+                },
+                {
+                  key: 'status',
+                  header: 'Status',
+                  width: '130px',
+                  value: (r) => r.status,
+                  cell: (r) => <StatusPill status={r.status} />,
+                },
+              ]}
+            />
           )}
         </section>
 

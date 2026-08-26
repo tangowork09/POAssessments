@@ -1,6 +1,6 @@
 /** Small shared pieces for the console panels. */
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import type { AdminRole } from '../../../src/shared/types.js';
 
@@ -30,6 +30,303 @@ export function CardHead({ title, sub, aside }: { title: string; sub?: string; a
       </div>
       {aside ?? null}
     </div>
+  );
+}
+
+// ------------------------------------------------------------------- tables
+
+export interface Column<T> {
+  key: string;
+  header: string;
+  /** How the cell is drawn. */
+  cell: (row: T) => ReactNode;
+  /**
+   * The text this column is searched and sorted on. A column without one is
+   * inert — an actions column has nothing to search for.
+   */
+  value?: (row: T) => string | number | null | undefined;
+  align?: 'right';
+  width?: string;
+  className?: string;
+  /** Placeholder for the column's filter box. Defaults to the header. */
+  filterHint?: string;
+}
+
+const PAGE_SIZES = [10, 25, 50, 0] as const;
+
+function textOf(v: string | number | null | undefined): string {
+  return v === null || v === undefined ? '' : String(v);
+}
+
+/**
+ * One table, used by every panel.
+ *
+ * Three things every list in the console needed and none of them had: a filter
+ * per column, a sort, and a page. They belong together — a filter without a
+ * page still hands back four hundred rows, and a page without a filter makes
+ * you walk them.
+ *
+ * Filtering is per column rather than one box across the table. A console is
+ * read by someone who knows what they are looking for and which column it lives
+ * in: "the row whose email contains acme", not "acme somewhere". It is also the
+ * only kind of search that can be honest about a column it cannot search — an
+ * actions column simply has no box.
+ *
+ * Everything is client-side, which is right for the sizes here (a roster is
+ * fifty people, a cohort list is dozens) and wrong for a candidate table that
+ * grows into thousands. When that day comes the props do not change; the page
+ * and the filters move to the server behind them.
+ */
+export function DataTable<T>({
+  rows,
+  columns,
+  rowKey,
+  pageSize = 10,
+  minWidth,
+  empty,
+  footer,
+  toolbar,
+  className,
+  expand,
+  expandLabel,
+  onShown,
+}: {
+  rows: T[];
+  columns: Column<T>[];
+  rowKey: (row: T) => string;
+  pageSize?: number;
+  minWidth?: number;
+  /** Shown when there are no rows at all. A filtered-to-nothing table says so itself. */
+  empty?: ReactNode;
+  /** Rendered after the last row — the roster's "add a person" line lives here. */
+  footer?: ReactNode;
+  toolbar?: ReactNode;
+  className?: string;
+  /**
+   * Child rows. Returning null means this parent has none, and its toggle is
+   * absent rather than disabled — an arrow that does nothing is a lie about
+   * there being something underneath.
+   */
+  expand?: (row: T) => ReactNode | null;
+  /** How many children there are, said on the toggle. */
+  expandLabel?: (row: T) => string;
+  /**
+   * The rows actually on screen, for a caller that needs to act on them — the
+   * candidate table's "select all" means "all of these", not "all four hundred
+   * behind the filter".
+   */
+  onShown?: (rows: T[]) => void;
+}) {
+  const [filters, setFilters] = useState<Record<string, string>>({});
+  const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
+  const [size, setSize] = useState(pageSize);
+  const [page, setPage] = useState(0);
+  const [opened, setOpened] = useState<Record<string, boolean>>({});
+
+  const active = Object.entries(filters).filter(([, v]) => v.trim() !== '');
+
+  const filtered = useMemo(() => {
+    if (active.length === 0) return rows;
+    return rows.filter((row) =>
+      active.every(([key, term]) => {
+        const col = columns.find((c) => c.key === key);
+        if (!col?.value) return true;
+        return textOf(col.value(row)).toLowerCase().includes(term.trim().toLowerCase());
+      }),
+    );
+    // `active` is derived from `filters`; listing it would re-run on every keystroke twice.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [columns, filters, rows]);
+
+  const sorted = useMemo(() => {
+    if (!sort) return filtered;
+    const col = columns.find((c) => c.key === sort.key);
+    if (!col?.value) return filtered;
+    // A copy: sorting the array we were handed would reorder the caller's state.
+    return [...filtered].sort((a, b) => {
+      const x = col.value!(a);
+      const y = col.value!(b);
+      if (typeof x === 'number' && typeof y === 'number') return (x - y) * sort.dir;
+      return textOf(x).localeCompare(textOf(y), undefined, { numeric: true }) * sort.dir;
+    });
+  }, [columns, filtered, sort]);
+
+  // A filter that removes the page you were on should not leave you staring at
+  // an empty table with rows behind you.
+  const pageCount = size > 0 ? Math.max(1, Math.ceil(sorted.length / size)) : 1;
+  const current = Math.min(page, pageCount - 1);
+  const shown = size > 0 ? sorted.slice(current * size, current * size + size) : sorted;
+
+  useEffect(() => {
+    onShown?.(shown);
+    // `shown` is derived; comparing it by identity is exactly right — a new
+    // slice means a new page, a new filter or a new sort.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shown]);
+
+  function setFilter(key: string, value: string): void {
+    setFilters((prev) => ({ ...prev, [key]: value }));
+    setPage(0);
+  }
+
+  function toggleSort(key: string): void {
+    setSort((prev) => (prev?.key === key ? { key, dir: prev.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
+    setPage(0);
+  }
+
+  if (rows.length === 0 && empty) return <>{empty}</>;
+
+  const searchable = columns.some((c) => c.value);
+
+  return (
+    <>
+      {toolbar ? <div className="dt-toolbar">{toolbar}</div> : null}
+
+      <div className="table-scroll">
+        <table className={`table ${className ?? ''}`} style={minWidth ? { minWidth } : undefined}>
+          <thead>
+            <tr>
+              {expand ? <th className="dt-toggle-col" /> : null}
+              {columns.map((c) => (
+                <th
+                  key={c.key}
+                  style={c.width ? { width: c.width } : undefined}
+                  className={`${c.align === 'right' ? 'ta-right' : ''} ${c.value ? 'dt-sortable' : ''}`}
+                  onClick={c.value ? () => toggleSort(c.key) : undefined}
+                  aria-sort={
+                    sort?.key === c.key ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined
+                  }
+                >
+                  {c.header}
+                  {sort?.key === c.key ? (
+                    <span className="dt-arrow" aria-hidden="true">
+                      {sort.dir === 1 ? '↑' : '↓'}
+                    </span>
+                  ) : null}
+                </th>
+              ))}
+            </tr>
+            {searchable ? (
+              <tr className="dt-filters">
+                {expand ? <th className="dt-toggle-col" /> : null}
+                {columns.map((c) => (
+                  <th key={c.key}>
+                    {c.value ? (
+                      <input
+                        className="dt-filter"
+                        value={filters[c.key] ?? ''}
+                        placeholder={c.filterHint ?? c.header}
+                        aria-label={`Filter by ${c.header}`}
+                        onChange={(e) => setFilter(c.key, e.target.value)}
+                      />
+                    ) : null}
+                  </th>
+                ))}
+              </tr>
+            ) : null}
+          </thead>
+          <tbody>
+            {shown.map((row) => {
+              const key = rowKey(row);
+              const children = expand ? expand(row) : null;
+              const isOpen = Boolean(opened[key]);
+              return (
+                <Fragment key={key}>
+                  <tr className={children && isOpen ? 'dt-parent is-open' : children ? 'dt-parent' : ''}>
+                    {expand ? (
+                      <td className="dt-toggle-col">
+                        {children ? (
+                          <button
+                            className="dt-toggle"
+                            aria-expanded={isOpen}
+                            aria-label={expandLabel ? expandLabel(row) : 'Show the rows underneath'}
+                            title={expandLabel ? expandLabel(row) : undefined}
+                            onClick={() => setOpened((prev) => ({ ...prev, [key]: !prev[key] }))}
+                          >
+                            <span aria-hidden="true">{isOpen ? '▾' : '▸'}</span>
+                          </button>
+                        ) : null}
+                      </td>
+                    ) : null}
+                    {columns.map((c) => (
+                      <td
+                        key={c.key}
+                        className={`${c.className ?? ''} ${c.align === 'right' ? 'ta-right' : ''}`}
+                      >
+                        {c.cell(row)}
+                      </td>
+                    ))}
+                  </tr>
+                  {children && isOpen ? (
+                    <tr className="dt-child">
+                      <td colSpan={columns.length + 1}>{children}</td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              );
+            })}
+            {shown.length === 0 ? (
+              <tr>
+                <td colSpan={columns.length + (expand ? 1 : 0)} className="dt-none">
+                  Nothing matches those filters.{' '}
+                  <button className="link-btn" onClick={() => setFilters({})}>
+                    Clear them
+                  </button>
+                </td>
+              </tr>
+            ) : null}
+            {footer}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="dt-foot">
+        <span className="dt-count">
+          {sorted.length === 0
+            ? 'No rows'
+            : size > 0
+              ? `${current * size + 1}–${Math.min(sorted.length, current * size + size)} of ${sorted.length}`
+              : `${sorted.length} of ${sorted.length}`}
+          {active.length > 0 ? ` (filtered from ${rows.length})` : ''}
+        </span>
+
+        <div className="dt-pager">
+          <label className="dt-size">
+            Rows
+            <select
+              value={size}
+              onChange={(e) => {
+                setSize(Number(e.target.value));
+                setPage(0);
+              }}
+            >
+              {PAGE_SIZES.map((n) => (
+                <option key={n} value={n}>
+                  {n === 0 ? 'All' : n}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            className="btn btn-ghost btn-sm"
+            disabled={current === 0}
+            onClick={() => setPage(current - 1)}
+          >
+            Previous
+          </button>
+          <span className="dt-page">
+            {current + 1} / {pageCount}
+          </span>
+          <button
+            className="btn btn-ghost btn-sm"
+            disabled={current >= pageCount - 1}
+            onClick={() => setPage(current + 1)}
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    </>
   );
 }
 

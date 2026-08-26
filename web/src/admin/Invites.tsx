@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, api } from '../lib/api.js';
 import {
+  DataTable,
   CardHead,
   EmptyState,
   ErrorState,
@@ -663,45 +664,67 @@ function Outbox({ refreshKey }: { refreshKey: number }) {
           body="Every invitation and report email is recorded here with its result, so a failed send is never silent."
         />
       ) : (
-        <div className="table-scroll capped">
-          <table className="table-outbox">
-            <thead>
-              <tr>
-                <th>Recipient</th>
-                <th>Subject</th>
-                <th>Kind</th>
-                <th>Status</th>
-                <th className="right">Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {messages.map((m) => (
-                <tr key={m.id}>
-                  <td className="name">{m.to_email}</td>
-                  <td className="cell-truncate" title={m.subject}>
-                    {m.subject}
-                  </td>
-                  <td>{sentenceCase(m.kind)}</td>
-                  <td>
-                    <span
-                      className={`pill ${
-                        m.status === 'sent'
-                          ? 'pill-ok'
-                          : m.status === 'failed'
-                            ? 'pill-warn'
-                            : 'pill-neutral'
-                      }`}
-                    >
-                      {sentenceCase(m.status)}
-                    </span>
-                    {m.error ? <span className="cell-sub danger">{m.error}</span> : null}
-                  </td>
-                  <td className="right num">{formatDateTime(m.created_at)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          rows={messages}
+          rowKey={(m) => String(m.id)}
+          pageSize={25}
+          minWidth={880}
+          className="table-outbox"
+          columns={[
+            {
+              key: 'to',
+              header: 'Recipient',
+              className: 'name',
+              value: (m) => m.to_email,
+              cell: (m) => m.to_email,
+            },
+            {
+              key: 'subject',
+              header: 'Subject',
+              className: 'cell-truncate',
+              value: (m) => m.subject,
+              cell: (m) => m.subject,
+            },
+            {
+              key: 'kind',
+              header: 'Kind',
+              width: '130px',
+              value: (m) => m.kind,
+              cell: (m) => sentenceCase(m.kind),
+            },
+            {
+              key: 'status',
+              header: 'Status',
+              width: '160px',
+              value: (m) => m.status,
+              cell: (m) => (
+                <>
+                  <span
+                    className={`pill ${
+                      m.status === 'sent'
+                        ? 'pill-ok'
+                        : m.status === 'failed'
+                          ? 'pill-warn'
+                          : 'pill-neutral'
+                    }`}
+                  >
+                    {sentenceCase(m.status)}
+                  </span>
+                  {m.error ? <span className="cell-sub danger">{m.error}</span> : null}
+                </>
+              ),
+            },
+            {
+              key: 'created',
+              header: 'Created',
+              width: '150px',
+              align: 'right',
+              className: 'num',
+              value: (m) => m.created_at,
+              cell: (m) => formatDateTime(m.created_at),
+            },
+          ]}
+        />
       )}
     </section>
   );

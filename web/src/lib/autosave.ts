@@ -119,6 +119,42 @@ export class Autosave {
     void this.flush();
   }
 
+  /**
+   * Removes whole rows both here and on the server — a cohort respondent
+   * saying "we don't really work together" about someone they had started to
+   * rate. Not queued like an answer: a clear that silently failed would leave
+   * a row the respondent believes is gone, and submit would then stop them on
+   * it, so this reports failure to the caller instead.
+   */
+  async clear(memberNos: number[], itemCount: number): Promise<boolean> {
+    if (memberNos.length === 0) return true;
+    try {
+      const res = await fetch(
+        `/api/candidate/answers/${this.token}/clear?response=${encodeURIComponent(this.responseId)}`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ memberNos, resumePage: this.page }),
+        },
+      );
+      if (!res.ok) return false;
+    } catch {
+      return false;
+    }
+
+    for (const memberNo of memberNos) {
+      for (let item = 1; item <= itemCount; item++) {
+        const no = (memberNo - 1) * itemCount + item;
+        delete this.answers[no];
+        this.pending.delete(no);
+      }
+    }
+    this.persist();
+    this.emit('saved');
+    return true;
+  }
+
   onChange(fn: (state: SaveState, pending: number) => void): () => void {
     this.listeners.add(fn);
     fn(this.state, this.pending.size);

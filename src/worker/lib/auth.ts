@@ -6,7 +6,7 @@
 
 import bcrypt from 'bcryptjs';
 import { SignJWT, jwtVerify } from 'jose';
-import type { Context } from 'hono';
+import type { Context, MiddlewareHandler } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { Env } from '../env.js';
 import type { AdminRole } from '../../shared/types.js';
@@ -30,7 +30,13 @@ export function toRole(value: unknown): AdminRole {
 /** The Hono environment every authenticated admin route runs under. */
 export interface AdminHono {
   Bindings: Env;
-  Variables: { admin: AdminClaims };
+  Variables: {
+    admin: AdminClaims;
+    /** Snapshots a handler took before changing something. See `audit.ts`. */
+    auditEntries?: unknown;
+    /** A body a handler chose to expose to the automatic log. */
+    auditBody?: unknown;
+  };
 }
 
 type Ctx = Context<AdminHono>;
@@ -94,3 +100,14 @@ export async function readSession(c: Ctx): Promise<AdminClaims | null> {
     return null;
   }
 }
+
+/**
+ * Session gate for the console. Lives here rather than in `admin.ts` so every
+ * admin router mounts the same check instead of re-deriving one.
+ */
+export const requireAdmin: MiddlewareHandler<AdminHono> = async (c, next) => {
+  const claims = await readSession(c);
+  if (!claims) return c.json({ error: 'Not signed in' }, 401);
+  c.set('admin', claims);
+  await next();
+};

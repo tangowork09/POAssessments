@@ -44,4 +44,10 @@ export const api = {
     request<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) }),
   put: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PUT', body: body === undefined ? undefined : JSON.stringify(body) }),
+  // Named `patchJson` rather than `patch` because `patch` reads like a verb on
+  // the api object itself in call sites that pass no body.
+  patchJson: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: 'PATCH', body: body === undefined ? undefined : JSON.stringify(body) }),
+  // `del`, not `delete` — a reserved word cannot be a shorthand property name.
+  del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 };

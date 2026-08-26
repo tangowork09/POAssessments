@@ -1,0 +1,20 @@
+-- Whether a cohort's participants are told a report is coming at all.
+--
+-- The self-rating instruments score one person and mail them a PDF, so the
+-- completion screen promising "your report is on its way" is simply true. A
+-- cohort is not that. Its reports are built across the whole group when the
+-- facilitator closes a round, and whether any individual profile is ever handed
+-- to the person it is about is the facilitator's decision, made per engagement
+-- — some clients run this as a group diagnostic and nobody gets a personal
+-- profile at all.
+--
+-- Telling every respondent a summary is coming and then not sending one is the
+-- worst of the available outcomes: it is a promise the platform made on the
+-- facilitator's behalf and cannot keep. So the promise is opt-in. Off, the
+-- completion screen thanks the respondent and says nothing about reports, PDFs
+-- or email. On, it says what it says today.
+--
+-- Default 0 — including for the cohorts that already exist. A cohort created
+-- before this column was here was created without anyone deciding the question,
+-- and the safe reading of a decision nobody made is "do not promise".
+ALTER TABLE cohorts ADD COLUMN share_reports INTEGER NOT NULL DEFAULT 0;

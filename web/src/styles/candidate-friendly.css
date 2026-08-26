@@ -50,6 +50,10 @@ body.fb-body {
   --yellow: #ffc53d;
   --red: #e0523f;
   --red-soft: #fdece9;
+  /* Error text sits on --red-soft, where --red itself is about 3:1 — under AA
+     for the 12.5px the inline messages are set at. This is 6.6:1 on that
+     ground and still reads as the same red. */
+  --red-ink: #a8321f;
 
   --shadow: 0 1px 2px rgba(21, 36, 46, 0.05), 0 8px 24px rgba(21, 36, 46, 0.06);
   --shadow-lg: 0 2px 4px rgba(21, 36, 46, 0.06), 0 18px 48px rgba(21, 36, 46, 0.1);
@@ -1672,3 +1676,1043 @@ body.fb-body {
     animation: none;
   }
 }
+
+/* ==========================================================================
+   Loading skeletons
+   ==========================================================================
+   A candidate opening a link on a phone waits on one round trip. "Loading…" in
+   grey text says nothing about what is coming; a skeleton in the shape of the
+   card that is about to appear says "this is a page, and it is nearly here",
+   and it holds the layout so nothing jumps when it does.
+
+   Deliberately dumb: no spinner, no progress, no delay heuristics. It is shown
+   while the fetch is in flight and replaced when it lands.
+   ========================================================================== */
+
+.fb .sk {
+  display: block;
+  border-radius: 10px;
+  background: linear-gradient(90deg, var(--soft-2) 25%, var(--soft) 37%, var(--soft-2) 63%);
+  background-size: 400% 100%;
+  animation: skshimmer 1.4s ease-in-out infinite;
+}
+.fb .sk-line {
+  height: 14px;
+  margin-bottom: 10px;
+}
+.fb .sk-line.is-title {
+  height: 30px;
+  width: 62%;
+  margin-bottom: 18px;
+  border-radius: 12px;
+}
+.fb .sk-line.is-short { width: 45%; }
+.fb .sk-line.is-mid { width: 78%; }
+.fb .sk-block {
+  height: 64px;
+  border-radius: 16px;
+}
+.fb .sk-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+.fb .sk-card {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: clamp(20px, 4vh, 36px) clamp(18px, 3vw, 30px);
+  background: var(--white);
+  border: 2px solid var(--line);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow);
+}
+@keyframes skshimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: 0 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fb .sk { animation: none; }
+}
+
+/* ==========================================================================
+   Collaboration Sociometry — roster picker and the rating matrix
+   ==========================================================================
+   Two screens the self-rating instruments do not have: choosing yourself out
+   of a named list, and rating one colleague across twelve statements.
+
+   The rating screen does not scroll. That was only ever a problem while the
+   screen showed all twelve statements at once; it shows one, and one statement
+   plus a five-point scale fits any viewport worth supporting. What it costs is
+   that every vertical measurement here — padding, gap, type, control height —
+   is a `clamp()` against `vh` as well as `vw`, so the whole panel shrinks with
+   a short window instead of overflowing it. The one deliberate exception is
+   `.matrix-review`, whose list is as long as the roster.
+   ========================================================================== */
+
+/* ==========================================================================
+   Collaboration Sociometry — the roster picker and the rating screen
+   ==========================================================================
+   Two screens the self-rating instruments do not have: choosing yourself out
+   of a named list, and rating one colleague across twelve statements.
+   ========================================================================== */
+
+/* ---------------------------------------------------- the roster combobox */
+
+.fb .combo {
+  position: relative;
+}
+/* Room for the clear button / caret that sits inside the field. */
+.fb .combo-input {
+  padding-right: 46px;
+}
+
+.fb .combo-clear,
+.fb .combo-caret {
+  position: absolute;
+  top: 0;
+  right: 14px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+}
+.fb .combo-clear {
+  appearance: none;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--ink-3);
+  border-radius: 50%;
+}
+.fb .combo-clear:hover {
+  color: var(--ink);
+}
+/* A chevron, drawn rather than shipped as an asset. */
+.fb .combo-caret::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-right: 2.5px solid var(--ink-3);
+  border-bottom: 2.5px solid var(--ink-3);
+  transform: translateY(-3px) rotate(45deg);
+  transition: transform 140ms ease-out;
+}
+.fb .combo.is-open .combo-caret::before {
+  transform: translateY(1px) rotate(-135deg);
+}
+
+/*
+ * The list floats over what follows it rather than pushing it down the page.
+ *
+ * That needs the card body to stop clipping — `.formcard .card-body` is
+ * `overflow-y: auto` so a long form can scroll, and an overflow container clips
+ * absolutely-positioned descendants too. The identity card is short enough to
+ * never need that scroll, so `.is-identity` opts out of it; the seven-field
+ * details form keeps it.
+ */
+.fb .formcard.is-identity .card-body {
+  overflow: visible;
+}
+.fb .combo-list {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  border: 2px solid var(--line-3);
+  border-radius: var(--r-btn);
+  background: var(--white);
+  max-height: 252px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-shadow: 0 16px 34px -18px rgba(21, 36, 46, 0.55);
+}
+
+/*
+ * On a short screen the card does need its own scroll after all, and a floating
+ * panel inside a scrolling box gets clipped at its edge. There the list goes
+ * back to normal flow: being pushed down is worse than being cut off, but only
+ * just, and this is the case where there is genuinely no room to float into.
+ */
+@media (max-height: 620px) {
+  .fb .formcard.is-identity .card-body {
+    overflow-y: auto;
+  }
+  .fb .combo-list {
+    position: static;
+    margin-top: 8px;
+    max-height: 200px;
+  }
+}
+
+.fb .combo-opt {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  /* The tap-target floor still applies: this is a phone control too. */
+  min-height: 48px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.fb .combo-opt.is-active {
+  background: var(--soft);
+}
+.fb .combo-opt.is-picked {
+  background: var(--teal-soft);
+}
+.fb .combo-name {
+  font-weight: 800;
+  color: var(--ink);
+}
+.fb .combo-meta {
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.fb .combo-meta em {
+  font-style: normal;
+  font-weight: 800;
+  color: var(--warn);
+}
+/* Taken: the row is shown, greyed, and does not respond to a click. Filtering
+   it out would leave someone unable to find their own name at all. */
+.fb .combo-opt.is-taken {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.fb .combo-opt.is-taken:hover,
+.fb .combo-opt.is-taken.is-active {
+  background: transparent;
+}
+
+.fb .combo-empty {
+  padding: 12px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
+/* ------------------------------------------------------- the rating screen */
+
+/*
+ * One statement at a time, the same shape the other two instruments use. What
+ * this one adds is the second axis — which colleague, and which section — and
+ * both live in the info panel at the top rather than in a side rail, so the
+ * layout is the same object on a phone as on a desktop.
+ */
+.fb .matrix-screen {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  /* Not `--fb-pad-y`: that budget is generous on a tall window, and this screen
+     spends its height on the panel rather than on margin around it. */
+  padding: clamp(8px, 1.6vh, 20px) clamp(10px, 2vw, 20px);
+}
+/* Contained rather than edge to edge: the info panel already carries the
+   context a full-bleed layout was making room for. */
+.fb .matrix-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--white);
+  border: 2px solid var(--line);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------ the info box */
+
+.fb .matrix-info {
+  flex: 0 0 auto;
+  padding: clamp(9px, 1.6vh, 18px) clamp(13px, 2vw, 22px);
+  background: var(--soft);
+  border-bottom: 2px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(7px, 1.3vh, 14px);
+}
+
+.fb .matrix-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: clamp(8px, 1.6vw, 16px);
+}
+.fb .matrix-who {
+  min-width: 0;
+}
+.fb .matrix-who .eyebrow {
+  margin-bottom: 6px;
+}
+.fb .matrix-who-name {
+  margin: 0;
+  /* `min()` of a width term and a height term: the name must give way to a
+     short window as readily as to a narrow one, or the panel grows a scrollbar
+     on a laptop with the dock and a browser toolbar taking a third of it. */
+  font-size: clamp(16px, min(3.2vw, 2.7vh), 24px);
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+  font-weight: 800;
+  color: var(--ink);
+}
+.fb .matrix-who-func {
+  margin: 3px 0 0;
+  font-size: clamp(11px, 1.5vh, 12.5px);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.fb .save-badge {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.fb .save-badge.is-offline,
+.fb .save-badge.is-error {
+  color: var(--warn);
+}
+
+/* --------------------------------------------------------- progress */
+
+.fb .matrix-progress {
+  display: flex;
+  align-items: center;
+  gap: clamp(8px, 1.4vw, 12px);
+}
+/* A bar with its own track and a label. Six pixels of colour on a card edge
+   read as the card's border, not as progress. */
+.fb .matrix-rail {
+  flex: 1 1 auto;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--soft-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+.fb .matrix-rail > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--teal);
+  transition: width 260ms ease-out;
+}
+.fb .matrix-progress-label {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------- section chooser */
+
+/* One row per chooser on a phone, side by side from 720px — two controls of the
+   same kind doing the same kind of job, and stacking them spends a row of
+   height the statement could have had. */
+.fb .matrix-pickers {
+  display: grid;
+  gap: clamp(7px, 1.2vh, 12px);
+}
+@media (min-width: 720px) {
+  .fb .matrix-pickers {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px 20px;
+  }
+  /* Side by side, each control has about half the panel. The name is what has
+     to fit; the words for the state repeat what the meter beside them and the
+     counter after them already show, and the list rows still carry them. */
+  .fb .matrix-select-btn .matrix-select-note {
+    display: none;
+  }
+}
+
+/* A grid, not a flex row: "LEADER" and "SECTION" are different widths, so as
+   flex items they started their controls at different x and the two rows read
+   as misaligned. The label column is fixed, so both controls share an edge and
+   both counters share the opposite one. */
+.fb .matrix-picker {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+.fb .matrix-picker-label {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.fb .matrix-counter {
+  justify-self: end;
+  min-width: 44px;
+  text-align: right;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.fb .matrix-select {
+  position: relative;
+  min-width: 0;
+}
+/* The two choosers are siblings, and a later sibling paints over an earlier
+   one whatever the panel's own z-index says. Raising the open wrapper — not
+   just its list — is what puts the leader list above the section row. */
+.fb .matrix-select.is-open {
+  z-index: 40;
+}
+.fb .matrix-select-btn {
+  appearance: none;
+  cursor: pointer;
+  width: 100%;
+  /* Floors at 40px rather than the usual 48: two of these stack in the info
+     box, so sixteen pixels of slack here is sixteen off the statement. */
+  min-height: clamp(40px, 6vh, 48px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: clamp(5px, 0.9vh, 8px) 40px clamp(5px, 0.9vh, 8px) 14px;
+  background: var(--white);
+  /* No colour rail. Both choosers carried one — the section's own hue on the
+     section control, the row's state on the leader control — and between them
+     the info box had two saturated bars saying two unrelated things a foot
+     apart. The words beside each control already say which section and how far
+     along it is. */
+  border: 2px solid var(--line-strong);
+  border-radius: 12px;
+  font: inherit;
+  text-align: left;
+}
+.fb .matrix-select-btn:hover {
+  background: var(--soft-2);
+}
+.fb .matrix-select-btn::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  width: 8px;
+  height: 8px;
+  margin-top: -6px;
+  border-right: 2.5px solid var(--ink-3);
+  border-bottom: 2.5px solid var(--ink-3);
+  transform: rotate(45deg);
+  transition: transform 140ms ease-out;
+}
+.fb .matrix-select.is-open .matrix-select-btn::after {
+  margin-top: -2px;
+  transform: rotate(-135deg);
+}
+/* One line, cut with an ellipsis. A fifty-person roster contains names longer
+   than any control, and wrapping one turned a 44px row into a 60px one — twice,
+   once per chooser. */
+.fb .matrix-select-name {
+  min-width: 0;
+  /* Grows into whatever the note and the meter leave, and only then truncates —
+     a name cut short while the row still has slack reads as a bug. */
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: clamp(13px, 1.7vh, 14px);
+  font-weight: 800;
+  color: var(--ink);
+}
+.fb .matrix-select-note {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The list is free to be wider than the control it hangs off. Tied to the
+   control's width it truncated the very names it exists to let you read — two
+   choosers side by side leave each control about 250px, and a roster is full of
+   names longer than that. */
+.fb .matrix-select-list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: min(88vw, 420px);
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  background: var(--white);
+  border: 2px solid var(--line-3);
+  border-radius: 14px;
+  box-shadow: 0 16px 34px -18px rgba(21, 36, 46, 0.55);
+}
+.fb .matrix-select-opt {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* The list floats over the panel, so it is free to keep a comfortable row
+     height even where the closed control has given some up. */
+  min-height: 44px;
+  /* Room for the tick that marks the current one. */
+  padding: 8px 12px 8px 34px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+/* Hover and selection have to look like different things. Two pale washes of
+   nearly the same colour read as two selections, which is exactly how the
+   first version looked: a grey row under the pointer and a pale blue row that
+   was actually chosen. Hover is a wash; the choice is a tick and bold ink. */
+.fb .matrix-select-opt.is-active {
+  background: var(--soft);
+}
+.fb .matrix-select-opt.is-picked {
+  background: transparent;
+}
+.fb .matrix-select-opt.is-picked.is-active {
+  background: var(--soft);
+}
+.fb .matrix-select-opt.is-picked .matrix-select-name {
+  color: var(--ink);
+}
+.fb .matrix-select-opt.is-picked::before {
+  content: "";
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  width: 6px;
+  height: 11px;
+  margin-top: -7px;
+  border-right: 2.5px solid var(--ink-2);
+  border-bottom: 2.5px solid var(--ink-2);
+  transform: rotate(45deg);
+}
+
+/* --------------------------------------------------------------- the meter */
+
+/* Pushed to the trailing edge of whatever row it is in, so the bars stack into
+   a column the eye can read down. */
+.fb .matrix-meter {
+  flex: 0 0 auto;
+  margin-left: auto;
+  width: clamp(28px, 5vw, 52px);
+  height: 4px;
+  border-radius: 999px;
+  background: var(--soft-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+.fb .matrix-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--ink-3);
+  transition: width 200ms ease-out;
+}
+/* Finished is the one state worth a colour, and it is the same green as a
+   filled step chip and a rated leader. */
+.fb .matrix-meter.is-full > span {
+  background: #0e7c5a;
+}
+/* The closed control keeps clear of the caret. */
+.fb .matrix-select-btn .matrix-meter {
+  margin-right: 4px;
+}
+
+/* ------------------------------------------------- the statements as steps */
+
+/*
+ * One chip per statement in the current section. Two jobs: jump straight to a
+ * statement, and show at a glance which of them already carry a rating — a
+ * respondent revisiting a colleague could otherwise only find the gaps by
+ * walking the whole twelve.
+ */
+.fb .matrix-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fb .matrix-step {
+  appearance: none;
+  cursor: pointer;
+  flex: 0 0 auto;
+  min-width: clamp(30px, 4.6vh, 36px);
+  min-height: clamp(30px, 4.6vh, 36px);
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--white);
+  border: 2px solid var(--line-strong);
+  border-radius: 10px;
+  font: inherit;
+  font-size: clamp(12px, 1.7vh, 13.5px);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  transition: background-color 140ms ease-out, border-color 140ms ease-out, color 140ms ease-out;
+}
+.fb .matrix-step:hover {
+  border-color: var(--ink-3);
+}
+/* Answered. The same green the leader chooser uses for a finished row, so one
+   colour means one thing across the screen. */
+.fb .matrix-step.is-done {
+  background: #0e7c5a;
+  border-color: #0e7c5a;
+  color: var(--white);
+}
+/* Where you are. A ring rather than a fill, so it reads on top of either
+   state — an answered statement you have come back to is both. */
+.fb .matrix-step.is-now {
+  box-shadow: 0 0 0 3px var(--teal-ring, rgba(11, 111, 180, 0.28));
+  border-color: var(--teal-edge, #0b6fb4);
+}
+.fb .matrix-step.is-now:not(.is-done) {
+  color: var(--ink);
+}
+
+/* ------------------------------------------------------------ the question */
+
+.fb .matrix-question {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* Nothing here scrolls: everything inside is sized against `vh`, so the
+     column shrinks to the box rather than spilling out of it. `safe center`
+     stays as the backstop — if a long statement in a very large font ever does
+     overflow, alignment falls back to the top so the first line is the one that
+     survives rather than the middle. */
+  overflow: hidden;
+  padding: clamp(9px, 2.2vh, 30px) clamp(14px, 2.2vw, 22px) clamp(8px, 1.4vh, 20px);
+  display: flex;
+  flex-direction: column;
+  justify-content: safe center;
+  gap: clamp(8px, 1.4vh, 16px);
+}
+@supports not (justify-content: safe center) {
+  .fb .matrix-question {
+    justify-content: flex-start;
+  }
+}
+
+/* The statement's own name, from the workbook's column header, and — on the one
+   deficit-polarity statement — the warning that a high answer there is a
+   request rather than a compliment. Both are pills on one line, because two
+   stacked banners above a single sentence is more chrome than the sentence. */
+.fb .matrix-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-self: flex-start;
+}
+.fb .matrix-tag {
+  padding: clamp(3px, 0.6vh, 5px) 10px;
+  border-radius: 999px;
+  background: var(--soft-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink-2);
+  font-size: clamp(9.5px, 1.4vh, 11px);
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.fb .matrix-tag.is-gap {
+  background: var(--orange-soft);
+  box-shadow: none;
+  color: var(--warn);
+}
+
+/* The statement is the largest thing on the screen, because it is the only
+   thing being asked. */
+.fb .matrix-statement {
+  margin: 0;
+  /* Rating is a rapid click-click-click, and a double click on the way to a
+     scale square was leaving the statement highlighted blue. Nobody selects
+     this text on purpose. */
+  user-select: none;
+  font-size: clamp(15px, min(2.4vw, 3vh), 26px);
+  line-height: 1.28;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+  color: var(--ink);
+  text-wrap: balance;
+}
+
+/* The base control is a square capped at --fb-rate-max, which is right when
+   five of them share a narrow column. Here they stretch. */
+.fb .matrix-question .rate {
+  user-select: none;
+  aspect-ratio: auto;
+  width: 100%;
+  /* `height`, not `min-height`: the narrow-screen rules for the self-rating
+     instruments pin `.fb .rate` to a fixed height, and a min-height here would
+     lose to it. 40px is the floor a thumb still hits reliably. */
+  height: clamp(40px, 7.6vh, 66px);
+  min-height: 0;
+  max-height: none;
+  padding: clamp(4px, 1vh, 10px) 8px;
+}
+.fb .matrix-question .rate .v {
+  font-size: clamp(15px, min(2vw, 2.4vh), 21px);
+}
+
+/* Ends of the scale, spelled out. Orientation on a wide screen, and the only
+   anchor left on a narrow one. */
+.fb .matrix-legend {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: clamp(-6px, -0.8vh, -3px) 0 0;
+  font-size: clamp(10.5px, 1.4vh, 11.5px);
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+/* Blanks are the workbook's own instruction, not an oversight, so the screen
+   says so rather than leaving the respondent to guess whether they may. */
+.fb .matrix-optional {
+  margin: 0;
+  font-size: clamp(11px, 1.5vh, 12px);
+  color: var(--ink-3);
+}
+
+/* ---------------------------------------------------------------- the foot */
+
+.fb .matrix-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: clamp(6px, 1vw, 10px);
+  flex-wrap: wrap;
+  padding: clamp(8px, 1.4vh, 14px) clamp(12px, 2vw, 18px);
+  border-top: 2px solid var(--line);
+  background: var(--white);
+}
+/* The shared button is 56px tall with 14px of padding, which is most of a
+   short window's remaining height once three of them sit on one row. */
+.fb .matrix-foot .btn {
+  min-height: clamp(40px, 6.4vh, 52px);
+  padding: clamp(6px, 1.1vh, 12px) clamp(14px, 2.4vw, 24px);
+  font-size: clamp(13.5px, 1.8vh, 15.5px);
+}
+/* Back, the hint, then the two ways forward. Both carry `margin-right: auto`
+   so the forward pair stays on the trailing edge whether or not the hint is
+   showing — it is hidden on touch and on short windows. */
+.fb .matrix-foot .btn-ghost {
+  margin-right: auto;
+}
+.fb .matrix-foot .keyhint {
+  margin-left: 4px;
+  margin-right: auto;
+  font-size: 12.5px;
+}
+
+/* ---------------------------------------------------------------- review */
+
+.fb .matrix-review {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: clamp(20px, 4vh, 36px) 24px 24px;
+}
+.fb .matrix-review .display {
+  margin: 8px 0 6px;
+}
+
+/* -------------------------------------------------------------- narrow */
+
+@media (max-width: 620px) {
+  .fb .matrix-screen {
+    padding: 10px 10px 0;
+  }
+  .fb .matrix-panel {
+    border-radius: 16px;
+  }
+  .fb .matrix-info {
+    padding: clamp(8px, 1.4vh, 12px) 12px;
+    gap: clamp(6px, 1.2vh, 10px);
+  }
+  .fb .matrix-question {
+    padding: clamp(10px, 2vh, 18px) 12px clamp(8px, 1.4vh, 14px);
+    gap: clamp(8px, 1.7vh, 14px);
+  }
+
+  /* The label stays beside the control, not above it. Putting it on its own
+     line was the first fix for a cramped row, and it cost two lines of height
+     across the two choosers — on a 320px phone that was the difference between
+     the statement fitting and not. A narrower label column and a narrower
+     counter buy the same room without a second line. */
+  .fb .matrix-picker {
+    grid-template-columns: 50px minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+  .fb .matrix-picker-label {
+    font-size: 9.5px;
+    letter-spacing: 0.05em;
+  }
+  /* The name and the meter carry it; the words repeat what the bar shows. */
+  .fb .matrix-select-btn .matrix-select-note {
+    display: none;
+  }
+  .fb .matrix-counter {
+    min-width: 36px;
+    font-size: 11px;
+  }
+  .fb .matrix-select-btn {
+    min-height: clamp(38px, 5.6vh, 44px);
+    padding: clamp(4px, 0.8vh, 6px) 34px clamp(4px, 0.8vh, 6px) 12px;
+  }
+  .fb .matrix-counter {
+    font-size: 11.5px;
+  }
+
+  /* The two ways forward share the top row; Back is the least-used and sits
+     under them. Three full-width stacked buttons pushed the statement off the
+     screen. */
+  /* `minmax(0, 1fr)`, not `1fr`: a grid item's automatic minimum is its
+     min-content width, so "Next colleague" pushed its own column wider than
+     half the panel and hung off the right edge on a 390px phone. */
+  .fb .matrix-foot {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+    padding: clamp(7px, 1.2vh, 10px) 12px;
+  }
+  .fb .matrix-foot .btn {
+    width: 100%;
+    /* Pairs with the `minmax(0, …)` above — without it the flex item inside
+       the grid item re-imposes the same min-content floor. */
+    min-width: 0;
+    margin-right: 0;
+    min-height: clamp(38px, 5.8vh, 48px);
+    padding: clamp(5px, 1vh, 8px) 10px;
+    font-size: clamp(12.5px, 1.7vh, 14px);
+    /* A two-word label wraps rather than overflowing. */
+    white-space: normal;
+    line-height: 1.15;
+    text-align: center;
+  }
+  .fb .matrix-foot .btn-ghost {
+    grid-column: 1 / -1;
+    order: 3;
+  }
+  /* No keyboard here, and no room for a line about one. */
+  .fb .matrix-foot .keyhint {
+    display: none;
+  }
+  .fb .matrix-foot .btn-secondary {
+    order: 1;
+  }
+  .fb .matrix-foot .btn-primary {
+    order: 2;
+  }
+}
+@media (max-width: 560px) {
+  .fb .matrix-question .rate {
+    height: clamp(44px, 7.4vh, 58px);
+  }
+  .fb .matrix-question .rate .k {
+    font-size: 9px;
+  }
+}
+@media (max-width: 470px) {
+  /* The words stay. A fifth of a 390px screen is about 62px, which "MODERATELY"
+     fits at 8.5px once the letter-spacing goes and it is allowed to wrap onto a
+     second line — and a bare column of digits leaves the respondent reading the
+     legend to work out which end is which on every statement. */
+  .fb .matrix-question .rate {
+    height: clamp(46px, 7.6vh, 56px);
+    padding: 4px 3px;
+  }
+  /* One line, whole word. `overflow-wrap: anywhere` is right for the base
+     control, where a broken word is better than a broken layout, but here it
+     produced "MODERATE / LY" — a word split mid-syllable is harder to read at
+     a glance than no word at all, which was the point of keeping it. At 8px
+     with no letter-spacing the longest label is about 45px in a column that is
+     at least 50px wide even on a 320px phone. */
+  .fb .matrix-question .rate .k {
+    display: block;
+    font-size: min(7.8px, 2vw);
+    letter-spacing: 0;
+    line-height: 1.05;
+    padding: 0;
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+  .fb .matrix-question .rate .v {
+    font-size: 15px;
+  }
+  .fb .matrix-question .rating {
+    gap: 5px;
+  }
+}
+/* Small phones: the step chips and the info gaps give up what the statement and
+   the scale need, and the legend goes — with a word under every number it was
+   saying the same thing twice. */
+@media (max-width: 400px) {
+  /* Two pills above a statement is one too many at this width — they wrap onto
+     two lines and take more height than the sentence they introduce. The
+     statement's own name stays; the polarity warning goes, and the wording of
+     the statement itself carries it. */
+  .fb .matrix-tag.is-gap {
+    display: none;
+  }
+  .fb .matrix-tag {
+    font-size: 9.5px;
+    padding: 3px 8px;
+    letter-spacing: 0.03em;
+  }
+  .fb .matrix-statement {
+    font-size: clamp(14px, 3.9vw, 17px);
+  }
+  .fb .matrix-step {
+    min-width: clamp(26px, 4vh, 32px);
+    min-height: clamp(26px, 4vh, 32px);
+    border-radius: 8px;
+    font-size: 11.5px;
+  }
+  .fb .matrix-steps {
+    gap: 5px;
+  }
+  .fb .matrix-info {
+    gap: clamp(5px, 1vh, 9px);
+  }
+  .fb .matrix-legend {
+    display: none;
+  }
+  .fb .matrix-question .rate {
+    padding: 4px 1px;
+  }
+}
+/* A 320px screen gives each square about 46px. The last three of those go to
+   the gap and the padding, which is the difference between "MODERATELY" fitting
+   and being clipped by three pixels. */
+@media (max-width: 340px) {
+  .fb .matrix-question .rating {
+    gap: 4px;
+  }
+  .fb .matrix-question .rate {
+    padding: 4px 0;
+  }
+}
+
+/* ------------------------------------------------ short windows, any width */
+
+/*
+ * Below this the clamps have hit their floors, so the only way to keep the
+ * screen inside the viewport is to drop things rather than shrink them. What
+ * goes is explanatory chrome — the respondent's own job title, the note that
+ * blanks are allowed — never the statement or the scale.
+ */
+@media (max-height: 620px) {
+  .fb .matrix-optional {
+    display: none;
+  }
+  .fb .matrix-who .eyebrow {
+    display: none;
+  }
+  .fb .matrix-who-func {
+    margin-top: 1px;
+  }
+}
+/* A narrow window spends height on the statement wrapping, so the same chrome
+   has to go earlier there: a 360x640 phone was nine pixels over. */
+@media (max-width: 620px) and (max-height: 740px) {
+  .fb .matrix-optional {
+    display: none;
+  }
+  .fb .matrix-who .eyebrow {
+    display: none;
+  }
+}
+@media (max-height: 620px) {
+  .fb .matrix-foot .keyhint {
+    display: none;
+  }
+}
+@media (pointer: coarse) {
+  .fb .matrix-foot .keyhint {
+    display: none;
+  }
+}
+/* The hint is the first thing to go when the footer gets tight: below this the
+   three buttons and the hint no longer share a line, and the hint wrapping
+   pushed "Next colleague" onto a row of its own. */
+@media (max-width: 1099px) {
+  .fb .matrix-foot .keyhint {
+    display: none;
+  }
+}
+@media (max-height: 520px) {
+  .fb .matrix-legend {
+    display: none;
+  }
+  .fb .matrix-progress-label {
+    font-size: 10.5px;
+  }
+  .fb .matrix-picker-label {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------------------ review */
+
+.fb .review-list {
+  list-style: none;
+  padding: 0;
+  margin: 18px 0 0;
+  display: grid;
+  gap: 6px;
+}
+.fb .review-row {
+  appearance: none;
+  cursor: pointer;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 14px;
+  background: var(--white);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-btn);
+}
+.fb .review-row:hover { background: var(--soft); }
+.fb .review-name { font-weight: 700; color: var(--ink); }
+.fb .review-state {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.fb .review-state.is-complete { color: var(--ok); }
+.fb .review-state.is-partial { color: var(--warn); }

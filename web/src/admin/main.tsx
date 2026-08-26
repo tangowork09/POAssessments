@@ -13,9 +13,11 @@ import { Login } from './Login.js';
 import { AdminShell } from './AdminShell.js';
 import { Dashboard } from './Dashboard.js';
 import { Assessments } from './Assessments.js';
+import { Cohorts } from './Cohorts.js';
 import { Candidates } from './Candidates.js';
 import { Invites } from './Invites.js';
 import { AssessmentLinks } from './AssessmentLinks.js';
+import { Activity } from './Activity.js';
 import { BrandingPanel } from './BrandingPanel.js';
 import { Head } from './ui.js';
 import type { AdminUser } from '../../../src/shared/types.js';
@@ -51,9 +53,11 @@ function App() {
       <Routes>
         <Route path="/admin" element={<Dashboard />} />
         <Route path="/admin/assessments" element={<Assessments />} />
+        <Route path="/admin/cohorts" element={<Cohorts />} />
         <Route path="/admin/candidates" element={<Candidates />} />
         <Route path="/admin/invites" element={<Invites />} />
         <Route path="/admin/links" element={<AssessmentLinks />} />
+        <Route path="/admin/activity" element={isSuperadmin ? <Activity /> : <Restricted />} />
         {/*
           The server already answers 403 here. This second gate exists so a
           non-superadmin who types the URL gets a plain explanation instead of

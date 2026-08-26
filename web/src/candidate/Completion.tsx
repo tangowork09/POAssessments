@@ -1,7 +1,7 @@
 /** Completion screen. Also the resting state for a completed personal link. */
 
 import { useEffect, useMemo, useState } from 'react';
-import type { CandidateSession } from '../../../src/shared/types.js';
+import type { CandidateCohort, CandidateSession } from '../../../src/shared/types.js';
 
 const CONFETTI_COLOURS = ['#0BA5C8', '#FF8A24', '#2FA96B', '#FFC53D', '#087E9A'];
 const CONFETTI_PIECES = 20;
@@ -11,11 +11,17 @@ export function Completion({
   token,
   reportReady,
   email,
+  cohort,
+  ratedCount,
 }: {
   session: CandidateSession;
   token: string;
   reportReady: boolean;
   email: string;
+  /** Set for a cohort instrument, where nothing is scored on submission. */
+  cohort: CandidateCohort | null;
+  /** Cohort instruments only: colleagues this respondent actually rated. */
+  ratedCount: number;
 }) {
   const details = session.response?.details;
   const completedAt = session.response?.completedAt;
@@ -89,15 +95,28 @@ export function Completion({
             the fold. */}
         <div className="stage-scroll">
           <div className="done-copy">
-            <span className="eyebrow">All {session.questions.length} answered</span>
-            <h2 className="display">Nice work{firstName ? `, ${firstName}` : ''}.</h2>
+            <span className="eyebrow">
+              {cohort
+                ? `${ratedCount} ${ratedCount === 1 ? 'colleague' : 'colleagues'} rated`
+                : `All ${session.questions.length} answered`}
+            </span>
+            <h2 className="display">
+              {cohort ? 'Thank you' : 'Nice work'}
+              {firstName ? `, ${firstName}` : ''}.
+            </h2>
             <p className="lede">
-              That is everything we needed. Your answers are in, and your profile is being put
-              together right now — written in plain language, with nothing to decode.
+              {cohort
+                ? 'That is everything we needed. Nothing you entered is shown to anyone else in the group, and nothing is reported as who said what about whom.'
+                : 'That is everything we needed. Your answers are in, and your profile is being put together right now — written in plain language, with nothing to decode.'}
             </p>
           </div>
 
           <div className="done-detail">
+            {/* For a cohort the promise of a personal report is the facilitator's
+                to make, not the platform's. Unless they turned sharing on for
+                this cohort, nothing here mentions a report, a PDF or an email —
+                the respondent is thanked and that is the whole message. */}
+            {cohort && !cohort.shareReports ? null : (
             <div className="mailrow">
               <div className="icon" aria-hidden="true">
                 <svg
@@ -115,24 +134,44 @@ export function Completion({
                 </svg>
               </div>
               <div>
-                <h3>Your PDF report is on its way</h3>
+                {/* A cohort is scored across every response at once, so there is
+                    nothing to promise "in the next few minutes" — saying so
+                    would have people refreshing an empty page for days. */}
+                <h3>{cohort ? 'Your own feedback comes later' : 'Your PDF report is on its way'}</h3>
                 <p>
-                  {email ? (
+                  {cohort ? (
                     <>
-                      It lands at <b>{email}</b> in the next few minutes.
+                      This exercise is read across the whole group, so nothing is produced until everyone
+                      has had their turn. When your facilitator closes it,{' '}
+                      {email ? (
+                        <>
+                          a summary of how colleagues experience working with you is sent to <b>{email}</b>.
+                        </>
+                      ) : (
+                        'a summary of how colleagues experience working with you is sent to you by email.'
+                      )}
                     </>
                   ) : (
-                    'It will arrive by email in the next few minutes.'
-                  )}{' '}
-                  Nothing else is needed from you.
+                    <>
+                      {email ? (
+                        <>
+                          It lands at <b>{email}</b> in the next few minutes.
+                        </>
+                      ) : (
+                        'It will arrive by email in the next few minutes.'
+                      )}{' '}
+                      Nothing else is needed from you.
+                    </>
+                  )}
                 </p>
               </div>
             </div>
+            )}
 
             <dl className="done-receipt">
               <div>
-                <dt>Assessment</dt>
-                <dd>{session.assessment.name}</dd>
+                <dt>{cohort ? 'Group' : 'Assessment'}</dt>
+                <dd>{cohort ? cohort.name : session.assessment.name}</dd>
               </div>
               {details ? (
                 <div>
@@ -143,9 +182,15 @@ export function Completion({
                 </div>
               ) : null}
               <div>
-                <dt>Statements answered</dt>
+                <dt>{cohort ? 'Colleagues rated' : 'Statements answered'}</dt>
                 <dd className="num">
-                  {session.questions.length} of {session.questions.length}
+                  {cohort
+                    ? `${ratedCount} of ${
+                        cohort.allowedTargetIds
+                          ? cohort.allowedTargetIds.length
+                          : Math.max(0, cohort.roster.length - 1)
+                      }`
+                    : `${session.questions.length} of ${session.questions.length}`}
                 </dd>
               </div>
               {completedAt ? (
@@ -160,7 +205,7 @@ export function Completion({
 
         <div className="stage-pin">
           <div className="cta-row">
-            {reportReady ? (
+            {cohort ? null : reportReady ? (
               <a
                 className="btn btn-primary btn-lg btn-block"
                 href={`/t/${encodeURIComponent(token)}/report`}
@@ -178,8 +223,9 @@ export function Completion({
           </div>
 
           <p className="fineprint">
-            You can close this page. Coming back to your link brings you right back here — it never
-            expires.
+            {cohort
+              ? 'You can close this page. Your ratings are locked in and cannot be changed from here — if something needs correcting, ask your facilitator.'
+              : 'You can close this page. Coming back to your link brings you right back here — it never expires.'}
           </p>
         </div>
       </div>

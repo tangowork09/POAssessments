@@ -12,7 +12,12 @@ import { sendMail, type MailResult } from './lib/mailer.js';
 import { buildReport } from './lib/report.js';
 import { attachPdf, dailySendCap, getSettings, brandingFrom } from './lib/settings.js';
 import { generateToken, hashToken } from './lib/tokens.js';
-import { inviteEmail, reportEmail } from './email/templates.js';
+import { cohortMemberReportEmail, inviteEmail, reportEmail } from './email/templates.js';
+import {
+  COHORT_REPORT_SELECT,
+  renderStoredCohortPdf,
+  type CohortReportRow,
+} from './lib/cohort-report-render.js';
 import { decodeImageDataUrl } from './pdf/image.js';
 import { renderReportPdf } from './pdf/report.js';
 import { toBase64 } from './pdf/writer.js';
@@ -44,6 +49,9 @@ export async function handleMessage(env: Env, msg: PipelineMessage): Promise<voi
       return;
     case 'send_invite':
       await sendBatchInvite(env, msg.batchItemId);
+      return;
+    case 'send_cohort_report':
+      await deliverCohortMemberReport(env, msg.cohortReportId, msg.reportToken);
       return;
   }
 }
@@ -241,6 +249,98 @@ export async function deliverReportEmail(
   return result;
 }
 
+// ------------------------------------------------------------ cohort reports
+
+/**
+ * Sends one member's peer-feedback report and stamps `cohort_reports.sent_at`.
+ *
+ * The token is passed in rather than read back, because member report tokens
+ * are stored only as a keyed hash. The caller mints one, writes the hash, and
+ * hands the plaintext here — which is also why a resend is a re-issue: the
+ * previous link stops working the moment a new token is written.
+ *
+ * A suppressed report is never mailed. Sending someone a document that exists
+ * only to explain that there is no document would be worse than saying nothing.
+ */
+export async function deliverCohortMemberReport(
+  env: Env,
+  cohortReportId: string,
+  reportToken: string,
+): Promise<MailResult | null> {
+  const row = await env.DB.prepare(`${COHORT_REPORT_SELECT} WHERE cr.id = ?1`)
+    .bind(cohortReportId)
+    .first<CohortReportRow>();
+
+  if (!row) {
+    console.error('[pipeline] unknown cohort report', cohortReportId);
+    return null;
+  }
+  if (row.scope !== 'member') {
+    console.error('[pipeline] refusing to mail a group report to a member', cohortReportId);
+    return null;
+  }
+  if (row.suppressed === 1) {
+    console.log('[pipeline] cohort report suppressed, not mailed:', cohortReportId);
+    return null;
+  }
+
+  const member = await env.DB.prepare(
+    'SELECT name, email FROM cohort_members WHERE id = ?1',
+  )
+    .bind(row.member_id)
+    .first<{ name: string; email: string }>();
+
+  if (!member?.email) {
+    console.log('[pipeline] no email on roster for member', row.member_id, '— nothing sent');
+    return null;
+  }
+
+  const settings = await getSettings(env);
+  const branding = brandingFrom(settings);
+  const attach = attachPdf(settings);
+  const pdf = attach ? await renderStoredCohortPdf(row, branding) : null;
+
+  const scores = JSON.parse(row.scores_json) as { member?: { coverage?: number } };
+  const mail = cohortMemberReportEmail({
+    branding,
+    logoUrl: `${baseUrl(env)}/api/logo`,
+    firstName: member.name.trim().split(/\s+/)[0] ?? member.name,
+    cohortName: row.cohort_name,
+    assessmentName: row.assessment_name,
+    reportUrl: `${baseUrl(env)}/c/${reportToken}`,
+    raters: scores.member?.coverage ?? 0,
+    attached: attach && pdf !== null,
+  });
+
+  const result = await sendMail(env, {
+    to: member.email,
+    ...(env.REPORT_CC_EMAIL ? { cc: [env.REPORT_CC_EMAIL] } : {}),
+    subject: mail.subject,
+    html: mail.html,
+    text: mail.text,
+    kind: 'cohort_report',
+    ...(pdf
+      ? {
+          attachments: [
+            {
+              filename: `${slug(row.cohort_name)}-peer-report.pdf`,
+              content: toBase64(pdf),
+              contentType: 'application/pdf',
+            },
+          ],
+        }
+      : {}),
+  });
+
+  if (result.status === 'sent') {
+    await env.DB.prepare("UPDATE cohort_reports SET sent_at = datetime('now') WHERE id = ?1")
+      .bind(cohortReportId)
+      .run();
+  }
+
+  return result;
+}
+
 // ------------------------------------------------------------- bulk invites
 
 /**
@@ -423,7 +523,9 @@ export async function ensureCandidateAndLink(
   await env.DB.prepare(
     `INSERT INTO responses (id, assessment_id, candidate_id, status)
      VALUES (?1, ?2, ?3, 'invited')
-     ON CONFLICT (assessment_id, candidate_id) DO NOTHING`,
+     -- Names idx_responses_identity in full. A partial target does not match
+     -- the index and SQLite refuses the statement outright.
+     ON CONFLICT (assessment_id, candidate_id, COALESCE(cohort_id, ''), round_no) DO NOTHING`,
   )
     .bind(newId('resp'), input.assessmentId, candidate.id)
     .run();

@@ -48,13 +48,18 @@ export const candidateDetailsSchema = z.object({
  * value outside the instrument's own range is rejected at the edge, not
  * clamped, because a 5 arriving for a 0–4 instrument means the client and the
  * server disagree about the scale and silently absorbing it would hide that.
+ *
+ * `maxNo` is the highest answer number the instrument can produce. A statement
+ * inventory tops out at its statement count; a cohort instrument addresses a
+ * matrix cell, so its ceiling is roster size × items and is passed in from the
+ * cohort rather than assumed.
  */
-export function answerBatchSchemaFor(min: number, max: number) {
+export function answerBatchSchemaFor(min: number, max: number, maxNo = 200) {
   return z.object({
     answers: z
       .array(
         z.object({
-          no: z.number().int().min(1).max(200),
+          no: z.number().int().min(1).max(maxNo),
           value: z
             .number()
             .int()
@@ -64,7 +69,9 @@ export function answerBatchSchemaFor(min: number, max: number) {
       )
       .min(1)
       .max(200),
-    resumePage: z.number().int().min(0).max(100).optional(),
+    // A cohort instrument pages by roster member, so the ceiling is the
+    // largest roster the platform accepts rather than a statement-count page.
+    resumePage: z.number().int().min(0).max(500).optional(),
   });
 }
 
@@ -125,6 +132,160 @@ export const mailSettingsSchema = z.object({
 });
 
 export const linkToggleSchema = z.object({ active: z.boolean() });
+
+// ------------------------------------------------------------------ cohorts
+
+/**
+ * A cohort respondent identifies themselves from the roster instead of filling
+ * in a details form. Name and function are the cohort's own facts, fixed by the
+ * facilitator, so the only thing asked for is an email -- and that is asked for
+ * because it is how their own peer-feedback report reaches them, not for
+ * demographics. Age, experience and gender are not collected: they are
+ * irrelevant to a network score and this is a named group.
+ */
+/**
+ * Identity for a cohort respondent is the email the facilitator put on the
+ * roster — nothing else. There is no name picker: a list of who is in the
+ * group is the facilitator's information, and handing it to whoever opens the
+ * link would leak the roster to anyone the link reaches.
+ */
+export const cohortIdentitySchema = z.object({
+  email: emailSchema,
+  /** Required only when the cohort has OTP switched on. Six digits, mailed. */
+  otp: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code from your email').optional(),
+});
+
+/** Asking for a code: the email alone. */
+export const cohortOtpRequestSchema = z.object({
+  email: emailSchema,
+});
+
+/**
+ * A cohort's memorable alias, used as a bare path (`/acme-leadership-2026`).
+ *
+ * Deliberately narrow: it shares a namespace with the app's own routes and with
+ * the instrument aliases, so it is lower-case, hyphen-separated and long enough
+ * that a two-letter collision with a future route is unlikely.
+ */
+export const cohortSlugSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(3, 'Use at least 3 characters')
+  .max(60)
+  .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, 'Lower-case letters, numbers and hyphens only');
+
+/**
+ * The editable settings of a cohort, without defaults.
+ *
+ * The defaults live on the create schema alone, and the update schema is built
+ * from these bare fields rather than from `cohortCreateSchema.partial()`.
+ * `.partial()` makes a key optional but does not strip its `.default()`, so a
+ * partial update that omitted `organisation` would still parse as `''` — and
+ * the handler's COALESCE, seeing a value rather than null, would overwrite the
+ * stored one. A PATCH that only flipped the status silently blanked the
+ * organisation and reset the rater floor and tie threshold to their defaults.
+ */
+const cohortFields = {
+  name: trimmed(160).min(1, 'Give the cohort a name'),
+  shortSlug: z.union([cohortSlugSchema, z.literal('')]),
+  // The alias can be switched off without being given up: the slug stays
+  // reserved to this cohort and the token link keeps working, the alias 404s.
+  slugActive: z.boolean(),
+  organisation: trimmed(160),
+  minRaters: z.number().int().min(1).max(50),
+  tieThreshold: z.number().int().min(1).max(5),
+  minRatedTargets: z.number().int().min(0).max(200),
+  /** Whether participants are promised their own report. See migration 0015. */
+  shareReports: z.boolean(),
+  /** Whether a one-time code must verify the roster email. See migration 0017. */
+  otpRequired: z.boolean(),
+};
+
+export const cohortCreateSchema = z.object({
+  name: cohortFields.name,
+  organisation: cohortFields.organisation.default(''),
+  minRaters: cohortFields.minRaters.default(3),
+  tieThreshold: cohortFields.tieThreshold.default(4),
+  minRatedTargets: cohortFields.minRatedTargets.default(1),
+});
+
+export const cohortUpdateSchema = z
+  .object({ ...cohortFields, status: z.enum(['draft', 'open', 'closed']) })
+  .partial();
+
+export const rosterRowSchema = z.object({
+  name: trimmed(120).min(1, 'Every roster row needs a name'),
+  func: trimmed(120).default(''),
+  email: z.union([emailSchema, z.literal('')]).default(''),
+});
+
+/**
+ * The roster is replaced wholesale rather than diffed. Positions are the
+ * addresses the stored ratings use, so the handler -- not this schema -- is
+ * where existing positions are preserved; see the roster route.
+ */
+export const rosterSetSchema = z.object({
+  members: z.array(rosterRowSchema).min(1).max(200),
+});
+
+/**
+ * The whole assignment map, replaced wholesale like the roster: who rates whom
+ * when the cohort is too big for everyone-rates-everyone. An empty list clears
+ * the map and returns the cohort to the full matrix.
+ */
+export const assignmentsSetSchema = z.object({
+  assignments: z
+    .array(
+      z.object({
+        raterMemberId: z.string().min(1),
+        targetMemberIds: z.array(z.string().min(1)).max(200),
+      }),
+    )
+    .max(200),
+});
+
+/** Whole rows to blank out, addressed by roster position. */
+export const clearRowSchema = z.object({
+  memberNos: z.array(z.number().int().min(1).max(200)).min(1).max(200),
+  resumePage: z.number().int().min(0).max(500).optional(),
+});
+
+/** One roster member, added or edited on their own. */
+export const rosterMemberSchema = z.object({
+  name: trimmed(120).min(1, 'Name is required'),
+  func: trimmed(120).default(''),
+  email: z.union([emailSchema, z.literal('')]).default(''),
+});
+
+/**
+ * A roster workbook, uploaded rather than pasted. Base64 because the Worker
+ * reads the bytes itself: the same three columns as the paste box, so a client
+ * can hand over the spreadsheet the facilitator already has instead of
+ * retyping it.
+ */
+export const rosterUploadSchema = z.object({
+  // ~6 MB of base64 is about 4.5 MB of workbook, far more than a roster needs.
+  fileBase64: z.string().min(1).max(6_000_000),
+  filename: trimmed(200).default(''),
+});
+
+/**
+ * One workbook in, one working cohort out. Name and organisation typed in the
+ * console win over anything found in the file; the file wins over its own
+ * filename.
+ */
+export const cohortImportSchema = z.object({
+  fileBase64: z.string().min(1).max(6_000_000),
+  filename: trimmed(200).default(''),
+  name: z.union([trimmed(160), z.literal('')]).default(''),
+  organisation: z.union([trimmed(160), z.literal('')]).default(''),
+});
+
+/** Roster paste: one member per line, `Name, Function, email`. */
+export const rosterPasteSchema = z.object({
+  text: z.string().max(200_000),
+});
 
 export type CandidateDetailsInput = z.infer<typeof candidateDetailsSchema>;
 export type BulkRow = z.infer<typeof bulkRowSchema>;

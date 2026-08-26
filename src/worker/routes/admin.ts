@@ -11,6 +11,8 @@ import type { Env } from '../env.js';
 import { baseUrl } from '../env.js';
 import { clearSession, issueSession, readSession, toRole, verifyPassword } from '../lib/auth.js';
 import type { AdminHono } from '../lib/auth.js';
+import { auditAll, recordBefore } from '../lib/audit.js';
+import { roundName } from '../lib/cohort.js';
 import { newId } from '../lib/ids.js';
 import { sendMail } from '../lib/mailer.js';
 import { clientKey, rateLimit } from '../lib/ratelimit.js';
@@ -43,7 +45,7 @@ import {
   sendsToday,
 } from '../pipeline.js';
 import { inviteEmail } from '../email/templates.js';
-import { kindForAssessment, type AssessmentKind } from '../../shared/assessments.js';
+import { isCohortAssessment, kindForAssessment, type AssessmentKind } from '../../shared/assessments.js';
 import { EGO_STATES } from '../../shared/ego.js';
 import { EGO_MAX_STATE_SCORE, type EgoResult } from '../../shared/ego-scoring.js';
 import { MAX_SIDE_SCORE, MAX_STYLE_SCORE, type ScoreResult } from '../../shared/scoring.js';
@@ -113,6 +115,11 @@ const requireSuperadmin: MiddlewareHandler<AdminHono> = async (c, next) => {
   c.set('admin', claims);
   await next();
 };
+
+// Every mutating admin request is logged, whether or not its handler describes
+// itself. Above the auth guards, so a refused request is logged too — "someone
+// tried" is exactly what you want to see after something breaks.
+adminRoutes.use('*', auditAll);
 
 adminRoutes.use('/dashboard', requireAdmin);
 adminRoutes.use('/assessments/*', requireAdmin);
@@ -706,6 +713,22 @@ adminRoutes.post('/links/:linkId/active', async (c) => {
   const parsed = linkToggleSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: 'Invalid payload' }, 400);
 
+  const before = await c.env.DB.prepare(
+    'SELECT id, kind, assessment_id, cohort_id, round_no, token_plain, active FROM links WHERE id = ?1',
+  )
+    .bind(c.req.param('linkId'))
+    .first<Record<string, unknown>>();
+  if (before) {
+    recordBefore(c, {
+      action: parsed.data.active ? 'links.activate' : 'links.deactivate',
+      entity: 'link',
+      entityId: c.req.param('linkId'),
+      summary: `${parsed.data.active ? 'Re-activated' : 'Deactivated'} a ${String(before.kind)} link.`,
+      before,
+      after: { active: parsed.data.active },
+    });
+  }
+
   const res = await c.env.DB.prepare('UPDATE links SET active = ?2 WHERE id = ?1')
     .bind(c.req.param('linkId'), parsed.data.active ? 1 : 0)
     .run();
@@ -716,15 +739,74 @@ adminRoutes.post('/links/:linkId/active', async (c) => {
 // -------------------------------------------------------------- generic links
 
 adminRoutes.get('/links', async (c) => {
+  // `l.cohort_id IS NULL` is the whole fix for a page that had started showing
+  // "Collaboration Sociometry" five times: a cohort instrument has one generic
+  // link *per cohort per round*, and joining them all onto the assessment
+  // multiplied the instrument's row once per group. An instrument-level link is
+  // the one that belongs to no group.
   const { results } = await c.env.DB.prepare(
     `SELECT a.id AS assessment_id, a.name, a.slug, a.status, a.question_count,
             l.id AS link_id, l.active, l.created_at, l.last_seen_at
        FROM assessments a
-       LEFT JOIN links l ON l.assessment_id = a.id AND l.kind = 'generic'
+       LEFT JOIN links l
+              ON l.assessment_id = a.id AND l.kind = 'generic' AND l.cohort_id IS NULL
       ORDER BY a.status DESC, a.name`,
   ).all();
+
+  // The group links, listed under the instrument they belong to rather than
+  // beside it. A facilitator looking for "the sociometry link" is looking for
+  // one of these, and the page should say which group and which round it opens.
+  const cohortLinks = await c.env.DB.prepare(
+    `SELECT l.id AS link_id, l.assessment_id, l.active, l.created_at, l.last_seen_at,
+            l.token_plain, l.round_no,
+            co.id AS cohort_id, co.name AS cohort_name, co.organisation, co.status AS cohort_status,
+            rd.label AS round_label, rd.closed_at AS round_closed_at,
+            (SELECT COUNT(*) FROM responses r
+              WHERE r.cohort_id = co.id AND r.round_no = l.round_no
+                AND r.status = 'completed') AS respondents
+       FROM links l
+       JOIN cohorts co ON co.id = l.cohort_id
+       LEFT JOIN cohort_rounds rd ON rd.cohort_id = co.id AND rd.no = l.round_no
+      WHERE l.kind = 'generic'
+      ORDER BY co.created_at DESC, l.round_no DESC`,
+  ).all<{
+    link_id: string;
+    assessment_id: string;
+    active: number;
+    created_at: string;
+    last_seen_at: string | null;
+    token_plain: string | null;
+    round_no: number;
+    cohort_id: string;
+    cohort_name: string;
+    organisation: string;
+    cohort_status: string;
+    round_label: string | null;
+    round_closed_at: string | null;
+    respondents: number;
+  }>();
+
   const settings = await getSettings(c.env);
-  return c.json({ links: results ?? [], activeTheme: settings['theme.active'] });
+  return c.json({
+    links: results ?? [],
+    cohortLinks: (cohortLinks.results ?? []).map((r) => ({
+      linkId: r.link_id,
+      assessmentId: r.assessment_id,
+      cohortId: r.cohort_id,
+      cohortName: r.cohort_name,
+      organisation: r.organisation,
+      cohortStatus: r.cohort_status,
+      roundNo: r.round_no,
+      roundName: roundName({ no: r.round_no, label: r.round_label ?? '' }),
+      roundClosed: r.round_closed_at !== null,
+      active: r.active === 1,
+      token: r.token_plain,
+      respondents: r.respondents,
+      createdAt: r.created_at,
+      lastSeenAt: r.last_seen_at,
+    })),
+    activeTheme: settings['theme.active'],
+  });
 });
 
 /**
@@ -738,13 +820,40 @@ adminRoutes.post('/links/generic/:assessmentId', async (c) => {
     .first<{ id: string }>();
   if (!assessment) return c.json({ error: 'Unknown assessment' }, 404);
 
+  // A cohort instrument's open link belongs to a cohort, not to the instrument:
+  // one issued here would carry no cohort, resolve fine, and then tell whoever
+  // opened it that it is not attached to a group.
+  if (isCohortAssessment(assessmentId)) {
+    return c.json(
+      {
+        error:
+          'This instrument is run per group. Create a cohort and issue its link from the Cohorts panel — a link without a group has nobody to rate.',
+      },
+      400,
+    );
+  }
+
   const token = generateToken();
   const hash = await hashToken(token, c.env.LINK_TOKEN_SECRET);
   const existing = await c.env.DB.prepare(
-    `SELECT id FROM links WHERE kind = 'generic' AND assessment_id = ?1`,
+    `SELECT id, token_plain FROM links
+      WHERE kind = 'generic' AND assessment_id = ?1 AND cohort_id IS NULL`,
   )
     .bind(assessmentId)
-    .first<{ id: string }>();
+    .first<{ id: string; token_plain: string | null }>();
+
+  // The link this replaces. Rotating is the whole point of the button, and the
+  // log is where the previous token survives being replaced.
+  recordBefore(c, {
+    action: existing ? 'links.generic.reissue' : 'links.generic.issue',
+    entity: 'assessment',
+    entityId: assessmentId,
+    summary: existing
+      ? `Re-issued the open link for ${assessmentId}. Every copy of the previous link stopped working.`
+      : `Issued the open link for ${assessmentId}.`,
+    before: existing ? { linkId: existing.id, token: existing.token_plain } : null,
+    after: { token },
+  });
 
   if (existing) {
     await c.env.DB.prepare('UPDATE links SET token_hash = ?2, token_plain = ?3, active = 1 WHERE id = ?1')
@@ -760,6 +869,122 @@ adminRoutes.post('/links/generic/:assessmentId', async (c) => {
   }
 
   return c.json({ url: `${baseUrl(c.env, c.req.raw)}/t/${token}`, rotated: Boolean(existing) });
+});
+
+// ------------------------------------------------------------------ activity
+
+/**
+ * The log, newest first.
+ *
+ * Superadmin only. It carries previous link tokens, which are credentials for
+ * as long as they are un-rotated, and it names who did what — neither belongs
+ * in front of every administrator.
+ */
+adminRoutes.get('/activity', requireSuperadmin, async (c) => {
+  const limit = Math.min(Math.max(Number(c.req.query('limit') ?? 100), 1), 500);
+  const action = c.req.query('action') ?? '';
+  const entityId = c.req.query('entityId') ?? '';
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, at, admin_email, action, entity, entity_id, summary,
+            before_json, after_json, method, path, status
+       FROM admin_audit
+      WHERE (?2 = '' OR action LIKE ?2 || '%')
+        AND (?3 = '' OR entity_id = ?3)
+      ORDER BY at DESC, rowid DESC
+      LIMIT ?1`,
+  )
+    .bind(limit, action, entityId)
+    .all<{
+      id: string;
+      at: string;
+      admin_email: string | null;
+      action: string;
+      entity: string | null;
+      entity_id: string | null;
+      summary: string;
+      before_json: string | null;
+      after_json: string | null;
+      method: string | null;
+      path: string | null;
+      status: number | null;
+    }>();
+
+  return c.json({
+    entries: (results ?? []).map((r) => ({
+      id: r.id,
+      at: r.at,
+      admin: r.admin_email,
+      action: r.action,
+      entity: r.entity,
+      entityId: r.entity_id,
+      summary: r.summary,
+      before: r.before_json,
+      after: r.after_json,
+      method: r.method,
+      path: r.path,
+      status: r.status,
+    })),
+  });
+});
+
+/**
+ * Puts a rotated link back.
+ *
+ * The one recovery the log can actually perform. A token is only ever stored as
+ * a hash, so a link cannot be "undeleted" from the links table — but the plain
+ * token of the link that was replaced is in the log, and re-hashing it makes
+ * the old link work again. Used when a rotation went out to the wrong list, or
+ * when someone rotated the link people were already halfway through answering.
+ *
+ * The current token is logged in turn, so this is reversible too.
+ */
+adminRoutes.post('/activity/:entryId/restore-link', requireSuperadmin, async (c) => {
+  const entry = await c.env.DB.prepare(
+    'SELECT id, action, entity_id, before_json FROM admin_audit WHERE id = ?1',
+  )
+    .bind(c.req.param('entryId'))
+    .first<{ id: string; action: string; entity_id: string | null; before_json: string | null }>();
+  if (!entry) return c.json({ error: 'No such log entry.' }, 404);
+
+  interface PreviousLink {
+    linkId?: string;
+    token?: string | null;
+  }
+  let before: PreviousLink | null = null;
+  try {
+    before = entry.before_json ? (JSON.parse(entry.before_json) as PreviousLink) : null;
+  } catch {
+    before = null;
+  }
+  if (!before?.linkId || !before.token) {
+    return c.json({ error: 'That entry has no previous link to restore.' }, 400);
+  }
+
+  const current = await c.env.DB.prepare(
+    'SELECT id, token_plain FROM links WHERE id = ?1',
+  )
+    .bind(before.linkId)
+    .first<{ id: string; token_plain: string | null }>();
+  if (!current) return c.json({ error: 'That link no longer exists.' }, 404);
+
+  const hash = await hashToken(before.token, c.env.LINK_TOKEN_SECRET);
+  await c.env.DB.prepare(
+    'UPDATE links SET token_hash = ?2, token_plain = ?3, active = 1 WHERE id = ?1',
+  )
+    .bind(before.linkId, hash, before.token)
+    .run();
+
+  recordBefore(c, {
+    action: 'links.restore',
+    entity: 'link',
+    entityId: before.linkId,
+    summary: 'Restored a previously rotated link from the activity log.',
+    before: { linkId: before.linkId, token: current.token_plain },
+    after: { linkId: before.linkId, token: before.token, fromEntry: entry.id },
+  });
+
+  return c.json({ url: `${baseUrl(c.env, c.req.raw)}/t/${before.token}` });
 });
 
 // ------------------------------------------------------------------- invites

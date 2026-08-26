@@ -6,7 +6,18 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, api } from '../lib/api.js';
-import { CardHead, EmptyState, ErrorState, Head, Loading, StatusPill, Toast, useToast } from './ui.js';
+import {
+  CardHead,
+  DataTable,
+  EmptyState,
+  ErrorState,
+  Head,
+  Loading,
+  StatusPill,
+  Toast,
+  useToast,
+} from './ui.js';
+import type { Column } from './ui.js';
 import { STYLES } from '../../../src/shared/styles.js';
 import { MAX_STYLE_SCORE } from '../../../src/shared/scoring.js';
 
@@ -91,58 +102,102 @@ export function Assessments() {
             body="Instruments live in the database. Once one is seeded it appears here with its questions and funnel."
           />
         ) : (
-          <div className="table-scroll">
-            <table className="table-funnel">
-              <thead>
-                <tr>
-                  <th>Assessment</th>
-                  <th>Status</th>
-                  <th className="right">Questions</th>
-                  <th className="right">Invited</th>
-                  <th className="right">Started</th>
-                  <th className="right">Completed</th>
-                  <th className="right">Completed of started</th>
-                  <th>Report email</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((a) => (
-                  <tr key={a.id}>
-                    <td className="name">
-                      {a.name}
-                      <span className="cell-sub">{a.description}</span>
-                    </td>
-                    <td>
-                      <StatusPill status={a.status} />
-                    </td>
-                    <td className="right num">{a.question_count}</td>
-                    <td className="right num">{a.invited}</td>
-                    <td className="right num">{a.started}</td>
-                    <td className="right num">{a.completed}</td>
-                    <td className="right num">
-                      {a.started > 0 ? `${Math.round((a.completed / a.started) * 100)}%` : '—'}
-                    </td>
-                    <td>
-                      <label className="check-label">
-                        <input
-                          type="checkbox"
-                          checked={a.auto_send_report === 1}
-                          disabled={busy === a.id}
-                          onChange={() => toggleAutoSend(a)}
-                        />
-                        <span>{a.auto_send_report === 1 ? 'Automatic' : 'Manual'}</span>
-                      </label>
-                      {a.auto_send_report === 0 && a.unsent_reports > 0 ? (
-                        <span className="cell-sub">
-                          {a.unsent_reports} waiting to be sent
-                        </span>
-                      ) : null}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            rows={rows}
+            rowKey={(a) => a.id}
+            pageSize={25}
+            minWidth={980}
+            className="table-funnel"
+            columns={([
+              {
+                key: 'name',
+                header: 'Assessment',
+                className: 'name',
+                value: (a) => `${a.name} ${a.description}`,
+                cell: (a) => (
+                  <>
+                    {a.name}
+                    <span className="cell-sub">{a.description}</span>
+                  </>
+                ),
+              },
+              {
+                key: 'status',
+                header: 'Status',
+                width: '110px',
+                value: (a) => a.status,
+                cell: (a) => <StatusPill status={a.status} />,
+              },
+              {
+                key: 'questions',
+                header: 'Questions',
+                width: '100px',
+                align: 'right',
+                className: 'num',
+                value: (a) => a.question_count,
+                cell: (a) => a.question_count,
+              },
+              {
+                key: 'invited',
+                header: 'Invited',
+                width: '90px',
+                align: 'right',
+                className: 'num',
+                value: (a) => a.invited,
+                cell: (a) => a.invited,
+              },
+              {
+                key: 'started',
+                header: 'Started',
+                width: '90px',
+                align: 'right',
+                className: 'num',
+                value: (a) => a.started,
+                cell: (a) => a.started,
+              },
+              {
+                key: 'completed',
+                header: 'Completed',
+                width: '110px',
+                align: 'right',
+                className: 'num',
+                value: (a) => a.completed,
+                cell: (a) => a.completed,
+              },
+              {
+                key: 'rate',
+                header: 'Completed of started',
+                width: '150px',
+                align: 'right',
+                className: 'num',
+                value: (a) => (a.started > 0 ? Math.round((a.completed / a.started) * 100) : -1),
+                cell: (a) =>
+                  a.started > 0 ? `${Math.round((a.completed / a.started) * 100)}%` : '—',
+              },
+              {
+                key: 'mail',
+                header: 'Report email',
+                width: '170px',
+                value: (a) => (a.auto_send_report === 1 ? 'automatic' : 'manual'),
+                cell: (a) => (
+                  <>
+                    <label className="check-label">
+                      <input
+                        type="checkbox"
+                        checked={a.auto_send_report === 1}
+                        disabled={busy === a.id}
+                        onChange={() => toggleAutoSend(a)}
+                      />
+                      <span>{a.auto_send_report === 1 ? 'Automatic' : 'Manual'}</span>
+                    </label>
+                    {a.auto_send_report === 0 && a.unsent_reports > 0 ? (
+                      <span className="cell-sub">{a.unsent_reports} waiting to be sent</span>
+                    ) : null}
+                  </>
+                ),
+              },
+            ] as Column<Row>[])}
+          />
         )}
       </section>
 

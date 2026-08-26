@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { ApiError, api } from '../lib/api.js';
 import { DEFAULT_BRANDING, LogoSlot, Shell, useAccent } from './Shell.js';
+import { ReportSkeleton } from './Skeleton.js';
 import { MAX_SIDE_SCORE, MAX_STYLE_SCORE } from '../../../src/shared/scoring.js';
 import { EGO_MAX_STATE_SCORE } from '../../../src/shared/ego-scoring.js';
 import type {
@@ -87,10 +88,8 @@ export function ReportPage({ source }: { source: 'report' | 'link' }) {
 
   if (!report) {
     return (
-      <Shell branding={DEFAULT_BRANDING}>
-        <p className="hint" style={{ marginTop: 48 }}>
-          Preparing your report…
-        </p>
+      <Shell branding={DEFAULT_BRANDING} friendly>
+        <ReportSkeleton />
       </Shell>
     );
   }

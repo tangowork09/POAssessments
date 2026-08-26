@@ -15,19 +15,42 @@ import {
   EGO_QUESTION_COUNT,
   EGO_SCALE_LABELS,
 } from './ego-scoring.js';
+import {
+  SOCIO_ITEM_COUNT,
+  SOCIO_MAX_ANSWER,
+  SOCIO_MIN_ANSWER,
+  SOCIO_SCALE_LABELS,
+  SOCIO_SCALE_SHORT_LABELS,
+} from './socio.js';
 
 /** Which scoring engine and which report shape an assessment uses. */
-export type AssessmentKind = 'isi' | 'ego';
+export type AssessmentKind = 'isi' | 'ego' | 'socio';
 
 export const ASSESSMENT_ID = {
   isi: 'asm_influencing_style',
   ego: 'asm_ta_ego_states',
+  socio: 'asm_sociometry',
 } as const satisfies Record<AssessmentKind, string>;
 
 const KIND_BY_ID: Record<string, AssessmentKind> = {
   [ASSESSMENT_ID.isi]: 'isi',
   [ASSESSMENT_ID.ego]: 'ego',
+  [ASSESSMENT_ID.socio]: 'socio',
 };
+
+/**
+ * Cohort instruments are rated about *other people*, so they need a roster
+ * before anyone can start, they are scored across the whole group rather than
+ * per response, and their reports live in `cohort_reports` rather than
+ * `reports`. Everything that branches on that branches on this.
+ */
+export function isCohortKind(kind: AssessmentKind | null): boolean {
+  return kind === 'socio';
+}
+
+export function isCohortAssessment(assessmentId: string): boolean {
+  return isCohortKind(kindForAssessment(assessmentId));
+}
 
 /**
  * Resolves an assessment id to its kind. An instrument seeded in D1 without an
@@ -82,6 +105,8 @@ export interface AssessmentIntro {
 
 export interface AssessmentConfig {
   kind: AssessmentKind;
+  /** True when the instrument is answered about a roster rather than oneself. */
+  cohortBased?: boolean;
   id: string;
   slug: string;
   /** Display name; the DB row is authoritative, this is the fallback. */
@@ -153,6 +178,45 @@ export const ASSESSMENTS: Readonly<Record<AssessmentKind, AssessmentConfig>> = {
       emphasis:
         'In responding to each statement, read it first and once you have understood it, respond intuitively rather than rationally.',
       cta: 'Begin Test',
+      ctaResume: 'Continue where I left off',
+    },
+  },
+
+  socio: {
+    kind: 'socio',
+    cohortBased: true,
+    id: ASSESSMENT_ID.socio,
+    slug: 'collaboration-sociometry',
+    name: 'Collaboration Sociometry',
+    // Twelve statements, but answered once per colleague rather than once in
+    // total, so the real length depends on the roster and how much of it the
+    // respondent actually works with. `questionCount` stays the item count
+    // because that is what the `questions` table holds.
+    questionCount: SOCIO_ITEM_COUNT,
+    scale: {
+      min: SOCIO_MIN_ANSWER,
+      max: SOCIO_MAX_ANSWER,
+      labels: SOCIO_SCALE_LABELS,
+      shortLabels: SOCIO_SCALE_SHORT_LABELS,
+    },
+    intro: {
+      eyebrow: '12 statements per colleague - about 15 minutes',
+      // The workbook's own title for the exercise.
+      title: 'Collaboration Sociometry',
+      lede: 'This short exercise looks at how leaders in the group work together - who you rely on, and who you find it easy to work with. Your answers, combined with everyone else\'s, help build an honest picture of where collaboration is strong and where it can be strengthened. It is not a performance review, and it is not scored against any individual.',
+      instructionsTitle: 'How to fill it in',
+      // Verbatim from the workbook's Instructions sheet, with the two
+      // spreadsheet-specific lines rewritten for a screen that already knows
+      // who you are and already leaves your own row out.
+      instructions: [
+        'You will see the leaders in the group one at a time.',
+        'For each leader, rate how true each statement is of your experience with them.',
+        'Rate only the people you actually work with. If you have no real basis to judge someone, skip them - a skip is fine and is useful information in itself.',
+        'There are no right or wrong answers. Answer for how things actually are, not how they should be.',
+      ],
+      emphasis:
+        'Your own name is left out automatically. Your progress saves itself, so you can stop at any point and pick up exactly where you left off.',
+      cta: 'Begin',
       ctaResume: 'Continue where I left off',
     },
   },

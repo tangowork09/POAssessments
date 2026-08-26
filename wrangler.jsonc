@@ -93,7 +93,7 @@
         // the no-reply sender is a machine address and nothing reads it.
         "MAIL_REPLY_TO": "support@poassessments.com",
         "ADMIN_EMAIL": "admin@poassessments.com",
-        "REPORT_CC_EMAIL": "niveditasaxena12@gmail.com"
+        "REPORT_CC_EMAIL": "nivisaxena@gmail.com"
       },
       "d1_databases": [
         {

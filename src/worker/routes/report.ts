@@ -7,6 +7,12 @@
  *
  * Both return the identical payload, so the HTML report page and the PDF are
  * always rendering the same numbers.
+ *
+ * A cohort instrument has a third door, /api/report/cohort/:token. Its reports
+ * are not facts about one response — there is a group report and one report per
+ * rated member — so they carry their own payload union and their own renderer,
+ * and they are matched before the per-response routes so that `cohort` is never
+ * mistaken for a report token.
  */
 
 import { Hono } from 'hono';
@@ -14,6 +20,7 @@ import type { Context } from 'hono';
 import type { Env } from '../env.js';
 import { clientKey, rateLimit } from '../lib/ratelimit.js';
 import { getBranding } from '../lib/settings.js';
+import { brandingForClient } from '../lib/brand-asset.js';
 import { hashToken, looksLikeToken } from '../lib/tokens.js';
 import {
   REPORT_SELECT as SELECT_REPORT,
@@ -21,6 +28,13 @@ import {
   toPayload,
   type ReportRow,
 } from '../lib/report-render.js';
+import {
+  COHORT_REPORT_SELECT,
+  cohortPdfName,
+  renderStoredCohortPdf,
+  toCohortPayload,
+  type CohortReportRow,
+} from '../lib/cohort-report-render.js';
 
 export const reportRoutes = new Hono<{ Bindings: Env }>();
 
@@ -44,6 +58,48 @@ async function byLinkToken(env: Env, token: string): Promise<ReportRow | null> {
     .first<ReportRow>();
 }
 
+// ------------------------------------------------------------ cohort reports
+//
+// Declared before '/:token' so the literal segment wins the match.
+
+async function byCohortToken(env: Env, token: string): Promise<CohortReportRow | null> {
+  if (!looksLikeToken(token)) return null;
+  const hash = await hashToken(token, env.LINK_TOKEN_SECRET);
+  return env.DB.prepare(`${COHORT_REPORT_SELECT} WHERE cr.token_hash = ?1`)
+    .bind(hash)
+    .first<CohortReportRow>();
+}
+
+reportRoutes.get('/cohort/:token', async (c) => {
+  const token = c.req.param('token');
+  const rl = await rateLimit(c.env, `crpt:${clientKey(c.req.raw)}`, 120, 60);
+  if (!rl.allowed) return c.json({ error: 'Too many requests' }, 429);
+
+  const row = await byCohortToken(c.env, token);
+  if (!row) return c.json({ error: 'This report link was not recognised.' }, 404);
+
+  return c.json(toCohortPayload(row, token, brandingForClient(await getBranding(c.env))));
+});
+
+reportRoutes.get('/cohort/:token/pdf', async (c) => {
+  const rl = await rateLimit(c.env, `crptpdf:${clientKey(c.req.raw)}`, 60, 60);
+  if (!rl.allowed) return c.json({ error: 'Too many requests' }, 429);
+
+  const row = await byCohortToken(c.env, c.req.param('token'));
+  if (!row) return c.json({ error: 'Report not found.' }, 404);
+
+  const bytes = await renderStoredCohortPdf(row, await getBranding(c.env));
+  return new Response(bytes, {
+    headers: {
+      'content-type': 'application/pdf',
+      'content-disposition': `inline; filename="${cohortPdfName(row)}.pdf"`,
+      'cache-control': 'private, no-store',
+    },
+  });
+});
+
+// ----------------------------------------------------- per-response reports
+
 reportRoutes.get('/:token', async (c) => {
   const token = c.req.param('token');
   const rl = await rateLimit(c.env, `rpt:${clientKey(c.req.raw)}`, 120, 60);
@@ -52,7 +108,7 @@ reportRoutes.get('/:token', async (c) => {
   const row = await byReportToken(c.env, token);
   if (!row) return c.json({ error: 'This report link was not recognised.' }, 404);
 
-  return c.json(toPayload(row, token, await getBranding(c.env)));
+  return c.json(toPayload(row, token, brandingForClient(await getBranding(c.env))));
 });
 
 reportRoutes.get('/by-link/:token', async (c) => {
@@ -65,7 +121,7 @@ reportRoutes.get('/by-link/:token', async (c) => {
 
   // The report token is not recoverable from its hash; the candidate reading
   // through their own link does not need it, so it is reported as empty.
-  return c.json(toPayload(row, '', await getBranding(c.env)));
+  return c.json(toPayload(row, '', brandingForClient(await getBranding(c.env))));
 });
 
 /**

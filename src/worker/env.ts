@@ -32,7 +32,13 @@ export type PipelineMessage =
    * working report URL immediately; the pipeline stores only its hash.
    */
   | { type: 'score_and_deliver'; responseId: string; reportToken: string }
-  | { type: 'send_invite'; batchItemId: string };
+  | { type: 'send_invite'; batchItemId: string }
+  /**
+   * One leader's peer-feedback report. A fresh token is minted per send, since
+   * member report tokens are stored only as hashes and are not recoverable —
+   * so a resend is a re-issue, and the previous link stops working.
+   */
+  | { type: 'send_cohort_report'; cohortReportId: string; reportToken: string };
 
 /** Base URL for links in mail, preferring the request origin in development. */
 export function baseUrl(env: Env, req?: Request): string {

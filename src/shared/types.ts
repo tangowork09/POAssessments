@@ -3,6 +3,7 @@
 import type { AssessmentIntro, AssessmentKind } from './assessments.js';
 import type { EgoBand, EgoResult } from './ego-scoring.js';
 import type { Band, ScoreResult } from './scoring.js';
+import type { SocioGroupResult, SocioMemberResult } from './socio-scoring.js';
 
 export interface Question {
   no: number;
@@ -52,6 +53,12 @@ export interface CandidateSession {
   scale: ScaleInfo;
   /** Begin-test copy for this instrument. */
   intro: AssessmentIntro;
+  /**
+   * Present only for a cohort instrument (Collaboration Sociometry). Carries
+   * the roster the respondent rates and who they have identified themselves
+   * as. null for the self-rating instruments, which have no cohort.
+   */
+  cohort: CandidateCohort | null;
   /** Present once a response row exists (personal link, or generic link resumed). */
   response: CandidateResponseState | null;
   /**
@@ -62,6 +69,68 @@ export interface CandidateSession {
   reportAvailable: boolean;
 }
 
+/**
+ * One run of a cohort instrument, as the respondent sees it: who else is in the
+ * group, and which of them they are.
+ *
+ * The roster is not a list of candidates. Roster membership is the cohort's own
+ * fact, fixed by the facilitator before anyone is invited, and `no` is the
+ * position the answer encoding addresses -- so it never renumbers.
+ */
+export interface CandidateCohort {
+  cohortId: string;
+  name: string;
+  organisation: string;
+  /** The wave being answered. Shown only when a cohort has run more than once. */
+  roundNo: number;
+  roundName: string;
+  /** Fewest colleagues that must be rated before the matrix can be submitted. */
+  minRatedTargets: number;
+  /**
+   * How many people are in the group — a number, not names. Before the
+   * respondent identifies themselves the roster below is empty: names are the
+   * facilitator's information and are only released to an identified rater,
+   * and then only the ones that rater is assigned to see.
+   */
+  rosterSize: number;
+  /**
+   * Whether this cohort's facilitator has chosen to send participants their own
+   * peer-feedback report. False by default, and false is not "not yet decided" —
+   * it is the instruction to promise the respondent nothing. The completion
+   * screen says thank you and stops; it does not mention a report, a PDF or an
+   * email, because for most cohorts none of the three is coming.
+   */
+  shareReports: boolean;
+  /**
+   * Whether the respondent must type a one-time code mailed to their address
+   * before being bound to a roster position. Off by default.
+   */
+  otpRequired: boolean;
+  roster: CohortRosterMember[];
+  /**
+   * The respondent's own roster position, once identified. Their row is
+   * excluded from the matrix -- the instrument forbids self-rating.
+   */
+  selfMemberId: string | null;
+  /**
+   * The member ids this respondent has been assigned to rate, or null when the
+   * cohort runs unrestricted for them (no assignment map, or none for them).
+   * Null means the whole roster, as before assignments existed.
+   */
+  allowedTargetIds: string[] | null;
+}
+
+export interface CohortRosterMember {
+  memberId: string;
+  /** Roster position, 1-based. What `cellNo` encodes against. */
+  no: number;
+  name: string;
+  /** Function or department. May be ''. */
+  func: string;
+  /** True once this member has submitted, so the console and roster can say so. */
+  responded?: boolean;
+}
+
 export interface CandidateResponseState {
   responseId: string;
   status: 'invited' | 'in_progress' | 'completed';
@@ -70,6 +139,8 @@ export interface CandidateResponseState {
   answeredCount: number;
   /** 0-based page the candidate should resume on. */
   resumePage: number;
+  /** Cohort instruments only: the roster position these ratings come from. */
+  raterMemberId: string | null;
   startedAt: string | null;
   completedAt: string | null;
 }
@@ -188,4 +259,220 @@ export interface AdminUser {
 export interface ApiError {
   error: string;
   details?: unknown;
+}
+
+// ------------------------------------------------------------ cohort reports
+
+/**
+ * Sociometry reports are not facts about one response, so they are a separate
+ * union from `ReportPayload` rather than a third member of it: there is no
+ * candidate, no completion date and no single set of answers behind them. Both
+ * scopes share this base, and every renderer switches on `kind`.
+ */
+export interface CohortReportBase {
+  /** Empty when the reader reached the report by a door that cannot recover it. */
+  reportToken: string;
+  cohortId: string;
+  cohortName: string;
+  organisation: string;
+  assessmentId: string;
+  assessmentName: string;
+  /** Which wave of rating this report describes. 1 for a cohort run once. */
+  roundNo: number;
+  /** The facilitator's name for that wave, or "Round 2". */
+  roundName: string;
+  generatedAt: string;
+  branding: Branding;
+  /** Plain-language headline paragraph, identical in every rendering. */
+  summary: string;
+  /** The confidentiality promise the workbook makes, restated in the report. */
+  confidentiality: string;
+}
+
+/** Item and block labels, sent with the payload so a renderer needs no imports. */
+export interface SocioItemInfo {
+  no: number;
+  short: string;
+  text: string;
+  blockKey: string;
+  polarity: 'asset' | 'deficit';
+}
+
+export interface SocioBlockInfo {
+  key: string;
+  name: string;
+  gloss: string;
+  short: string;
+  color: string;
+  items: number[];
+}
+
+/** The facilitator's report: the whole network, no individual attribution. */
+export interface SocioGroupReportPayload extends CohortReportBase {
+  kind: 'socio_group';
+  group: SocioGroupResult;
+  blocks: SocioBlockInfo[];
+  items: SocioItemInfo[];
+}
+
+/** One leader's peer-feedback report, suppressed below the cohort rater floor. */
+export interface SocioMemberReportPayload extends CohortReportBase {
+  kind: 'socio_member';
+  member: SocioMemberResult;
+  /** This member's block means beside the cohort's, for reading in context. */
+  context: {
+    blockKey: string;
+    name: string;
+    short: string;
+    color: string;
+    memberMean: number | null;
+    cohortMean: number | null;
+    delta: number | null;
+  }[];
+  /** Just enough of the group to make the numbers legible. */
+  groupContext: {
+    rosterSize: number;
+    respondents: number;
+    minRaters: number;
+    tieThreshold: number;
+    cohortMean: number | null;
+  };
+  items: SocioItemInfo[];
+  /** True when coverage was under the floor and the profile is withheld. */
+  suppressed: boolean;
+}
+
+export type CohortReportPayload = SocioGroupReportPayload | SocioMemberReportPayload;
+
+// -------------------------------------------------------------- cohort admin
+
+/** One wave of rating: its own link, its own responses, its own reports. */
+export interface CohortRoundSummary {
+  no: number;
+  label: string;
+  name: string;
+  openedAt: string;
+  closedAt: string | null;
+  /** The generic link for this wave. Previous waves keep theirs. */
+  linkToken: string | null;
+  linkActive: boolean;
+  respondents: number;
+  reports: { group: boolean; members: number; suppressed: number };
+}
+
+export interface CohortSummary {
+  id: string;
+  assessmentId: string;
+  name: string;
+  organisation: string;
+  status: 'draft' | 'open' | 'closed';
+  minRaters: number;
+  tieThreshold: number;
+  minRatedTargets: number;
+  /**
+   * Whether participants are told, on finishing, that their own report is
+   * coming. Off by default; the completion screen promises nothing until the
+   * facilitator turns this on.
+   */
+  shareReports: boolean;
+  /**
+   * Whether a one-time code must verify the roster email before a respondent
+   * is bound to a position — two-factor identity, off by default.
+   */
+  otpRequired: boolean;
+  /** Memorable alias for the open link, or null. Reached as a bare path. */
+  shortSlug: string | null;
+  /** Whether the alias resolves. Off keeps the slug reserved and 404s the path. */
+  slugActive: boolean;
+  /** The alias is namespaced by the instrument: `/<instrumentSlug>/<shortSlug>`. */
+  instrumentSlug: string | null;
+  rosterSize: number;
+  respondents: number;
+  createdAt: string;
+  closedAt: string | null;
+  /** The generic link token, retained for a cohort so the console can re-show it. */
+  linkToken: string | null;
+  linkActive: boolean;
+  /** How many reports exist, by scope. */
+  reports: { group: boolean; members: number; suppressed: number };
+  /** The wave a link issued today belongs to. */
+  roundNo: number;
+  roundName: string;
+  roundCount: number;
+}
+
+/** One directed rater→target aggregate for the console's network view. */
+export interface CohortNetworkEdge {
+  /** Roster positions, 1-based — the same addresses the answers use. */
+  from: number;
+  to: number;
+  /** Asset-item ratings given, across the eleven asset statements. */
+  n: number;
+  /** Mean of the asset-item ratings, 2dp. */
+  mean: number;
+  /** Per-block means and tie flags, keyed by block key. Absent block: no answers. */
+  blocks: Record<string, { mean: number; n: number; tie: boolean }>;
+  /** Item 12, the deficit item, kept apart as everywhere else. */
+  gap: { mean: number; n: number } | null;
+}
+
+/**
+ * Everything the cohort dashboard draws: the roster as nodes, every directed
+ * pair with at least one rating as an edge, the scored group result for the
+ * metrics panel, and the assignment map for the who-rates-whom view. Admin
+ * eyes only — this is the facilitator's instrument, never the candidate's.
+ */
+export interface CohortNetwork {
+  cohortId: string;
+  roundNo: number;
+  roundName: string;
+  roundClosed: boolean;
+  tieThreshold: number;
+  minRaters: number;
+  respondents: number;
+  rosterSize: number;
+  nodes: CohortRosterMember[];
+  edges: CohortNetworkEdge[];
+  /** Null until at least one response is in — nothing to score. */
+  group: SocioGroupResult | null;
+  assignments: { raterMemberId: string; targetMemberIds: string[] }[];
+}
+
+export interface CohortDetail extends CohortSummary {
+  roster: (CohortRosterMember & { email: string; active: boolean })[];
+  /** Every wave this group has been rated in, oldest first. */
+  rounds: CohortRoundSummary[];
+}
+
+// --------------------------------------------------------------- cohort trend
+
+/** One round's figures, for reading a group's movement across waves. */
+export interface CohortTrendRound {
+  no: number;
+  name: string;
+  openedAt: string;
+  closedAt: string | null;
+  rosterSize: number;
+  respondents: number;
+  /** Respondents over roster, 0..1. Engagement, per wave. */
+  responseRate: number;
+  /** Ratings actually given over ratings possible, 0..1. Coverage, per wave. */
+  coverage: number;
+  density: number | null;
+  reciprocity: number | null;
+  concentration: number | null;
+  cohortMean: number | null;
+  isolates: number;
+  blocks: { blockKey: string; name: string; short: string; mean: number | null }[];
+  reportsReady: boolean;
+}
+
+export interface CohortTrend {
+  cohortId: string;
+  cohortName: string;
+  organisation: string;
+  minRaters: number;
+  rounds: CohortTrendRound[];
+  /** Leaders whose overall mean moved most between the first and last round. */
+  movers: { memberId: string; name: string; func: string; first: number | null; last: number | null; delta: number | null }[];
 }

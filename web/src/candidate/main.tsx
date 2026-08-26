@@ -5,6 +5,7 @@
  *   /              a neutral landing page
  *   /t/:token      the assessment
  *   /r/:token      a report
+ *   /c/:token      a cohort report — a group's, or one member's peer feedback
  *
  * There is deliberately no navigation to the admin console anywhere in this
  * bundle — administrators reach it by typing /admin.
@@ -19,6 +20,7 @@ import '../styles/candidate-friendly.css';
 import { Landing } from './Landing.js';
 import { AssessmentPage } from './AssessmentPage.js';
 import { ReportPage } from './ReportPage.js';
+import { CohortReportPage } from './CohortReportPage.js';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -28,6 +30,7 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/t/:token" element={<AssessmentPage />} />
         <Route path="/r/:token" element={<ReportPage source="report" />} />
         <Route path="/t/:token/report" element={<ReportPage source="link" />} />
+        <Route path="/c/:token" element={<CohortReportPage />} />
         <Route path="*" element={<Landing notFound />} />
       </Routes>
     </BrowserRouter>

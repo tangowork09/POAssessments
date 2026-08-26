@@ -404,3 +404,116 @@
   .detail,.dev-block,.headline,.method,.egogram{ break-inside:avoid; page-break-inside:avoid; }
   .bar-fill,.cohort-fill,.split-bar .sp,.split-bar .su{ transition:none !important; }
 }
+
+/* ============================================================
+   COHORT REPORT — group, and one member's peer feedback
+   ============================================================
+   Deliberately its own vocabulary rather than reusing the ISI report's
+   `.bar-*` classes. Those bars animate a `scaleX` on an absolutely-positioned
+   fill; these are plain width-driven meters that render dozens per page, and
+   sharing the class names would have meant one of the two silently losing.
+   ============================================================ */
+.co-report{ max-width:900px; margin:0 auto 40px; }
+
+.co-head{
+  padding:32px 0 24px; border-bottom:2px solid var(--ink); margin-bottom:28px;
+}
+.co-head .eyebrow{ display:block; margin-top:18px; }
+.co-head .display{ font-size:clamp(26px,3.6vw,34px); letter-spacing:-.026em; font-weight:680; margin-top:6px; }
+.co-head .lede{ font-size:15px; color:var(--ink-3); margin-top:8px; }
+.co-head .btn{ margin-top:18px; }
+
+.co-card{
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--r-3);
+  padding:24px 28px; margin-bottom:18px;
+}
+@media (max-width:640px){ .co-card{ padding:18px; } }
+.co-card h2{ font-size:16px; font-weight:650; letter-spacing:-.012em; }
+.co-card h2 + .hint{ margin-top:8px; }
+.co-card p{ margin-top:12px; font-size:14px; line-height:1.62; color:var(--ink-2); }
+.co-summary{ font-size:15px !important; line-height:1.68 !important; }
+.co-fine{ background:var(--surface-2); }
+.co-fine p{ font-size:13px; color:var(--ink-3); }
+
+/* stat tiles */
+.co-stats{
+  margin-top:18px; display:grid; gap:12px;
+  grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+}
+.co-stat{
+  border:1px solid var(--line); border-radius:var(--r-3); background:var(--surface-2);
+  padding:14px 16px; display:flex; flex-direction:column; gap:2px;
+}
+.co-stat-label{ font-size:10.5px; letter-spacing:.07em; text-transform:uppercase; color:var(--ink-4); font-weight:650; }
+.co-stat-value{ font-size:22px; font-weight:700; letter-spacing:-.03em; color:var(--ink); font-variant-numeric:tabular-nums; }
+.co-stat-note{ font-size:11.5px; color:var(--ink-4); }
+
+/* networks */
+.co-net{ margin-top:22px; }
+.co-net-head{
+  display:flex; align-items:baseline; justify-content:space-between; gap:16px; flex-wrap:wrap;
+  padding-left:12px; border-left:4px solid var(--line-2);
+}
+.co-net-head h3{ font-size:14px; font-weight:650; letter-spacing:-.01em; }
+.co-net-stats{ display:flex; gap:16px; flex-wrap:wrap; font-size:11.5px; color:var(--ink-4); }
+.co-net-stats b{ color:var(--ink); font-size:14px; font-weight:680; font-variant-numeric:tabular-nums; }
+
+/* meters */
+.co-bars{ list-style:none; padding:0; margin:14px 0 0; }
+.co-bars li{
+  display:grid; grid-template-columns:minmax(110px,180px) 1fr auto; gap:14px;
+  align-items:center; padding:6px 0;
+}
+@media (max-width:640px){
+  .co-bars li{ grid-template-columns:1fr auto; gap:4px 12px; padding:8px 0; }
+  .co-bars .co-track{ grid-column:1 / -1; }
+}
+.co-bar-name{ font-size:13px; color:var(--ink-2); }
+.co-bar-name .co-delta{
+  display:block; font-style:normal; font-size:11px; color:var(--ok); font-weight:600;
+}
+.co-bar-name .co-delta.is-down{ color:var(--warn); }
+.co-track{
+  position:relative; display:block; height:10px; border-radius:5px;
+  background:var(--surface-3); overflow:hidden;
+}
+.co-fill{ display:block; height:100%; border-radius:5px; }
+.co-tick{
+  position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--ink-3);
+  /* Sits above the fill so the group's level stays readable inside a long bar. */
+  z-index:1;
+}
+.co-val{ font-size:12px; color:var(--ink-3); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.co-bars-lg li{ padding:10px 0; }
+.co-bars-lg .co-track{ height:14px; border-radius:7px; overflow:visible; }
+.co-bars-lg .co-fill{ border-radius:7px; }
+
+/* the two gap lists, side by side */
+.co-split{ margin-top:16px; display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); }
+.co-gaps{ border:1px solid var(--line); border-radius:var(--r-3); padding:16px; background:var(--surface-2); }
+.co-gaps h3{ font-size:12.5px; font-weight:650; color:var(--ink); }
+.co-gaps.is-warn{ border-left:3px solid var(--warn); }
+.co-gaps.is-good{ border-left:3px solid var(--ok); }
+.co-gaps ul{ list-style:none; padding:0; margin:10px 0 0; }
+.co-gaps li{ display:flex; justify-content:space-between; gap:12px; padding:5px 0; font-size:13px; color:var(--ink-2); }
+.co-gaps li b{ font-variant-numeric:tabular-nums; }
+.co-gaps.is-warn li b{ color:var(--warn); }
+.co-gaps.is-good li b{ color:var(--ok); }
+
+/* function seams */
+.co-scroll{ overflow-x:auto; -webkit-overflow-scrolling:touch; margin-top:14px; }
+.co-heat{ border-collapse:separate; border-spacing:2px; min-width:0; width:auto; }
+.co-heat th{
+  position:static; background:none; font-size:10px; letter-spacing:.05em; text-transform:uppercase;
+  color:var(--ink-4); font-weight:650; padding:4px 6px; white-space:nowrap; border:0;
+}
+.co-heat th::after{ display:none; }
+.co-heat th[scope="row"]{ text-align:right; }
+.co-heat td{
+  min-width:46px; padding:8px 6px; text-align:center; border:0;
+  font-size:12px; font-variant-numeric:tabular-nums; color:var(--ink);
+  background:var(--surface-3); border-radius:var(--r-1);
+}
+
+/* The one-time-code box: six digits, big and unmistakable. */
+.otp-input{ font-family:var(--mono, ui-monospace, monospace); font-size:26px; letter-spacing:12px; text-align:center; max-width:280px; }

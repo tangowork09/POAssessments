@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ApiError, api } from '../lib/api.js';
 import {
+  DataTable,
   EmptyState,
   ErrorState,
   Head,
@@ -19,6 +20,7 @@ import {
   formatDate,
   useToast,
 } from './ui.js';
+import type { Column } from './ui.js';
 
 interface Row {
   response_id: string;
@@ -174,7 +176,14 @@ export function Candidates() {
     setConfirmDisable(false);
   }, [queryString]);
 
-  const visible = rows ?? [];
+  const all = rows ?? [];
+  /**
+   * The rows on screen — after the table's own filters and page, not merely
+   * after the server's. "Select all" that quietly selected four hundred rows
+   * while showing twenty-five would be a bulk action nobody consented to.
+   */
+  const [shown, setShown] = useState<Row[]>([]);
+  const visible = shown.length > 0 || all.length === 0 ? shown : all;
   const selectedRows = useMemo(
     () => visible.filter((r) => selected.has(r.response_id)),
     [visible, selected],
@@ -601,130 +610,176 @@ export function Candidates() {
             />
           )
         ) : (
-          <div className="table-scroll capped">
-            <table className="table-candidates">
-              <thead>
-                <tr>
-                  <th className="col-check">
-                    <input
-                      ref={headerBox}
-                      type="checkbox"
-                      className="row-check"
-                      checked={allSelected}
-                      onChange={toggleAll}
-                      aria-label={allSelected ? 'Clear selection' : `Select all ${visible.length} rows shown`}
-                    />
-                  </th>
-                  <th>Candidate</th>
-                  <th>Organisation</th>
-                  <th>Assessment</th>
-                  <th>Status</th>
-                  <th>Result</th>
-                  <th className="right">Completed</th>
-                  <th className="right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => {
+          <DataTable
+            rows={all}
+            rowKey={(r) => r.response_id}
+            pageSize={25}
+            minWidth={1080}
+            className="table-candidates"
+            onShown={setShown}
+            toolbar={
+              <label className="dt-selectall">
+                <input
+                  ref={headerBox}
+                  type="checkbox"
+                  className="row-check"
+                  checked={allSelected}
+                  onChange={toggleAll}
+                  aria-label={allSelected ? 'Clear selection' : `Select the ${visible.length} rows shown`}
+                />
+                Select the {visible.length} rows shown
+              </label>
+            }
+            columns={([
+              {
+                key: 'check',
+                header: '',
+                width: '34px',
+                className: 'col-check',
+                cell: (r) => (
+                  <input
+                    type="checkbox"
+                    className="row-check"
+                    checked={selected.has(r.response_id)}
+                    onChange={() => toggleRow(r.response_id)}
+                    aria-label={`Select ${`${r.first_name} ${r.last_name}`.trim() || r.email}`}
+                  />
+                ),
+              },
+              {
+                key: 'candidate',
+                header: 'Candidate',
+                filterHint: 'Name or email',
+                className: 'name',
+                value: (r) => `${r.first_name} ${r.last_name} ${r.email}`,
+                cell: (r) => (
+                  <>
+                    {`${r.first_name} ${r.last_name}`.trim() || r.email}
+                    <span className="cell-sub">{r.email}</span>
+                  </>
+                ),
+              },
+              {
+                key: 'org',
+                header: 'Organisation',
+                width: '150px',
+                className: 'cell-truncate',
+                value: (r) => r.organisation ?? '',
+                cell: (r) => r.organisation || <span className="muted">—</span>,
+              },
+              {
+                key: 'assessment',
+                header: 'Assessment',
+                width: '170px',
+                className: 'cell-truncate',
+                value: (r) => r.assessment_name,
+                cell: (r) => r.assessment_name,
+              },
+              {
+                key: 'status',
+                header: 'Status',
+                width: '140px',
+                value: (r) => r.status,
+                cell: (r) => (
+                  <>
+                    <StatusPill status={r.status} />
+                    {r.status === 'in_progress' && r.question_count ? (
+                      <span className="cell-sub num">
+                        {r.answered_count} of {r.question_count}
+                      </span>
+                    ) : null}
+                    {r.link_active === 0 ? (
+                      <span className="cell-sub danger">Link disabled</span>
+                    ) : null}
+                  </>
+                ),
+              },
+              {
+                key: 'result',
+                header: 'Result',
+                width: '150px',
+                className: 'cell-result',
+                value: (r) => r.resultLabel ?? '',
+                cell: (r) =>
+                  r.resultLabel ? (
+                    <>
+                      <span className="result-label num">{r.resultLabel}</span>
+                      {!r.reportSent ? <span className="cell-sub">Report not emailed</span> : null}
+                    </>
+                  ) : (
+                    <span className="muted">
+                      {r.status === 'completed' ? 'Report pending' : 'Not yet'}
+                    </span>
+                  ),
+              },
+              {
+                key: 'completed',
+                header: 'Completed',
+                width: '120px',
+                align: 'right',
+                className: 'num',
+                value: (r) => r.completed_at ?? '',
+                cell: (r) => formatDate(r.completed_at),
+              },
+              {
+                key: 'actions',
+                header: 'Actions',
+                width: '250px',
+                align: 'right',
+                cell: (r) => {
                   const name = `${r.first_name} ${r.last_name}`.trim() || r.email;
-                  const isSelected = selected.has(r.response_id);
                   return (
-                    <tr key={r.response_id} className={isSelected ? 'is-selected' : undefined}>
-                      <td className="col-check">
-                        <input
-                          type="checkbox"
-                          className="row-check"
-                          checked={isSelected}
-                          onChange={() => toggleRow(r.response_id)}
-                          aria-label={`Select ${name}`}
-                        />
-                      </td>
-                      <td className="name">
-                        {name}
-                        <span className="cell-sub">{r.email}</span>
-                      </td>
-                      <td className="cell-truncate" title={r.organisation || undefined}>
-                        {r.organisation || <span className="muted">—</span>}
-                      </td>
-                      <td className="cell-truncate" title={r.assessment_name}>
-                        {r.assessment_name}
-                      </td>
-                      <td>
-                        <StatusPill status={r.status} />
-                        {r.status === 'in_progress' && r.question_count ? (
-                          <span className="cell-sub num">
-                            {r.answered_count} of {r.question_count}
-                          </span>
-                        ) : null}
-                        {r.link_active === 0 ? <span className="cell-sub danger">Link disabled</span> : null}
-                      </td>
-                      <td className="cell-result">
-                        {r.resultLabel ? (
-                          <>
-                            <span className="result-label num">{r.resultLabel}</span>
-                            {!r.reportSent ? <span className="cell-sub">Report not emailed</span> : null}
-                          </>
-                        ) : (
-                          <span className="muted">
-                            {r.status === 'completed' ? 'Report pending' : 'Not yet'}
-                          </span>
-                        )}
-                      </td>
-                      <td className="right num">{formatDate(r.completed_at)}</td>
-                      <td className="right">
-                        <div className="row-actions">
-                          <button
-                            className="link-btn"
-                            type="button"
-                            onClick={() => copyLink(r)}
-                            disabled={busyRow === r.response_id}
-                            aria-label={`Copy the personal link for ${name}`}
-                          >
-                            Copy link
-                          </button>
-                          <button
-                            className="link-btn"
-                            type="button"
-                            onClick={() => resend(r)}
-                            disabled={busyRow === r.response_id}
-                            aria-label={`Resend the invitation to ${name}`}
-                          >
-                            Resend
-                          </button>
-                          {r.hasReport ? (
-                            <button
-                              className="link-btn"
-                              type="button"
-                              onClick={() => sendReport(r)}
-                              disabled={busyRow === r.response_id}
-                              aria-label={
-                                r.reportSent
-                                  ? `Send the report to ${name} again`
-                                  : `Send the report to ${name}`
-                              }
-                            >
-                              {r.reportSent ? 'Resend report' : 'Send report'}
-                            </button>
-                          ) : null}
-                          {r.link_id ? (
-                            <button
-                              className="link-btn"
-                              type="button"
-                              onClick={() => toggleLink(r)}
-                              disabled={busyRow === r.response_id}
-                              aria-label={`${r.link_active === 1 ? 'Disable' : 'Enable'} the link for ${name}`}
-                            >
-                              {r.link_active === 1 ? 'Disable' : 'Enable'}
-                            </button>
-                          ) : null}
-                        </div>
-                      </td>
-                    </tr>
+                    <div className="row-actions">
+                      <button
+                        className="link-btn"
+                        type="button"
+                        onClick={() => copyLink(r)}
+                        disabled={busyRow === r.response_id}
+                        aria-label={`Copy the personal link for ${name}`}
+                      >
+                        Copy link
+                      </button>
+                      <button
+                        className="link-btn"
+                        type="button"
+                        onClick={() => resend(r)}
+                        disabled={busyRow === r.response_id}
+                        aria-label={`Resend the invitation to ${name}`}
+                      >
+                        Resend
+                      </button>
+                      {r.hasReport ? (
+                        <button
+                          className="link-btn"
+                          type="button"
+                          onClick={() => sendReport(r)}
+                          disabled={busyRow === r.response_id}
+                          aria-label={
+                            r.reportSent
+                              ? `Send the report to ${name} again`
+                              : `Send the report to ${name}`
+                          }
+                        >
+                          {r.reportSent ? 'Resend report' : 'Send report'}
+                        </button>
+                      ) : null}
+                      {r.link_id ? (
+                        <button
+                          className="link-btn"
+                          type="button"
+                          onClick={() => toggleLink(r)}
+                          disabled={busyRow === r.response_id}
+                          aria-label={`${r.link_active === 1 ? 'Disable' : 'Enable'} the link for ${name}`}
+                        >
+                          {r.link_active === 1 ? 'Disable' : 'Enable'}
+                        </button>
+                      ) : null}
+                    </div>
                   );
-                })}
-              </tbody>
-            </table>
-          </div>
+                },
+              },
+            ] as Column<Row>[])}
+          />
         )}
       </section>
 

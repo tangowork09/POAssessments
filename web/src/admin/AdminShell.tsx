@@ -18,9 +18,13 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: '/admin', label: 'Dashboard', icon: IconGrid, end: true },
   { to: '/admin/assessments', label: 'Assessments', icon: IconDoc },
+  { to: '/admin/cohorts', label: 'Cohorts', icon: IconGroup },
   { to: '/admin/candidates', label: 'Candidates', icon: IconPeople },
   { to: '/admin/invites', label: 'Invites', icon: IconSend },
   { to: '/admin/links', label: 'Assessment Link', icon: IconLink },
+  // Names people and holds previously-issued tokens, so it is absent rather
+  // than merely disabled for an ordinary admin.
+  { to: '/admin/activity', label: 'Activity', icon: IconLog, superadminOnly: true },
   // Branding is hidden for now at the client's request — the identity is fixed
   // to PO Assessments and the panel only invites accidental changes to what
   // every candidate, report and email carries. The route itself still works,
@@ -38,7 +42,28 @@ export function AdminShell({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  // Desktop rail state. Sticky per browser: an operator who prefers the thin
+  // rail gets it back on every visit, and localStorage failing (private mode)
+  // just means the default.
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('admin.sidebar') === 'collapsed';
+    } catch {
+      return false;
+    }
+  });
   const navigate = useNavigate();
+
+  function toggleCollapsed(): void {
+    setCollapsed((v) => {
+      try {
+        localStorage.setItem('admin.sidebar', v ? 'expanded' : 'collapsed');
+      } catch {
+        /* the preference simply does not stick */
+      }
+      return !v;
+    });
+  }
 
   // Branding writes settings that reach every candidate, report and email, so
   // the nav item is not merely disabled for an ordinary admin — it is absent.
@@ -74,7 +99,7 @@ export function AdminShell({
         </div>
       </header>
 
-      <div className="admin-shell">
+      <div className={`admin-shell${collapsed ? ' is-collapsed' : ''}`}>
         <aside className="sidebar">
           <button
             className="side-toggle"
@@ -88,12 +113,33 @@ export function AdminShell({
           </button>
 
           <div className={`side-body${open ? ' is-open' : ''}`} id="admin-nav">
+            {/* Desktop only. Collapsed, the rail keeps every destination one
+                click away as an icon; labels come back with a second click.
+                The narrow-screen "Menu" disclosure above is untouched. */}
+            <button
+              className="side-collapse"
+              type="button"
+              onClick={toggleCollapsed}
+              aria-pressed={collapsed}
+              title={collapsed ? 'Expand the sidebar' : 'Collapse the sidebar'}
+            >
+              <IconRail flipped={collapsed} />
+              <span className="side-collapse-label">Collapse</span>
+            </button>
+
             <p className="side-label">Manage</p>
             <nav className="side-nav" aria-label="Console sections">
               {items.map(({ to, label, icon: Icon, end }) => (
-                <NavLink key={to} to={to} end={end} className="side-item" onClick={() => setOpen(false)}>
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={end}
+                  className="side-item"
+                  onClick={() => setOpen(false)}
+                  title={collapsed ? label : undefined}
+                >
                   <Icon />
-                  {label}
+                  <span className="side-item-label">{label}</span>
                 </NavLink>
               ))}
             </nav>
@@ -106,9 +152,14 @@ export function AdminShell({
               </span>
             </div>
 
-            <button className="side-item side-item-full" type="button" onClick={signOut}>
+            <button
+              className="side-item side-item-full"
+              type="button"
+              onClick={signOut}
+              title={collapsed ? 'Sign out' : undefined}
+            >
               <IconExit />
-              Sign out
+              <span className="side-item-label">Sign out</span>
             </button>
           </div>
         </aside>
@@ -144,6 +195,17 @@ function IconDoc() {
     </svg>
   );
 }
+/** A ring of people rather than a pair: a cohort is a whole group at once. */
+function IconGroup() {
+  return (
+    <svg width="15" height="15" {...svg}>
+      <circle cx="7.5" cy="4" r="1.9" />
+      <circle cx="3.4" cy="10.6" r="1.9" />
+      <circle cx="11.6" cy="10.6" r="1.9" />
+      <path d="M6.3 5.6L4.6 9M8.7 5.6l1.7 3.4M5.3 11.4h4.4" />
+    </svg>
+  );
+}
 function IconPeople() {
   return (
     <svg width="15" height="15" {...svg}>
@@ -160,6 +222,15 @@ function IconSend() {
     </svg>
   );
 }
+function IconLog(): ReactNode {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M5 4h11l3 3v13H5z" strokeLinejoin="round" />
+      <path d="M8 10h8M8 14h8M8 18h5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function IconLink() {
   return (
     <svg width="15" height="15" {...svg}>
@@ -176,6 +247,17 @@ function IconExit() {
     </svg>
   );
 }
+/** The rail toggle: a door with the panel on the side being shown or hidden. */
+function IconRail({ flipped }: { flipped: boolean }) {
+  return (
+    <svg width="15" height="15" {...svg} style={flipped ? { transform: 'scaleX(-1)' } : undefined}>
+      <rect x="2" y="2.5" width="12" height="11" rx="1.5" />
+      <path d="M6 2.5v11" />
+      <path d="M11.2 6.2L9.4 8l1.8 1.8" />
+    </svg>
+  );
+}
+
 function IconChevron() {
   return (
     <svg width="14" height="14" {...svg}>

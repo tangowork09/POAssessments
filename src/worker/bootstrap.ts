@@ -11,6 +11,7 @@ import type { Env } from './env.js';
 import { hashPassword } from './lib/auth.js';
 import { newId } from './lib/ids.js';
 import { generateToken, hashToken } from './lib/tokens.js';
+import { ASSESSMENT_ID, isCohortAssessment } from '../shared/assessments.js';
 
 let done = false;
 
@@ -51,15 +52,26 @@ async function seedAdmin(env: Env): Promise<void> {
 }
 
 /**
- * Every assessment gets exactly one generic link. The plaintext token is
- * printed once, here, because only its hash is retained — the admin console can
- * always reissue one on demand.
+ * Every self-rating assessment gets exactly one generic link. The plaintext
+ * token is printed once, here, because only its hash is retained — the admin
+ * console can always reissue one on demand.
+ *
+ * Cohort instruments are excluded. Their link belongs to a cohort rather than
+ * to the instrument, and a link seeded here would carry no cohort_id — so it
+ * would resolve, open, and then tell the respondent it is not attached to a
+ * group. Those links are issued from the Cohorts panel instead.
  */
 async function seedGenericLinks(env: Env): Promise<void> {
+  const cohortIds = Object.values(ASSESSMENT_ID).filter((id) => isCohortAssessment(id));
+  const exclusion = cohortIds.map((_, i) => `?${i + 1}`).join(', ');
+
   const { results } = await env.DB.prepare(
     `SELECT a.id, a.name FROM assessments a
-      WHERE NOT EXISTS (SELECT 1 FROM links l WHERE l.assessment_id = a.id AND l.kind = 'generic')`,
-  ).all<{ id: string; name: string }>();
+      WHERE NOT EXISTS (SELECT 1 FROM links l WHERE l.assessment_id = a.id AND l.kind = 'generic')
+        ${cohortIds.length > 0 ? `AND a.id NOT IN (${exclusion})` : ''}`,
+  )
+    .bind(...cohortIds)
+    .all<{ id: string; name: string }>();
 
   for (const assessment of results ?? []) {
     const token = generateToken();
