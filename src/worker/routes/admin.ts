@@ -823,21 +823,37 @@ adminRoutes.get('/links/generic/:assessmentId', async (c) => {
     );
   }
   const row = await c.env.DB.prepare(
-    `SELECT token_plain, active FROM links
-      WHERE kind = 'generic' AND assessment_id = ?1 AND cohort_id IS NULL`,
+    `SELECT l.token_plain, l.active AS link_active, a.short_slug, a.slug_active, a.status
+       FROM assessments a
+       LEFT JOIN links l
+              ON l.assessment_id = a.id AND l.kind = 'generic' AND l.cohort_id IS NULL
+      WHERE a.id = ?1`,
   )
     .bind(assessmentId)
-    .first<{ token_plain: string | null; active: number }>();
-  if (!row) {
+    .first<{
+      token_plain: string | null;
+      link_active: number | null;
+      short_slug: string | null;
+      slug_active: number;
+      status: string;
+    }>();
+  if (!row || row.link_active === null) {
     return c.json({ error: 'No open link yet — issue one from the Assessment Link panel.' }, 404);
   }
-  if (!row.token_plain || row.active !== 1) {
+  if (!row.token_plain || row.link_active !== 1) {
     return c.json(
       { error: 'This link cannot be shown again — re-issue it from the Assessment Link panel.' },
       404,
     );
   }
-  return c.json({ url: `${baseUrl(c.env, c.req.raw)}/t/${row.token_plain}` });
+  // The short alias when it currently resolves (same conditions the router
+  // checks), otherwise the tokenised URL — hand out the address that works.
+  const short = Boolean(row.short_slug && row.slug_active === 1 && row.status === 'live');
+  const base = baseUrl(c.env, c.req.raw);
+  return c.json({
+    url: short ? `${base}/${row.short_slug}` : `${base}/t/${row.token_plain}`,
+    short,
+  });
 });
 
 /**

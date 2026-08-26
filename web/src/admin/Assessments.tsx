@@ -63,9 +63,11 @@ export function Assessments() {
   async function copyLink(row: Row): Promise<void> {
     setBusy(`link:${row.id}`);
     try {
-      const res = await api.get<{ url: string }>(`/api/admin/links/generic/${row.id}`);
+      const res = await api.get<{ url: string; short: boolean }>(
+        `/api/admin/links/generic/${row.id}`,
+      );
       const copied = await copyToClipboard(res.url);
-      showToast(copied ? 'Link copied to the clipboard' : res.url);
+      showToast(copied ? (res.short ? 'Short link copied' : 'Link copied to the clipboard') : res.url);
     } catch (err) {
       showToast(err instanceof ApiError ? err.message : 'Could not fetch the link');
     } finally {
