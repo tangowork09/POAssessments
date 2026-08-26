@@ -157,12 +157,19 @@ export function DataTable<T>({
   const current = Math.min(page, pageCount - 1);
   const shown = size > 0 ? sorted.slice(current * size, current * size + size) : sorted;
 
+  // The rows on screen, reported by membership rather than identity. The slice
+  // above is a fresh array every render, so an identity-keyed effect would fire
+  // each render; a caller that stores the rows in state (the candidates grid)
+  // then re-renders this table forever — an endless urgent-update stream that
+  // starves React Router's navigation transition, freezing every nav click
+  // while the table is mounted.
+  const shownSig = useRef<string | null>(null);
   useEffect(() => {
+    const sig = shown.map(rowKey).join('\u0000');
+    if (sig === shownSig.current) return;
+    shownSig.current = sig;
     onShown?.(shown);
-    // `shown` is derived; comparing it by identity is exactly right — a new
-    // slice means a new page, a new filter or a new sort.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown]);
+  });
 
   function setFilter(key: string, value: string): void {
     setFilters((prev) => ({ ...prev, [key]: value }));

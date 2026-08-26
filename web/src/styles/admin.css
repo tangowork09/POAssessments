@@ -124,7 +124,12 @@
 /* ============================================================
    TABLES
    ============================================================ */
-.table-scroll{ overflow-x:auto; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+.table-scroll{ overflow-x:auto; overflow-y:auto; -webkit-overflow-scrolling:touch; scrollbar-width:thin; }
+/* A wide grid clipped at the card edge with an invisible macOS scrollbar reads
+   as broken, not scrollable. Keep the bar visible whenever there is overflow. */
+.table-scroll::-webkit-scrollbar{ height:8px; }
+.table-scroll::-webkit-scrollbar-track{ background:transparent; }
+.table-scroll::-webkit-scrollbar-thumb{ background:var(--line-2); border-radius:4px; }
 .table-scroll.capped{ max-height:min(60vh, 520px); }
 table{ width:100%; border-collapse:separate; border-spacing:0; min-width:620px; }
 thead th{
