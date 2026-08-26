@@ -13,7 +13,7 @@ import { api } from '../../lib/api.js';
 import { DataTable } from '../ui.js';
 import type { CohortNetwork } from '../../../../src/shared/types.js';
 import type { SocioMemberResult } from '../../../../src/shared/socio-scoring.js';
-import { POLARITY_STYLE, ROLE_STYLE, type DegreeCounts, type Role } from './model.js';
+import { edgePolarity, POLARITY_STYLE, ROLE_STYLE, type DegreeCounts, type Polarity, type Role } from './model.js';
 
 const GROUP_OTHER = '#8D97A6';
 
@@ -188,6 +188,8 @@ export function EmployeesTable({
         <PersonDossier
           cohortId={cohortId}
           roundCount={roundCount}
+          net={net}
+          groupColor={groupColor}
           node={dossierNode}
           member={dossierMember}
           degree={degreeMap.get(dossierNode.no) ?? null}
@@ -195,6 +197,7 @@ export function EmployeesTable({
           minRaters={minRaters}
           color={groupColor.get(dossierNode.func || '—') ?? GROUP_OTHER}
           onClose={() => setDossierNo(null)}
+          onJump={(no) => open(no)}
           isSelected={selectedNo === dossierNode.no}
         />
       ) : null}
@@ -213,6 +216,8 @@ interface TrendPoint {
 function PersonDossier({
   cohortId,
   roundCount,
+  net,
+  groupColor,
   node,
   member,
   degree,
@@ -220,9 +225,12 @@ function PersonDossier({
   minRaters,
   color,
   onClose,
+  onJump,
 }: {
   cohortId: string;
   roundCount: number;
+  net: CohortNetwork;
+  groupColor: Map<string, string>;
   node: { no: number; name: string; func: string; responded?: boolean };
   member: SocioMemberResult | null;
   degree: DegreeCounts | null;
@@ -230,6 +238,7 @@ function PersonDossier({
   minRaters: number;
   color: string;
   onClose: () => void;
+  onJump: (no: number) => void;
   isSelected: boolean;
 }) {
   const [trend, setTrend] = useState<TrendPoint[] | null>(null);
@@ -244,6 +253,27 @@ function PersonDossier({
       stop = true;
     };
   }, [cohortId, node.no]);
+
+  // The name-pairs behind the numbers: every colleague who rated this person,
+  // and everyone this person rated, each with the mean and its polarity. The
+  // graph already draws these same directed pairs — this is the readable form.
+  const nameByNo = useMemo(() => new Map(net.nodes.map((n) => [n.no, n])), [net.nodes]);
+  const pairList = (dir: 'in' | 'out') =>
+    net.edges
+      .filter((e) => (dir === 'in' ? e.to === node.no : e.from === node.no))
+      .map((e) => {
+        const other = nameByNo.get(dir === 'in' ? e.from : e.to);
+        return {
+          no: dir === 'in' ? e.from : e.to,
+          name: other?.name ?? '—',
+          func: other?.func ?? '',
+          mean: e.mean,
+          polarity: (edgePolarity(e, 'overall', net.tieThreshold) ?? 'neutral') as Polarity,
+        };
+      })
+      .sort((a, b) => b.mean - a.mean);
+  const ratedBy = pairList('in');
+  const rated = pairList('out');
 
   const pie = [
     { label: 'Positive', value: degree?.posIn ?? 0, color: POLARITY_STYLE.positive.color },
@@ -334,6 +364,20 @@ function PersonDossier({
           )}
         </div>
 
+        {/* Who is behind the numbers */}
+        <div className="dossier-card">
+          <h4>
+            Rated by <span>{ratedBy.length} colleagues, warmest first</span>
+          </h4>
+          <PairList items={ratedBy} groupColor={groupColor} onJump={onJump} empty="Nobody has rated them yet." />
+        </div>
+        <div className="dossier-card">
+          <h4>
+            They rated <span>{rated.length} colleagues</span>
+          </h4>
+          <PairList items={rated} groupColor={groupColor} onJump={onJump} empty="They have not rated anyone yet." />
+        </div>
+
         {/* Trend */}
         <div className="dossier-card dossier-wide">
           <h4>
@@ -349,6 +393,39 @@ function PersonDossier({
         </div>
       </div>
     </div>
+  );
+}
+
+function PairList({
+  items,
+  groupColor,
+  onJump,
+  empty,
+}: {
+  items: { no: number; name: string; func: string; mean: number; polarity: Polarity }[];
+  groupColor: Map<string, string>;
+  onJump: (no: number) => void;
+  empty: string;
+}) {
+  if (items.length === 0) return <p className="hint">{empty}</p>;
+  return (
+    <ul className="pairlist">
+      {items.map((x) => (
+        <li key={x.no}>
+          <button className="pairlist-row" onClick={() => onJump(x.no)} title={`Open ${x.name}'s profile`}>
+            <span className="emp-dot" style={{ background: groupColor.get(x.func || '—') ?? GROUP_OTHER }} />
+            <span className="pairlist-name">{x.name}</span>
+            <span className="pairlist-func">{x.func}</span>
+            <span
+              className={`pairlist-mean is-${x.polarity}`}
+              style={{ color: x.polarity === 'neutral' ? undefined : POLARITY_STYLE[x.polarity].color }}
+            >
+              {x.mean.toFixed(1)}
+            </span>
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 

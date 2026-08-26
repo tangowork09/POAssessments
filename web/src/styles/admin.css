@@ -1290,3 +1290,13 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
 .nx-tip-stats{ display:flex; gap:10px; font-size:10.5px; color:var(--ink-3); }
 .nx-tip-stats b{ font-size:13px; color:var(--ink); font-variant-numeric:tabular-nums; display:block; }
 .nx-tip-foot{ margin-top:7px; padding-top:6px; border-top:1px solid var(--line); font-size:10px; color:var(--ink-4); }
+
+/* The name-pairs behind a person's numbers: rated-by / they-rated lists. */
+.pairlist{ list-style:none; margin:0; padding:0; max-height:240px; overflow-y:auto; }
+.pairlist li + li{ border-top:1px solid var(--line); }
+.pairlist-row{ display:flex; align-items:center; gap:9px; width:100%; padding:6px 4px; text-align:left; border-radius:6px; }
+.pairlist-row:hover{ background:var(--surface-2); }
+.pairlist-row:hover .pairlist-name{ color:var(--accent); }
+.pairlist-name{ font-size:12.5px; font-weight:600; color:var(--ink); }
+.pairlist-func{ font-size:11px; color:var(--ink-4); margin-left:auto; }
+.pairlist-mean{ font-size:12.5px; font-weight:700; font-variant-numeric:tabular-nums; min-width:30px; text-align:right; }
