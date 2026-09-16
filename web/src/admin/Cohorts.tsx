@@ -14,8 +14,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ApiError, api } from '../lib/api.js';
-import { DataTable, Head, TableSkeleton, Toast, useToast } from './ui.js';
+import { CardHead, DataTable, EmptyState, Head, TableSkeleton, Toast, useToast } from './ui.js';
 import { CohortNetworkCard } from './network/CohortNetworkCard.js';
+import { TENURE_BANDS } from '../../../src/shared/types.js';
+import { cohortIdentityMode, cohortIdentityPatch } from '../../../src/shared/cohort-identity.js';
+import type { CohortIdentityMode } from '../../../src/shared/cohort-identity.js';
 import type { CohortDetail, CohortSummary, CohortTrend } from '../../../src/shared/types.js';
 
 interface CohortReportRow {
@@ -61,6 +64,10 @@ export function Cohorts() {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [newOrg, setNewOrg] = useState('');
+  // Creating is the rare visit. Someone with forty cohorts came here to open
+  // one, and an always-open create form put a two-column upload panel between
+  // them and the list every single time.
+  const [showCreate, setShowCreate] = useState(false);
   const [toast, showToast] = useToast();
   const importRef = useRef<HTMLInputElement>(null);
 
@@ -89,6 +96,7 @@ export function Cohorts() {
       });
       setNewName('');
       setNewOrg('');
+      setShowCreate(false);
       await load();
       setSelected(res.id);
     } catch (err) {
@@ -130,6 +138,7 @@ export function Cohorts() {
       );
       setNewName('');
       setNewOrg('');
+      setShowCreate(false);
       await load();
       setSelected(res.id);
     } catch (err) {
@@ -151,15 +160,37 @@ export function Cohorts() {
     );
   }
 
+  // An empty console has nothing to hide the create panel behind, so it opens
+  // itself: the first visit is the one that needs the upload path explained.
+  const isEmpty = cohorts !== null && cohorts.length === 0;
+  const createOpen = showCreate || isEmpty;
+
   return (
     <>
-      <Head title="Cohorts" />
+      <Head
+        title="Cohorts"
+        sub="One cohort is one run of the instrument on one intact group — a roster, its rounds, and the reports they produce."
+        actions={
+          isEmpty ? null : (
+            <button
+              className={`btn btn-sm ${createOpen ? 'btn-secondary' : 'btn-primary'}`}
+              aria-expanded={createOpen}
+              onClick={() => setShowCreate((v) => !v)}
+            >
+              {createOpen ? 'Close' : 'New cohort'}
+            </button>
+          )
+        }
+      />
       <Toast message={toast} />
 
-      <section className="card">
+      {createOpen ? (
+      <section className="card mb-4">
+        <CardHead
+          title="New cohort"
+          sub="Two ways in: the client's spreadsheet in one motion, or an empty cohort you fill afterwards."
+        />
         <div className="card-body">
-          <h2>New cohort</h2>
-
           <div className="cohort-create">
             {/* The fast path: the client's spreadsheet, one motion. */}
             <button
@@ -227,25 +258,34 @@ export function Cohorts() {
             </form>
           </div>
 
-          {error ? <p className="hint" role="alert" style={{ color: 'var(--danger)' }}>{error}</p> : null}
+          {error ? <div className="banner is-shown" role="alert">{error}</div> : null}
         </div>
       </section>
+      ) : null}
+
+      {error && !createOpen ? <div className="banner is-shown" role="alert">{error}</div> : null}
 
       <section className="card">
+        <CardHead
+          title="All cohorts"
+          sub={cohorts === null ? undefined : `${cohorts.length} in the console`}
+        />
         <div className="card-body">
-          <h2>All cohorts</h2>
           {cohorts === null ? <TableSkeleton rows={5} cols={6} /> : null}
           <DataTable
             expand={(c) => <CohortLinks cohortId={c.id} />}
             expandLabel={(c) => `Show every link issued for ${c.name}`}
             rows={cohorts ?? []}
             rowKey={(c) => c.id}
-            minWidth={860}
+            minWidth={880}
             empty={
               cohorts === null ? (
                 <></>
               ) : (
-                <p className="hint">No cohorts yet. Create one above to get started.</p>
+                <EmptyState
+                  title="No cohorts yet"
+                  body="A cohort is one intact group asked about each other. Upload the client's roster spreadsheet above and the whole thing is built in one motion, or start an empty one and add people inside it."
+                />
               )
             }
             columns={[
@@ -266,7 +306,7 @@ export function Cohorts() {
                 header: 'Status',
                 width: '110px',
                 value: (c) => c.status,
-                cell: (c) => <span className={`pill ${statusPill(c.status)}`}>{c.status}</span>,
+                cell: (c) => <span className={`pill ${statusPill(c.status)} co-status`}>{c.status}</span>,
               },
               {
                 key: 'round',
@@ -291,19 +331,36 @@ export function Cohorts() {
                 cell: (c) => c.rosterSize,
               },
               {
+                // The one column that moves on its own. A bare count made the
+                // reader do the division against the roster column two cells
+                // away; the bar answers "how far along is this one" at a glance
+                // down the table, and the numbers stay for the exact answer.
                 key: 'responded',
                 header: 'Responded',
-                width: '110px',
-                align: 'right',
+                width: '148px',
                 value: (c) => c.respondents,
-                cell: (c) => (
-                  <>
-                    {c.respondents}
-                    {c.rosterSize > 0 ? (
-                      <span className="cell-sub">{` · ${Math.round((c.respondents / c.rosterSize) * 100)}%`}</span>
-                    ) : null}
-                  </>
-                ),
+                cell: (c) => {
+                  const pct =
+                    c.rosterSize > 0 ? Math.round((c.respondents / c.rosterSize) * 100) : 0;
+                  return (
+                    <>
+                      <span className="co-cellmeter-val num">
+                        {c.respondents} of {c.rosterSize}
+                        {c.rosterSize > 0 ? <em> · {pct}%</em> : null}
+                      </span>
+                      <span
+                        className="progress-strip progress-strip-sm"
+                        role="progressbar"
+                        aria-valuenow={pct}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-label={`${pct}% of ${c.name} has responded`}
+                      >
+                        <i style={{ transform: `scaleX(${pct / 100})` }} />
+                      </span>
+                    </>
+                  );
+                },
               },
               {
                 key: 'reports',
@@ -337,6 +394,46 @@ export function Cohorts() {
 
 // ------------------------------------------------------------------- panel
 
+/**
+ * One cohort, opened.
+ *
+ * The screen is a standing header plus five tabs, and the split between them is
+ * the point. The header carries what stays true whichever tab you are on — who
+ * this group is, whether the exercise is running, how much of it has come back,
+ * and the two verbs that change those answers. The tabs carry the work, one
+ * subject each, at full width and full size.
+ *
+ * The five subjects are the facilitator's actual order of operations: build the
+ * roster, decide how people get in, run the waves, watch the network form, hand
+ * out the reports. An earlier build had two tabs — a map, and an "Info" that was
+ * seven unrelated panels stacked half a screen apart — which meant every job
+ * except reading the map began with a scroll to find where it lived.
+ */
+const COHORT_TABS = [
+  ['network', 'Network'],
+  ['roster', 'Roster'],
+  ['access', 'Access'],
+  ['rounds', 'Rounds'],
+  ['reports', 'Reports'],
+] as const;
+
+type CohortTab = (typeof COHORT_TABS)[number][0];
+
+function isCohortTab(v: string | null): v is CohortTab {
+  return v !== null && COHORT_TABS.some(([k]) => k === v);
+}
+
+/**
+ * Where an unparameterised open lands. A cohort too small to run wants the
+ * roster; one with a roster but no way in wants Access; anything past that has
+ * a network worth looking at, which is the reason the console exists.
+ */
+function defaultTab(cohort: CohortDetail): CohortTab {
+  if (cohort.rosterSize < 2) return 'roster';
+  if (!cohort.linkToken && cohort.personalLinkCount === 0) return 'access';
+  return 'network';
+}
+
 function CohortPanel({ cohortId, onClose }: { cohortId: string; onClose: () => void }) {
   const [cohort, setCohort] = useState<CohortDetail | null>(null);
   const [reports, setReports] = useState<CohortReportRow[]>([]);
@@ -349,16 +446,16 @@ function CohortPanel({ cohortId, onClose }: { cohortId: string; onClose: () => v
   const [busy, setBusy] = useState(false);
   const [rosterText, setRosterText] = useState('');
   const [link, setLink] = useState<string | null>(null);
-  // The tab lives in the URL too (?tab=info), so a reload keeps the view.
+  // The tab lives in the URL too (?tab=roster), so a reload keeps the view and
+  // a pasted link opens where the sender was.
   const [params, setParams] = useSearchParams();
-  const activeTab: 'overview' | 'info' = params.get('tab') === 'info' ? 'info' : 'overview';
+  const tabParam = params.get('tab');
   const setActiveTab = useCallback(
-    (tab: 'overview' | 'info') => {
+    (tab: CohortTab) => {
       setParams(
         (prev) => {
           const next = new URLSearchParams(prev);
-          if (tab === 'info') next.set('tab', 'info');
-          else next.delete('tab');
+          next.set('tab', tab);
           return next;
         },
         { replace: true },
@@ -411,7 +508,7 @@ function CohortPanel({ cohortId, onClose }: { cohortId: string; onClose: () => v
       <>
         <Head title="Cohort" />
         {error ? <div className="banner is-shown">{error}</div> : <TableSkeleton rows={6} cols={5} />}
-        <button className="btn btn-ghost btn-sm" onClick={onClose}>
+        <button className="btn btn-secondary btn-sm" onClick={onClose}>
           Back to cohorts
         </button>
       </>
@@ -419,68 +516,37 @@ function CohortPanel({ cohortId, onClose }: { cohortId: string; onClose: () => v
   }
 
   const responded = cohort.roster.filter((m) => m.responded).length;
+  const pct = cohort.rosterSize > 0 ? Math.round((responded / cohort.rosterSize) * 100) : 0;
+  const activeTab: CohortTab = isCohortTab(tabParam) ? tabParam : defaultTab(cohort);
 
   return (
     <div className="cohort-detail">
-      {/* Back sits with the title, not in a separate row: one glance gives you
-          where you are and the way out of it. */}
-      <div className="cohort-topbar">
-        <button className="cohort-back" onClick={onClose} aria-label="Back to all cohorts" title="All cohorts">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M15 18l-6-6 6-6" />
-          </svg>
-        </button>
-        <h1 className="cohort-title">{cohort.name}</h1>
-        {cohort.organisation ? <span className="cohort-org">{cohort.organisation}</span> : null}
-        <span className={`pill ${statusPill(cohort.status)}`} style={{ marginLeft: 'auto' }}>
-          {cohort.status}
-        </span>
-      </div>
-
-      <div className="cohort-tabs" role="tablist" aria-label="Cohort views">
-        {(
-          [
-            ['overview', 'Overview'],
-            ['info', 'Info'],
-          ] as const
-        ).map(([k, label]) => (
-          <button
-            key={k}
-            role="tab"
-            aria-selected={activeTab === k}
-            className={`cohort-tab${activeTab === k ? ' is-on' : ''}`}
-            onClick={() => setActiveTab(k)}
-          >
-            {label}
+      {/* Sticky, because the two verbs below and the response count are the
+          answers you come back to from every tab. */}
+      <header className="co-hero">
+        <div className="co-hero-top">
+          <button className="co-back" onClick={onClose} aria-label="Back to all cohorts" title="All cohorts">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
           </button>
-        ))}
-      </div>
 
-      {error ? <div className="banner is-shown">{error}</div> : null}
-
-      {activeTab === 'overview' ? (
-        <CohortNetworkCard cohortId={cohortId} roundCount={cohort.roundCount} fullBleed />
-      ) : null}
-
-      <div style={{ display: activeTab === 'info' ? 'contents' : 'none' }}>
-
-      <section className="card">
-        <div className="card-body">
-          <h2>{cohort.name}</h2>
-          {cohort.organisation ? <p className="hint">{cohort.organisation}</p> : null}
-
-          <div className="co-stats">
-            <Stat label="Roster" value={String(cohort.rosterSize)} note="active members" />
-            <Stat
-              label="Responded"
-              value={`${responded} of ${cohort.rosterSize}`}
-              note={cohort.rosterSize > 0 ? `${Math.round((responded / cohort.rosterSize) * 100)}%` : '—'}
-            />
-            <Stat label="Rater floor" value={String(cohort.minRaters)} note="for an individual report" />
-            <Stat label="Tie threshold" value={String(cohort.tieThreshold)} note="rating counted as a tie" />
+          <div className="co-hero-id">
+            <h1 className="co-hero-name">{cohort.name}</h1>
+            <p className="co-hero-meta">
+              {cohort.organisation ? <span>{cohort.organisation}</span> : null}
+              <span>
+                {cohort.roundName}
+                {cohort.roundCount > 1 ? ` · ${cohort.roundCount} waves` : ''}
+              </span>
+            </p>
           </div>
 
-          <div className="btn-row">
+          <span className={`pill ${statusPill(cohort.status)} co-status co-hero-status`}>{cohort.status}</span>
+
+          {/* Opening and closing the exercise, and the link that opens it, are
+              cohort-level verbs rather than the property of any one tab. */}
+          <div className="co-hero-actions">
             {cohort.status !== 'open' ? (
               <button
                 className="btn btn-primary btn-sm"
@@ -488,7 +554,7 @@ function CohortPanel({ cohortId, onClose }: { cohortId: string; onClose: () => v
                 onClick={() =>
                   void run(
                     () => api.patchJson(`/api/admin/cohorts/${cohortId}`, { status: 'open' }),
-                    'Cohort opened. Share the link below with the group.',
+                    'Cohort opened. Share the link from Access.',
                   )
                 }
               >
@@ -508,289 +574,408 @@ function CohortPanel({ cohortId, onClose }: { cohortId: string; onClose: () => v
                 Close the exercise
               </button>
             )}
-
-            <button
-              className="btn btn-secondary btn-sm"
-              disabled={busy}
-              onClick={() =>
-                void run(async () => {
-                  const res = await api.post<{ url: string }>(`/api/admin/cohorts/${cohortId}/link`);
-                  setLink(res.url);
-                }, 'Link issued. Any copy of the previous link has stopped working.')
-              }
-            >
-              {link ? 'Re-issue the link' : 'Issue the link'}
-            </button>
-          </div>
-
-          {link ? (
-            <>
-              <div className="linkbox">
-                <code>{link}</code>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => void navigator.clipboard?.writeText(link)}
-                >
-                  Copy
-                </button>
-              </div>
-              <ShortLink cohort={cohort} busy={busy} onRun={run} />
-            </>
-          ) : (
-            <p className="hint">
-              No link yet. Issue one once the roster is right — everyone in the group uses the same link
-              and identifies themselves from the roster when they open it.
-            </p>
-          )}
-
-          {/* Two-way binding. Off, the enrolled email alone opens the exercise;
-              on, a mailed six-digit code must come back first, so a colleague
-              who merely knows an address cannot answer as its owner. */}
-          <div className="share-toggle">
-            <div>
-              <b>Require sign-in code (OTP)</b>
-              <p className="hint" style={{ margin: '2px 0 0' }}>
-                {cohort.otpRequired
-                  ? 'On — respondents type their enrolled email, receive a 6-digit code there, and must enter it before the exercise opens. Proof of inbox, not just knowledge of an address.'
-                  : 'Off — the enrolled email alone opens the exercise. Fine for a trusted group; switch on for two-way binding in a large organisation.'}
-              </p>
-            </div>
-            <button
-              className={`btn btn-sm ${cohort.otpRequired ? 'btn-secondary' : 'btn-primary'}`}
-              disabled={busy}
-              onClick={() =>
-                void run(
-                  () => api.patchJson(`/api/admin/cohorts/${cohortId}`, { otpRequired: !cohort.otpRequired }),
-                  cohort.otpRequired
-                    ? 'Sign-in codes switched off — the enrolled email alone opens the exercise.'
-                    : 'Sign-in codes switched on — every respondent must confirm a mailed 6-digit code.',
-                )
-              }
-            >
-              {cohort.otpRequired ? 'Switch off' : 'Switch on'}
-            </button>
+            {link ? (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(link);
+                  showToast('Group link copied.');
+                }}
+              >
+                Copy link
+              </button>
+            ) : (
+              <button className="btn btn-secondary btn-sm" onClick={() => setActiveTab('access')}>
+                Issue a link
+              </button>
+            )}
           </div>
         </div>
-      </section>
 
-      <MemberLinksPanel cohort={cohort} busy={busy} onRun={run} />
-
-      <RoundsPanel cohort={cohort} busy={busy} onRun={run} />
-
-      {cohort.roundCount > 1 ? <TrendPanel cohortId={cohortId} /> : null}
-
-      <RosterPanel
-        cohort={cohort}
-        busy={busy}
-        onRun={run}
-        rosterText={rosterText}
-        setRosterText={setRosterText}
-      />
-
-      <AssignmentsPanel cohort={cohort} busy={busy} onRun={run} />
-
-      <section className="card">
-        <div className="card-body">
-          <h2>Reports</h2>
-          <p className="hint">
-            Generating scores the whole cohort at once and produces the group report plus one report per
-            member. Re-generating updates the numbers and keeps the group link working. A member rated by
-            fewer than {cohort.minRaters} colleagues is withheld rather than reported — an average of one
-            or two responses in a named group identifies who gave them.
-          </p>
-
-          {/* The completion screen's promise is controlled from here. Off — the
-              default — respondents are thanked and told nothing about reports;
-              their profiles still exist for the facilitator to hand over however
-              the engagement calls for. On, the completion screen says a summary
-              is coming by email, so only turn it on when that is actually the
-              plan. */}
-          <div className="share-toggle">
-            <div>
-              <b>Share reports with participants</b>
-              <p className="hint" style={{ margin: '2px 0 0' }}>
-                {cohort.shareReports
-                  ? 'On — the completion screen tells each respondent a personal summary will be emailed to them. Turning it off stops that promise for anyone who finishes afterwards.'
-                  : 'Off — respondents see a plain thank-you when they finish. No report, PDF or email is mentioned to them.'}
-              </p>
+        <div className="co-hero-stats">
+          {/* Responses lead and get the width: it is the one number that moves
+              on its own while the facilitator is doing something else. */}
+          <div className="co-progress">
+            <div className="co-progress-head">
+              <span className="co-stat-label">Responded</span>
+              <span className="co-progress-val num">
+                {responded} of {cohort.rosterSize}
+                <em>{cohort.rosterSize > 0 ? ` · ${pct}%` : ''}</em>
+              </span>
             </div>
-            <button
-              className={`btn btn-sm ${cohort.shareReports ? 'btn-secondary' : 'btn-primary'}`}
-              disabled={busy}
-              onClick={() =>
-                void run(
-                  () =>
-                    api.patchJson(`/api/admin/cohorts/${cohortId}`, {
-                      shareReports: !cohort.shareReports,
-                    }),
-                  cohort.shareReports
-                    ? 'Report sharing switched off — participants are no longer promised a report.'
-                    : 'Report sharing switched on — participants are told their summary will be emailed.',
-                )
-              }
+            <div
+              className="progress-strip"
+              role="progressbar"
+              aria-valuenow={pct}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="Share of the roster that has responded"
             >
-              {cohort.shareReports ? 'Switch off' : 'Switch on'}
-            </button>
+              <i style={{ transform: `scaleX(${pct / 100})` }} />
+            </div>
           </div>
 
-          {/* The same floor applies to the group report, so the button says so
-              before it is pressed rather than after: a cohort nobody has
-              answered would otherwise produce a "ready" report of an empty
-              network, and one or two responses would produce a group report
-              that is one person's opinions with the name taken off. */}
-          {responded < cohort.minRaters ? (
-            <p className="hint">
-              <b>
-                {responded === 0
-                  ? 'Nobody has responded yet.'
-                  : `${responded} of ${cohort.rosterSize} ${responded === 1 ? 'has' : 'have'} responded.`}
-              </b>{' '}
-              Reports need at least {cohort.minRaters} responses, for the group as well as for each
-              member — share the link and come back.
-            </p>
-          ) : null}
-
-          <div className="btn-row">
-            <button
-              className="btn btn-primary btn-sm"
-              disabled={busy || responded < cohort.minRaters}
-              onClick={() =>
-                void run(async () => {
-                  const res = await api.post<{ members: number; suppressed: number }>(
-                    `/api/admin/cohorts/${cohortId}/reports`,
-                  );
-                  showToast(
-                    `Generated the group report and ${res.members} member report${
-                      res.members === 1 ? '' : 's'
-                    }${res.suppressed > 0 ? `, of which ${res.suppressed} were withheld for low coverage` : ''}.`,
-                  );
-                })
-              }
-            >
-              {reports.length > 0 ? 'Re-generate reports' : 'Generate reports'}
-            </button>
-          </div>
-
-          {reports.length === 0 ? null : (
-            <div style={{ marginTop: 16 }}>
-              <DataTable
-                rows={reports}
-                rowKey={(r) => r.id}
-                pageSize={10}
-                minWidth={820}
-                columns={[
-                  {
-                    key: 'report',
-                    header: 'Report',
-                    value: (r) => (r.scope === 'group' ? 'Group report' : (r.memberName ?? '')),
-                    cell: (r) => (
-                      <>
-                        <b>{r.scope === 'group' ? 'Group report' : r.memberName}</b>
-                        {r.scope === 'member' && !r.memberEmail ? (
-                          <div className="cell-sub">no email on the roster</div>
-                        ) : null}
-                      </>
-                    ),
-                  },
-                  {
-                    key: 'round',
-                    header: 'Round',
-                    width: '140px',
-                    value: (r) => r.roundName,
-                    cell: (r) => r.roundName,
-                  },
-                  {
-                    key: 'status',
-                    header: 'Status',
-                    width: '110px',
-                    value: (r) => (r.suppressed ? 'withheld' : 'ready'),
-                    cell: (r) =>
-                      r.suppressed ? (
-                        <span className="pill pill-plain">withheld</span>
-                      ) : (
-                        <span className="pill pill-ok">ready</span>
-                      ),
-                  },
-                  {
-                    key: 'sent',
-                    header: 'Sent',
-                    width: '120px',
-                    value: (r) => r.sentAt ?? '',
-                    cell: (r) => (r.sentAt ? formatDate(r.sentAt) : '—'),
-                  },
-                  {
-                    key: 'actions',
-                    header: '',
-                    width: '250px',
-                    className: 'row-actions',
-                    cell: (r) => (
-                      <>
-                        <a
-                          className="btn btn-ghost btn-sm"
-                          href={`/api/admin/cohorts/${cohortId}/reports/${r.id}/pdf`}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          PDF
-                        </a>
-                        {r.scope === 'group' && r.url ? (
-                          <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => void navigator.clipboard?.writeText(r.url!)}
-                          >
-                            Copy link
-                          </button>
-                        ) : null}
-                        {r.scope === 'member' && !r.suppressed ? (
-                          <>
-                            <button
-                              className="btn btn-ghost btn-sm"
-                              disabled={busy || !r.memberEmail}
-                              onClick={() =>
-                                void run(
-                                  () =>
-                                    api.post(
-                                      `/api/admin/cohorts/${cohortId}/reports/${r.id}/send`,
-                                    ),
-                                  `Sent to ${r.memberEmail}.`,
-                                )
-                              }
-                            >
-                              {r.sentAt ? 'Send again' : 'Send'}
-                            </button>
-                            <button
-                              className="btn btn-ghost btn-sm"
-                              disabled={busy}
-                              onClick={() =>
-                                void run(async () => {
-                                  const res = await api.post<{ url: string }>(
-                                    `/api/admin/cohorts/${cohortId}/reports/${r.id}/reissue`,
-                                  );
-                                  await navigator.clipboard?.writeText(res.url);
-                                  showToast(
-                                    `A fresh link for ${r.memberName} is on your clipboard. The previous one no longer works.`,
-                                  );
-                                })
-                              }
-                            >
-                              Copy link
-                            </button>
-                          </>
-                        ) : null}
-                      </>
-                    ),
-                  },
-                ]}
-              />
-            </div>
-          )}
+          <Stat label="Roster" value={String(cohort.rosterSize)} note="active members" />
+          <Stat label="Rater floor" value={String(cohort.minRaters)} note="for an individual report" />
+          <Stat label="Tie threshold" value={String(cohort.tieThreshold)} note="counted as a tie" />
         </div>
-      </section>
+      </header>
 
+      {/* A sibling of the header, not a child of it. Sticky is bounded by the
+          containing block, and the header ends at the tab row — nested, the
+          tabs had a sticky range of zero pixels and simply scrolled away. */}
+      <nav className="co-tabs" role="tablist" aria-label="Cohort views">
+        {COHORT_TABS.map(([k, label]) => (
+          <button
+            key={k}
+            role="tab"
+            aria-selected={activeTab === k}
+            className={`co-tab${activeTab === k ? ' is-on' : ''}`}
+            onClick={() => setActiveTab(k)}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {error ? <div className="banner is-shown">{error}</div> : null}
+
+      <div className="co-tabpanel" role="tabpanel" key={activeTab}>
+        {activeTab === 'network' ? (
+          <CohortNetworkCard cohortId={cohortId} roundCount={cohort.roundCount} fullBleed />
+        ) : null}
+
+        {activeTab === 'roster' ? (
+          <>
+            <RosterPanel
+              cohort={cohort}
+              busy={busy}
+              onRun={run}
+              rosterText={rosterText}
+              setRosterText={setRosterText}
+            />
+            <AssignmentsPanel cohort={cohort} busy={busy} onRun={run} />
+          </>
+        ) : null}
+
+        {activeTab === 'access' ? (
+          <>
+            <AccessPanel cohort={cohort} busy={busy} onRun={run} link={link} setLink={setLink} />
+            <MemberLinksPanel cohort={cohort} busy={busy} onRun={run} />
+          </>
+        ) : null}
+
+        {activeTab === 'rounds' ? (
+          <>
+            <RoundsPanel cohort={cohort} busy={busy} onRun={run} />
+            {cohort.roundCount > 1 ? <TrendPanel cohortId={cohortId} /> : null}
+          </>
+        ) : null}
+
+        {activeTab === 'reports' ? (
+          <ReportsPanel
+            cohort={cohort}
+            reports={reports}
+            responded={responded}
+            busy={busy}
+            onRun={run}
+            showToast={showToast}
+          />
+        ) : null}
       </div>
 
       <Toast message={toast} />
     </div>
+  );
+}
+
+/**
+ * How people get in: the shared link, its readable alias, and the rule that
+ * decides who a respondent is allowed to claim to be.
+ *
+ * These three used to sit at the top of a general "Info" panel above four
+ * unrelated ones. They belong together because they are one decision made in
+ * three parts — a facilitator changing the identity rule almost always re-issues
+ * or re-shares the link in the same sitting.
+ */
+function AccessPanel({
+  cohort,
+  busy,
+  onRun,
+  link,
+  setLink,
+}: {
+  cohort: CohortDetail;
+  busy: boolean;
+  onRun: <T>(fn: () => Promise<T>, success?: string) => Promise<T | null>;
+  link: string | null;
+  setLink: (v: string) => void;
+}) {
+  return (
+    <section className="card">
+      <CardHead
+        title="The shared link"
+        sub="One link for the whole group. Everyone opens the same address and identifies themselves from the roster."
+        aside={
+          <button
+            className="btn btn-secondary btn-sm"
+            disabled={busy}
+            onClick={() =>
+              void onRun(async () => {
+                const res = await api.post<{ url: string }>(`/api/admin/cohorts/${cohort.id}/link`);
+                setLink(res.url);
+              }, 'Link issued. Any copy of the previous link has stopped working.')
+            }
+          >
+            {link ? 'Re-issue' : 'Issue the link'}
+          </button>
+        }
+      />
+      <div className="card-body">
+        {link ? (
+          <>
+            <div className="linkbox">
+              <code>{link}</code>
+              <button className="btn btn-ghost btn-sm" onClick={() => void navigator.clipboard?.writeText(link)}>
+                Copy
+              </button>
+            </div>
+            <ShortLink cohort={cohort} busy={busy} onRun={onRun} />
+          </>
+        ) : (
+          <EmptyState
+            title="No link yet"
+            body="Issue one once the roster is right. Everyone in the group uses the same link and identifies themselves from the roster when they open it."
+          />
+        )}
+
+        <IdentityModePicker cohort={cohort} busy={busy} onRun={onRun} />
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Generating, sharing and sending the reports.
+ *
+ * The rater floor is stated before the button rather than after it: a cohort
+ * nobody has answered would otherwise produce a "ready" report of an empty
+ * network, and one or two responses would produce a group report that is one
+ * person's opinions with the name taken off.
+ */
+function ReportsPanel({
+  cohort,
+  reports,
+  responded,
+  busy,
+  onRun,
+  showToast,
+}: {
+  cohort: CohortDetail;
+  reports: CohortReportRow[];
+  responded: number;
+  busy: boolean;
+  onRun: <T>(fn: () => Promise<T>, success?: string) => Promise<T | null>;
+  showToast: (message: string) => void;
+}) {
+  const cohortId = cohort.id;
+  const short = responded < cohort.minRaters;
+
+  return (
+    <section className="card">
+      <CardHead
+        title="Reports"
+        sub={`One group report plus one per member. A member rated by fewer than ${cohort.minRaters} colleagues is withheld rather than reported — an average of one or two responses in a named group identifies who gave them.`}
+        aside={
+          <button
+            className="btn btn-primary btn-sm"
+            disabled={busy || short}
+            title={short ? `Needs at least ${cohort.minRaters} responses` : undefined}
+            onClick={() =>
+              void onRun(async () => {
+                const res = await api.post<{ members: number; suppressed: number }>(
+                  `/api/admin/cohorts/${cohortId}/reports`,
+                );
+                showToast(
+                  `Generated the group report and ${res.members} member report${
+                    res.members === 1 ? '' : 's'
+                  }${res.suppressed > 0 ? `, of which ${res.suppressed} were withheld for low coverage` : ''}.`,
+                );
+              })
+            }
+          >
+            {reports.length > 0 ? 'Re-generate' : 'Generate reports'}
+          </button>
+        }
+      />
+      <div className="card-body">
+        {short ? (
+          <div className="notice" role="status">
+            <b>
+              {responded === 0
+                ? 'Nobody has responded yet.'
+                : `${responded} of ${cohort.rosterSize} ${responded === 1 ? 'has' : 'have'} responded.`}
+            </b>{' '}
+            Reports need at least {cohort.minRaters} responses, for the group as well as for each member —
+            share the link and come back.
+          </div>
+        ) : null}
+
+        {/* The completion screen's promise is controlled from here. Off — the
+            default — respondents are thanked and told nothing about reports;
+            their profiles still exist for the facilitator to hand over however
+            the engagement calls for. On, the completion screen says a summary
+            is coming by email, so only turn it on when that is actually the
+            plan. */}
+        <div className="share-toggle">
+          <div>
+            <b>Share reports with participants</b>
+            <p className="hint">
+              {cohort.shareReports
+                ? 'On — the completion screen tells each respondent a personal summary will be emailed to them. Turning it off stops that promise for anyone who finishes afterwards.'
+                : 'Off — respondents see a plain thank-you when they finish. No report, PDF or email is mentioned to them.'}
+            </p>
+          </div>
+          <button
+            className={`btn btn-sm ${cohort.shareReports ? 'btn-secondary' : 'btn-primary'}`}
+            disabled={busy}
+            onClick={() =>
+              void onRun(
+                () =>
+                  api.patchJson(`/api/admin/cohorts/${cohortId}`, {
+                    shareReports: !cohort.shareReports,
+                  }),
+                cohort.shareReports
+                  ? 'Report sharing switched off — participants are no longer promised a report.'
+                  : 'Report sharing switched on — participants are told their summary will be emailed.',
+              )
+            }
+          >
+            {cohort.shareReports ? 'Switch off' : 'Switch on'}
+          </button>
+        </div>
+
+        {reports.length === 0 ? (
+          <EmptyState
+            title="Nothing generated yet"
+            body={
+              short
+                ? 'Reports appear here once enough of the group has answered and you generate them.'
+                : 'Enough of the group has answered. Generate the reports to produce the group map and each member’s own.'
+            }
+          />
+        ) : (
+          <div className="mt-4">
+            <DataTable
+              rows={reports}
+              rowKey={(r) => r.id}
+              pageSize={10}
+              minWidth={820}
+              columns={[
+                {
+                  key: 'report',
+                  header: 'Report',
+                  value: (r) => (r.scope === 'group' ? 'Group report' : (r.memberName ?? '')),
+                  cell: (r) => (
+                    <>
+                      <b>{r.scope === 'group' ? 'Group report' : r.memberName}</b>
+                      {r.scope === 'member' && !r.memberEmail ? (
+                        <div className="cell-sub">no email on the roster</div>
+                      ) : null}
+                    </>
+                  ),
+                },
+                {
+                  key: 'round',
+                  header: 'Round',
+                  width: '140px',
+                  value: (r) => r.roundName,
+                  cell: (r) => r.roundName,
+                },
+                {
+                  key: 'status',
+                  header: 'Status',
+                  width: '110px',
+                  value: (r) => (r.suppressed ? 'withheld' : 'ready'),
+                  cell: (r) =>
+                    r.suppressed ? (
+                      <span className="pill pill-plain">withheld</span>
+                    ) : (
+                      <span className="pill pill-ok">ready</span>
+                    ),
+                },
+                {
+                  key: 'sent',
+                  header: 'Sent',
+                  width: '120px',
+                  value: (r) => r.sentAt ?? '',
+                  cell: (r) => (r.sentAt ? formatDate(r.sentAt) : '—'),
+                },
+                {
+                  key: 'actions',
+                  header: '',
+                  width: '250px',
+                  className: 'row-actions',
+                  cell: (r) => (
+                    <>
+                      <a
+                        className="btn btn-ghost btn-sm"
+                        href={`/api/admin/cohorts/${cohortId}/reports/${r.id}/pdf`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        PDF
+                      </a>
+                      {r.scope === 'group' && r.url ? (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => void navigator.clipboard?.writeText(r.url!)}
+                        >
+                          Copy link
+                        </button>
+                      ) : null}
+                      {r.scope === 'member' && !r.suppressed ? (
+                        <>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            disabled={busy || !r.memberEmail}
+                            onClick={() =>
+                              void onRun(
+                                () => api.post(`/api/admin/cohorts/${cohortId}/reports/${r.id}/send`),
+                                `Sent to ${r.memberEmail}.`,
+                              )
+                            }
+                          >
+                            {r.sentAt ? 'Send again' : 'Send'}
+                          </button>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            disabled={busy}
+                            onClick={() =>
+                              void onRun(async () => {
+                                const res = await api.post<{ url: string }>(
+                                  `/api/admin/cohorts/${cohortId}/reports/${r.id}/reissue`,
+                                );
+                                await navigator.clipboard?.writeText(res.url);
+                                showToast(
+                                  `A fresh link for ${r.memberName} is on your clipboard. The previous one no longer works.`,
+                                );
+                              })
+                            }
+                          >
+                            Copy link
+                          </button>
+                        </>
+                      ) : null}
+                    </>
+                  ),
+                },
+              ]}
+            />
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -1098,18 +1283,16 @@ function TrendPanel({ cohortId }: { cohortId: string }) {
 
   return (
     <section className="card">
-      <div className="card-body">
-        <div className="panel-head">
-          <h2>Trend</h2>
-          <button className="btn btn-secondary btn-sm" onClick={() => setOpen((o) => !o)}>
+      <CardHead
+        title="Trend"
+        sub="The same group across its rounds: how many answered, how much of the group each round actually covered, and where the four blocks moved."
+        aside={
+          <button className="btn btn-secondary btn-sm" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
             {open ? 'Hide the trend' : 'Show the trend'}
           </button>
-        </div>
-        <p className="hint">
-          The same group across its rounds: how many answered, how much of the group each round
-          actually covered, and where the four blocks moved.
-        </p>
-
+        }
+      />
+      <div className="card-body">
         {error ? <div className="banner is-shown">{error}</div> : null}
 
         {open && !trend && !error ? <p className="hint">Reading every round…</p> : null}
@@ -1264,20 +1447,17 @@ function RoundsPanel({
 
   return (
     <section className="card">
-      <div className="card-body">
-        <div className="panel-head">
-          <h2>Rounds</h2>
-          <span className="hint">
+      <CardHead
+        title="Rounds"
+        sub={`Ask the same group again without losing what they said last time. A new round issues a new link and empties the roster's "already responded" marks; every previous round keeps its link, its answers and its reports.`}
+        aside={
+          <span className="pill pill-plain">
             {cohort.roundCount === 1 ? 'One wave so far' : `${cohort.roundCount} waves`}
           </span>
-        </div>
-        <p className="hint">
-          Ask the same group again without losing what they said last time. A new round issues a new
-          link and empties the roster's "already responded" marks; every previous round keeps its link,
-          its answers and its reports.
-        </p>
-
-        <div className="inline-form">
+        }
+      />
+      <div className="card-body">
+        <div className="inline-form inline-form-first">
           <input
             className="control control-sm"
             placeholder={`Name this round, e.g. ${new Date().toLocaleString('en-GB', { month: 'long' })} ${new Date().getFullYear()}`}
@@ -1381,6 +1561,34 @@ function RoundsPanel({
  * let a later member inherit ratings meant for them. The row stays visible,
  * greyed, so the gap in the numbering reads as deliberate rather than as a bug.
  */
+/**
+ * One member as the editor holds them, which is not quite how the API states
+ * them. Both optional attributes are absent far more often than they are set,
+ * and a `<select>` has exactly one way to say "nothing chosen" — the empty
+ * string. So the editor keeps them as strings and `memberBody` turns the empty
+ * one back into the null the API means by it, rather than sprinkling the
+ * conversion through the JSX.
+ */
+interface MemberDraft {
+  name: string;
+  func: string;
+  email: string;
+  tenureBand: string;
+  reportsTo: string;
+}
+
+const EMPTY_MEMBER: MemberDraft = { name: '', func: '', email: '', tenureBand: '', reportsTo: '' };
+
+function memberBody(d: MemberDraft): Record<string, unknown> {
+  return {
+    name: d.name,
+    func: d.func,
+    email: d.email,
+    tenureBand: d.tenureBand === '' ? null : d.tenureBand,
+    reportsTo: d.reportsTo === '' ? null : Number(d.reportsTo),
+  };
+}
+
 function RosterPanel({
   cohort,
   busy,
@@ -1394,17 +1602,24 @@ function RosterPanel({
   rosterText: string;
   setRosterText: (v: string) => void;
 }) {
-  const [adding, setAdding] = useState({ name: '', func: '', email: '' });
+  const [adding, setAdding] = useState<MemberDraft>(EMPTY_MEMBER);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState({ name: '', func: '', email: '' });
+  const [draft, setDraft] = useState<MemberDraft>(EMPTY_MEMBER);
   const [showPaste, setShowPaste] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const active = cohort.roster.filter((m) => m.active);
+  const nameOfNo = new Map(cohort.roster.map((m) => [m.no, m.name]));
 
   function startEdit(m: CohortDetail['roster'][number]): void {
     setEditingId(m.memberId);
-    setDraft({ name: m.name, func: m.func, email: m.email });
+    setDraft({
+      name: m.name,
+      func: m.func,
+      email: m.email,
+      tenureBand: m.tenureBand ?? '',
+      reportsTo: m.reportsTo === null || m.reportsTo === undefined ? '' : String(m.reportsTo),
+    });
   }
 
   async function upload(file: File): Promise<void> {
@@ -1428,14 +1643,13 @@ function RosterPanel({
 
   return (
     <section className="card">
+      <CardHead
+        title="Roster"
+        sub="The people in this group, and the order their ratings are stored against. A position is never reused: rename someone and their ratings follow, remove someone and their slot stays theirs. Tenure and reporting line are optional — lenses for reading the network afterwards, and nothing about the exercise waits on them."
+        aside={<span className="pill pill-plain">{`${active.length} active`}</span>}
+      />
       <div className="card-body">
-        <h2>Roster</h2>
-        <p className="hint">
-          The people in this group, and the order their ratings are stored against. A position is never
-          reused: rename someone and their ratings follow, remove someone and their slot stays theirs.
-        </p>
-
-        <div className="btn-row">
+        <div className="btn-row btn-row-first">
           <button
             className="btn btn-secondary btn-sm"
             disabled={busy}
@@ -1509,7 +1723,11 @@ function RosterPanel({
             rows={cohort.roster}
             rowKey={(m) => m.memberId}
             pageSize={25}
-            minWidth={860}
+            // Sized to fit a 1440 viewport with the sidebar open rather than to
+            // the columns' natural widths: at 1130 the actions column sat just
+            // past the card edge, so every row ended in a half-drawn button and
+            // a scrollbar to reach it.
+            minWidth={1060}
             footer={
               <tr>
                 <td className="num">
@@ -1539,6 +1757,36 @@ function RosterPanel({
                     onChange={(e) => setAdding({ ...adding, email: e.target.value })}
                   />
                 </td>
+                <td>
+                  <select
+                    className="control control-sm"
+                    value={adding.tenureBand}
+                    onChange={(e) => setAdding({ ...adding, tenureBand: e.target.value })}
+                    aria-label="Tenure band"
+                  >
+                    <option value="">—</option>
+                    {TENURE_BANDS.map((b) => (
+                      <option key={b} value={b}>
+                        {b}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  <select
+                    className="control control-sm"
+                    value={adding.reportsTo}
+                    onChange={(e) => setAdding({ ...adding, reportsTo: e.target.value })}
+                    aria-label="Reports to"
+                  >
+                    <option value="">—</option>
+                    {active.map((o) => (
+                      <option key={o.memberId} value={String(o.no)}>
+                        {o.name}
+                      </option>
+                    ))}
+                  </select>
+                </td>
                 <td>—</td>
                 <td className="row-actions">
                   <button
@@ -1546,8 +1794,8 @@ function RosterPanel({
                     disabled={busy || !adding.name.trim()}
                     onClick={() =>
                       void onRun(async () => {
-                        await api.post(`/api/admin/cohorts/${cohort.id}/members`, adding);
-                        setAdding({ name: '', func: '', email: '' });
+                        await api.post(`/api/admin/cohorts/${cohort.id}/members`, memberBody(adding));
+                        setAdding(EMPTY_MEMBER);
                       }, `${adding.name.trim()} added.`)
                     }
                   >
@@ -1615,6 +1863,64 @@ function RosterPanel({
                   ),
               },
               {
+                key: 'tenure',
+                header: 'Tenure',
+                width: '110px',
+                value: (m) => m.tenureBand ?? '',
+                cell: (m) =>
+                  editingId === m.memberId ? (
+                    <select
+                      className="control control-sm"
+                      value={draft.tenureBand}
+                      onChange={(e) => setDraft({ ...draft, tenureBand: e.target.value })}
+                      aria-label="Tenure band"
+                    >
+                      <option value="">—</option>
+                      {TENURE_BANDS.map((b) => (
+                        <option key={b} value={b}>
+                          {b}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    (m.tenureBand ?? '—')
+                  ),
+              },
+              {
+                key: 'reportsTo',
+                header: 'Reports to',
+                width: '160px',
+                value: (m) => (m.reportsTo == null ? '' : (nameOfNo.get(m.reportsTo) ?? '')),
+                cell: (m) =>
+                  editingId === m.memberId ? (
+                    <select
+                      className="control control-sm"
+                      value={draft.reportsTo}
+                      onChange={(e) => setDraft({ ...draft, reportsTo: e.target.value })}
+                      aria-label="Reports to"
+                    >
+                      <option value="">—</option>
+                      {/* Never themselves: the server refuses it, so the list
+                          does not offer it. */}
+                      {active
+                        .filter((o) => o.memberId !== m.memberId)
+                        .map((o) => (
+                          <option key={o.memberId} value={String(o.no)}>
+                            {o.name}
+                          </option>
+                        ))}
+                    </select>
+                  ) : m.reportsTo == null ? (
+                    '—'
+                  ) : (
+                    // A manager taken off the roster leaves the line pointing at
+                    // a position nobody holds. Say so rather than showing blank.
+                    (nameOfNo.get(m.reportsTo) ?? (
+                      <span className="cell-sub">position {m.reportsTo}, no longer on the roster</span>
+                    ))
+                  ),
+              },
+              {
                 key: 'responded',
                 header: 'Responded',
                 width: '110px',
@@ -1636,7 +1942,7 @@ function RosterPanel({
                           void onRun(async () => {
                             await api.patchJson(
                               `/api/admin/cohorts/${cohort.id}/members/${m.memberId}`,
-                              draft,
+                              memberBody(draft),
                             );
                             setEditingId(null);
                           }, 'Saved.')
@@ -1692,6 +1998,98 @@ function RosterPanel({
   );
 }
 
+/**
+ * How this cohort decides who somebody is — one choice of three, not two
+ * unrelated switches.
+ *
+ * The stored flags are still two (`otpRequired`, `linkOnlyIdentity`), because
+ * keeping them apart is what lets a code requirement survive a spell on
+ * personal links. But a facilitator reasons about one question with three
+ * answers, and offering it as two toggles invited the fourth combination that
+ * means nothing: a code requirement on a cohort that no longer asks for an
+ * email. `cohortIdentityPatch` is the single place the three answers become
+ * flags, shared with the Worker that enforces them.
+ */
+function IdentityModePicker({
+  cohort,
+  busy,
+  onRun,
+}: {
+  cohort: CohortDetail;
+  busy: boolean;
+  onRun: <T>(fn: () => Promise<T>, success?: string) => Promise<T | null>;
+}) {
+  const current = cohortIdentityMode(cohort);
+  const missingLinks = Math.max(0, cohort.rosterSize - cohort.personalLinkCount);
+
+  const options: { mode: CohortIdentityMode; label: string; note: string; done: string }[] = [
+    {
+      mode: 'open',
+      label: 'Open',
+      note: 'respondents pick their name and confirm by work email',
+      done: 'Identity set to open — the enrolled work email alone opens the exercise.',
+    },
+    {
+      mode: 'otp',
+      label: 'Email + code',
+      note: 'a one-time code is mailed and must be typed back',
+      done: 'Identity set to email + code — every respondent must confirm a mailed 6-digit code.',
+    },
+    {
+      mode: 'link_only',
+      label: 'Personal links only',
+      note: 'each member enters by their own emailed link; the shared link stops accepting identities',
+      done: 'Identity set to personal links only — the shared link no longer accepts an identity.',
+    },
+  ];
+
+  return (
+    <div className="share-toggle identity-modes">
+      <div>
+        <b>Identity</b>
+        <p className="hint" style={{ margin: '2px 0 6px' }}>
+          How someone proves which roster position is theirs before they can rate anybody.
+        </p>
+
+        <div className="identity-choices" role="radiogroup" aria-label="Identity">
+          {options.map((o) => (
+            <label key={o.mode} className={`identity-choice${current === o.mode ? ' is-on' : ''}`}>
+              <input
+                type="radio"
+                name={`identity-${cohort.id}`}
+                checked={current === o.mode}
+                disabled={busy}
+                onChange={() => {
+                  if (current === o.mode) return;
+                  void onRun(
+                    () => api.patchJson(`/api/admin/cohorts/${cohort.id}`, cohortIdentityPatch(o.mode)),
+                    o.done,
+                  );
+                }}
+              />
+              <span>
+                <b>{o.label}</b> — {o.note}
+              </span>
+            </label>
+          ))}
+        </div>
+
+        {/* A shut front door and no keys handed out is not security, it is a
+            locked-out cohort — and it looks identical to the facilitator until
+            somebody emails to say the link does nothing. */}
+        {current === 'link_only' && missingLinks > 0 ? (
+          <div className="banner is-shown" style={{ marginTop: 8, marginBottom: 0 }}>
+            <span>
+              {missingLinks} of {cohort.rosterSize} members have no personal link yet — issue links
+              below or they cannot enter.
+            </span>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 interface MemberLinkRow {
   memberId: string;
   name: string;
@@ -1741,15 +2139,17 @@ function MemberLinksPanel({
 
   return (
     <section className="card">
+      <CardHead
+        title="Personal links"
+        sub="Each person gets their own unguessable link, already signed in as them — nothing to type, nobody to impersonate. A person who already holds a link keeps it."
+      />
       <div className="card-body">
-        <h2>Personal links</h2>
-        <p className="hint">
-          Each person gets their own unguessable link, already signed in as them — nothing to type,
-          nobody to impersonate. A person who already holds a link keeps it; freshly minted links are
-          shown below <b>once</b>, so copy or email them now. Regenerating kills every old link.
-        </p>
+        <div className="notice" role="note">
+          Freshly minted links are shown below <b>once</b>, so copy or email them before you leave this
+          panel. Regenerating kills every link already in someone's inbox.
+        </div>
 
-        <div className="btn-row">
+        <div className="btn-row btn-row-first">
           <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void issue({ send: false })}>
             Issue missing links
           </button>
@@ -1955,9 +2355,14 @@ function AssignmentsPanel({
 
   return (
     <section className="card">
-      <div className="card-body">
-        <div className="net-head">
-          <h2>Who rates whom</h2>
+      <CardHead
+        title="Who rates whom"
+        sub={
+          mapped === 0
+            ? 'Full matrix — every respondent rates the whole roster. Upload a mapping sheet, or open a person below, to narrow it.'
+            : `${mapped} of ${active.length} raters are mapped. A mapped rater sees only their targets; anyone unmapped still sees everyone.`
+        }
+        aside={
           <span className={`save-badge is-${saveState === 'idle' ? 'saved' : saveState}`} role="status">
             {saveState === 'saving'
               ? 'Saving…'
@@ -1967,14 +2372,10 @@ function AssignmentsPanel({
                   ? 'Saved'
                   : ''}
           </span>
-        </div>
-        <p className="hint">
-          {mapped === 0
-            ? 'Full matrix — every respondent rates the whole roster. Upload a mapping sheet, or open a person below, to narrow it.'
-            : `${mapped} of ${active.length} raters are mapped. A mapped rater sees only their targets; anyone unmapped still sees everyone.`}
-        </p>
-
-        <div className="btn-row">
+        }
+      />
+      <div className="card-body">
+        <div className="btn-row btn-row-first">
           <button
             className="btn btn-secondary btn-sm"
             disabled={busy}
@@ -2083,11 +2484,17 @@ function AssignmentsPanel({
   );
 }
 
+/**
+ * One figure in the standing header. The label sits above rather than beside:
+ * the four of them line up as a row of readings, and a reading whose caption is
+ * inline with it stops being scannable the moment one value is wider than the
+ * rest.
+ */
 function Stat({ label, value, note }: { label: string; value: string; note: string }) {
   return (
     <div className="co-stat">
       <span className="co-stat-label">{label}</span>
-      <span className="co-stat-value">{value}</span>
+      <span className="co-stat-value num">{value}</span>
       <span className="co-stat-note">{note}</span>
     </div>
   );

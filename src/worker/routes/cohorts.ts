@@ -27,6 +27,7 @@ import {
   cohortCreateSchema,
   cohortUpdateSchema,
   fieldErrors,
+  reportsToError,
   rosterMemberSchema,
   rosterPasteSchema,
   rosterSetSchema,
@@ -55,6 +56,7 @@ import {
   type CohortReportRow,
 } from '../lib/cohort-report-render.js';
 import { ASSESSMENT_ID } from '../../shared/assessments.js';
+import { cohortIdentityMode } from '../../shared/cohort-identity.js';
 import { scoreSocioCohort, socioEdges } from '../../shared/socio-scoring.js';
 import type { CohortDetail, CohortNetwork, CohortRoundSummary, CohortSummary } from '../../shared/types.js';
 
@@ -135,6 +137,7 @@ function toSummary(row: CohortListRow): CohortSummary {
     minRatedTargets: row.min_rated_targets,
     shareReports: row.share_reports === 1,
     otpRequired: row.otp_required === 1,
+    linkOnlyIdentity: row.link_only_identity === 1,
     shortSlug: row.short_slug,
     slugActive: row.slug_active === 1,
     // The alias is namespaced by the instrument — `/sociometry/acme-2026` — so
@@ -226,7 +229,7 @@ cohortRoutes.get('/:id', async (c) => {
   if (!row) return c.json({ error: 'Cohort not found' }, 404);
 
   const { results } = await c.env.DB.prepare(
-    `SELECT m.id, m.no, m.name, m.function, m.email, m.active,
+    `SELECT m.id, m.no, m.name, m.function, m.email, m.active, m.tenure_band, m.reports_to,
             EXISTS (SELECT 1 FROM responses r
                      WHERE r.cohort_id = m.cohort_id AND r.rater_member_id = m.id
                        AND r.round_no = ?2 AND r.status = 'completed') AS responded
@@ -242,11 +245,24 @@ cohortRoutes.get('/:id', async (c) => {
       function: string;
       email: string;
       active: number;
+      tenure_band: string | null;
+      reports_to: number | null;
       responded: number;
     }>();
 
+  // Scoped to the current round, like every other count on this view: a link
+  // belongs to the wave it was issued for, so September's links are not a way
+  // into October's asking and must not be counted as one.
+  const personalLinks = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM links
+      WHERE cohort_id = ?1 AND kind = 'personal' AND round_no = ?2 AND active = 1`,
+  )
+    .bind(row.id, row.round_no)
+    .first<{ n: number }>();
+
   const detail: CohortDetail = {
     ...toSummary(row),
+    personalLinkCount: personalLinks?.n ?? 0,
     rounds: await roundSummaries(c.env, row.id),
     roster: (results ?? []).map((m) => ({
       memberId: m.id,
@@ -256,6 +272,10 @@ cohortRoutes.get('/:id', async (c) => {
       email: m.email,
       active: m.active === 1,
       responded: m.responded === 1,
+      // Null on every roster built before migration 0018, and null is the
+      // answer the console draws as "—". Never coerced to a band or a zero.
+      tenureBand: m.tenure_band,
+      reportsTo: m.reports_to,
     })),
   };
   return c.json(detail);
@@ -351,6 +371,11 @@ cohortRoutes.patch('/:id', async (c) => {
             slug_active       = COALESCE(?9, slug_active),
             share_reports     = COALESCE(?10, share_reports),
             otp_required      = COALESCE(?11, otp_required),
+            -- Absent leaves it alone, which is what puts the two identity flags
+            -- beside each other rather than into one column: switching to
+            -- personal links says nothing about the code requirement, so the
+            -- stored one is still there to come back to. See migration 0019.
+            link_only_identity = COALESCE(?12, link_only_identity),
             closed_at         = CASE WHEN ?4 = 'closed' THEN datetime('now')
                                      WHEN ?4 IS NOT NULL THEN NULL
                                      ELSE closed_at END
@@ -368,8 +393,39 @@ cohortRoutes.patch('/:id', async (c) => {
       d.slugActive === undefined ? null : d.slugActive ? 1 : 0,
       d.shareReports === undefined ? null : d.shareReports ? 1 : 0,
       d.otpRequired === undefined ? null : d.otpRequired ? 1 : 0,
+      d.linkOnlyIdentity === undefined ? null : d.linkOnlyIdentity ? 1 : 0,
     )
     .run();
+
+  // Who is allowed to answer as whom is the one cohort setting whose weakening
+  // is worth a line of its own in the log. The automatic entry records that a
+  // PATCH happened; this records which door was opened or shut, and what the
+  // cohort was set to before — the question asked after the fact is never "was
+  // this changed" but "when did it stop being link-only, and by whom".
+  if (d.otpRequired !== undefined || d.linkOnlyIdentity !== undefined) {
+    const was = cohortIdentityMode({
+      otpRequired: cohort.otp_required === 1,
+      linkOnlyIdentity: cohort.link_only_identity === 1,
+    });
+    const now = cohortIdentityMode({
+      otpRequired: d.otpRequired ?? cohort.otp_required === 1,
+      linkOnlyIdentity: d.linkOnlyIdentity ?? cohort.link_only_identity === 1,
+    });
+    if (was !== now) {
+      recordBefore(c, {
+        action: 'cohort.identity_mode',
+        entity: 'cohort',
+        entityId: id,
+        summary: `Identity for "${cohort.name}" changed from ${was} to ${now}.`,
+        before: { mode: was, otpRequired: cohort.otp_required === 1, linkOnlyIdentity: cohort.link_only_identity === 1 },
+        after: {
+          mode: now,
+          otpRequired: d.otpRequired ?? cohort.otp_required === 1,
+          linkOnlyIdentity: d.linkOnlyIdentity ?? cohort.link_only_identity === 1,
+        },
+      });
+    }
+  }
 
   // Closing the exercise closes the wave that was taking responses; opening it
   // again reopens that same wave rather than starting a new one, which is what
@@ -410,7 +466,7 @@ cohortRoutes.delete('/:id', async (c) => {
       .first<Record<string, unknown>>();
     if (before) {
       const roster = await c.env.DB.prepare(
-        'SELECT no, name, function, email, active FROM cohort_members WHERE cohort_id = ?1 ORDER BY no',
+        'SELECT no, name, function, email, active, tenure_band, reports_to FROM cohort_members WHERE cohort_id = ?1 ORDER BY no',
       )
         .bind(id)
         .all<Record<string, unknown>>();
@@ -488,28 +544,54 @@ cohortRoutes.put('/:id/roster', async (c) => {
   const existing = results ?? [];
   const byName = new Map(existing.map((m) => [m.name.trim().toLowerCase(), m]));
 
+  // Positions are settled before anything is validated or written, because a
+  // reporting line points at a position and half of them may be positions this
+  // very request is about to create.
   let nextNo = existing.reduce((max, m) => Math.max(max, m.no), 0);
+  const planned = incoming.map((m) => {
+    const match = byName.get(m.name.trim().toLowerCase());
+    if (match) return { row: m, no: match.no, id: match.id, isNew: false };
+    nextNo += 1;
+    return { row: m, no: nextNo, id: newId('cmem'), isNew: true };
+  });
+
+  // Every position on the cohort, not just the ones in this payload: a member
+  // dropped from the list is deactivated rather than deleted, so their position
+  // still exists and a line drawn to it still means something.
+  const rosterNos = new Set<number>([...existing.map((m) => m.no), ...planned.map((p) => p.no)]);
+  for (const p of planned) {
+    const problem = reportsToError(p.row.reportsTo, p.no, rosterNos);
+    if (problem) return c.json({ error: `${p.row.name}: ${problem}` }, 400);
+  }
+
   const statements = [];
   const keptIds = new Set<string>();
 
-  for (const m of incoming) {
-    const match = byName.get(m.name.trim().toLowerCase());
-    if (match) {
-      keptIds.add(match.id);
+  for (const p of planned) {
+    const m = p.row;
+    // Absent is not the same as null here. A paste or a spreadsheet carries
+    // three columns and says nothing about tenure or reporting line, so a
+    // roster replace from either must leave the attributes a facilitator typed
+    // in by hand exactly where they are rather than wiping them.
+    const setTenure = m.tenureBand === undefined ? 0 : 1;
+    const setReports = m.reportsTo === undefined ? 0 : 1;
+    keptIds.add(p.id);
+    if (!p.isNew) {
       statements.push(
         c.env.DB.prepare(
-          'UPDATE cohort_members SET function = ?2, email = ?3, active = 1 WHERE id = ?1',
-        ).bind(match.id, m.func, m.email),
+          `UPDATE cohort_members
+              SET function = ?2, email = ?3, active = 1,
+                  tenure_band = CASE WHEN ?4 = 1 THEN ?5 ELSE tenure_band END,
+                  reports_to  = CASE WHEN ?6 = 1 THEN ?7 ELSE reports_to  END
+            WHERE id = ?1`,
+        ).bind(p.id, m.func, m.email, setTenure, m.tenureBand ?? null, setReports, m.reportsTo ?? null),
       );
     } else {
-      nextNo += 1;
-      const memberId = newId('cmem');
-      keptIds.add(memberId);
       statements.push(
         c.env.DB.prepare(
-          `INSERT INTO cohort_members (id, cohort_id, no, name, function, email, active)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)`,
-        ).bind(memberId, id, nextNo, m.name, m.func, m.email),
+          `INSERT INTO cohort_members (id, cohort_id, no, name, function, email, active, tenure_band, reports_to)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8)`,
+        ).bind(p.id, id, p.no, m.name, m.func, m.email, m.tenureBand ?? null, m.reportsTo ?? null),
       );
     }
   }
@@ -585,21 +667,29 @@ cohortRoutes.post('/:id/members', async (c) => {
 
   // Positions are the addresses stored ratings point at, so a new member takes
   // the next one rather than filling a gap a removed member left behind.
-  const highest = await c.env.DB.prepare(
-    'SELECT COALESCE(MAX(no), 0) AS n FROM cohort_members WHERE cohort_id = ?1',
+  const { results: nos } = await c.env.DB.prepare(
+    'SELECT no FROM cohort_members WHERE cohort_id = ?1',
   )
     .bind(id)
-    .first<{ n: number }>();
+    .all<{ no: number }>();
+  const rosterNos = new Set((nos ?? []).map((r) => r.no));
+  const nextNo = (nos ?? []).reduce((max, r) => Math.max(max, r.no), 0) + 1;
+
+  // The new position is not in `rosterNos`, so a line drawn to it is refused as
+  // a position that does not exist — which is what self-reference looks like
+  // for someone who is not on the roster yet.
+  const problem = reportsToError(d.reportsTo, nextNo, rosterNos);
+  if (problem) return c.json({ error: problem, details: { reportsTo: problem } }, 400);
 
   const memberId = newId('cmem');
   await c.env.DB.prepare(
-    `INSERT INTO cohort_members (id, cohort_id, no, name, function, email, active)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)`,
+    `INSERT INTO cohort_members (id, cohort_id, no, name, function, email, active, tenure_band, reports_to)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8)`,
   )
-    .bind(memberId, id, (highest?.n ?? 0) + 1, d.name, d.func, d.email)
+    .bind(memberId, id, nextNo, d.name, d.func, d.email, d.tenureBand ?? null, d.reportsTo ?? null)
     .run();
 
-  return c.json({ id: memberId, no: (highest?.n ?? 0) + 1 }, 201);
+  return c.json({ id: memberId, no: nextNo }, 201);
 });
 
 /**
@@ -619,11 +709,21 @@ cohortRoutes.patch('/:id/members/:memberId', async (c) => {
   const d = parsed.data;
 
   const member = await c.env.DB.prepare(
-    'SELECT id, name FROM cohort_members WHERE id = ?1 AND cohort_id = ?2',
+    'SELECT id, no, name FROM cohort_members WHERE id = ?1 AND cohort_id = ?2',
   )
     .bind(memberId, id)
-    .first<{ id: string; name: string }>();
+    .first<{ id: string; no: number; name: string }>();
   if (!member) return c.json({ error: 'That person is not on this roster.' }, 404);
+
+  if (d.reportsTo !== undefined) {
+    const { results: nos } = await c.env.DB.prepare(
+      'SELECT no FROM cohort_members WHERE cohort_id = ?1',
+    )
+      .bind(id)
+      .all<{ no: number }>();
+    const problem = reportsToError(d.reportsTo, member.no, new Set((nos ?? []).map((r) => r.no)));
+    if (problem) return c.json({ error: problem, details: { reportsTo: problem } }, 400);
+  }
 
   if (d.name && d.name.toLowerCase() !== member.name.toLowerCase()) {
     const clash = await c.env.DB.prepare(
@@ -640,14 +740,34 @@ cohortRoutes.patch('/:id/members/:memberId', async (c) => {
     }
   }
 
+  // COALESCE says "an omitted field keeps its stored value", which is right for
+  // the three fields above: none of them has a meaningful null, so null can
+  // stand in for "not supplied". Tenure and reporting line do have one — "not
+  // recorded" is the answer for most rosters — so clearing one has to be
+  // expressible, and COALESCE cannot tell a clear from an omission. The flag
+  // pairs below carry that distinction explicitly.
+  const setTenure = d.tenureBand === undefined ? 0 : 1;
+  const setReports = d.reportsTo === undefined ? 0 : 1;
+
   await c.env.DB.prepare(
     `UPDATE cohort_members
-        SET name     = COALESCE(?2, name),
-            function = COALESCE(?3, function),
-            email    = COALESCE(?4, email)
+        SET name        = COALESCE(?2, name),
+            function    = COALESCE(?3, function),
+            email       = COALESCE(?4, email),
+            tenure_band = CASE WHEN ?5 = 1 THEN ?6 ELSE tenure_band END,
+            reports_to  = CASE WHEN ?7 = 1 THEN ?8 ELSE reports_to  END
       WHERE id = ?1`,
   )
-    .bind(memberId, d.name ?? null, d.func ?? null, d.email ?? null)
+    .bind(
+      memberId,
+      d.name ?? null,
+      d.func ?? null,
+      d.email ?? null,
+      setTenure,
+      d.tenureBand ?? null,
+      setReports,
+      d.reportsTo ?? null,
+    )
     .run();
 
   return c.json({ ok: true });
@@ -665,7 +785,7 @@ cohortRoutes.patch('/:id/members/:memberId', async (c) => {
 cohortRoutes.delete('/:id/members/:memberId', async (c) => {
   {
     const row = await c.env.DB.prepare(
-      'SELECT id, no, name, function, email, active FROM cohort_members WHERE id = ?1 AND cohort_id = ?2',
+      'SELECT id, no, name, function, email, active, tenure_band, reports_to FROM cohort_members WHERE id = ?1 AND cohort_id = ?2',
     )
       .bind(c.req.param('memberId'), c.req.param('id'))
       .first<Record<string, unknown>>();
@@ -998,6 +1118,11 @@ cohortRoutes.get('/:id/network', async (c) => {
       name: m.name,
       func: m.function,
       responded: respondedNos.has(m.no),
+      // The two lenses the network is read through. Null on every cohort built
+      // before migration 0018 and on every member nobody filled them in for,
+      // so the views that use them have to have a "not recorded" case.
+      tenureBand: m.tenure_band,
+      reportsTo: m.reports_to,
     })),
     edges: socioEdges(responses, cohort.tie_threshold),
     group,

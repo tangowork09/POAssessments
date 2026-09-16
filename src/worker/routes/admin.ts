@@ -46,6 +46,7 @@ import {
 } from '../pipeline.js';
 import { inviteEmail } from '../email/templates.js';
 import { isCohortAssessment, kindForAssessment, type AssessmentKind } from '../../shared/assessments.js';
+import { isFullAdmin } from '../../shared/roles.js';
 import { EGO_STATES } from '../../shared/ego.js';
 import { EGO_MAX_STATE_SCORE, type EgoResult } from '../../shared/ego-scoring.js';
 import { MAX_SIDE_SCORE, MAX_STYLE_SCORE, type ScoreResult } from '../../shared/scoring.js';
@@ -93,9 +94,19 @@ adminRoutes.get('/me', async (c) => {
   });
 });
 
-const requireAdmin: MiddlewareHandler<AdminHono> = async (c, next) => {
+/**
+ * Everything in this router except the session endpoints runs the deployment
+ * rather than one cohort, so a `cohort_admin` is refused here and keeps only
+ * the cohort routes. The nav items are hidden in the console as well, but this
+ * is the check that actually enforces it — a facilitator who types the URL or
+ * calls the API directly gets 403 rather than data.
+ */
+const requireFullAdmin: MiddlewareHandler<AdminHono> = async (c, next) => {
   const claims = await readSession(c);
   if (!claims) return c.json({ error: 'Not signed in' }, 401);
+  if (!isFullAdmin(claims.role)) {
+    return c.json({ error: 'Your account manages cohorts only.' }, 403);
+  }
   c.set('admin', claims);
   await next();
 };
@@ -121,18 +132,20 @@ const requireSuperadmin: MiddlewareHandler<AdminHono> = async (c, next) => {
 // tried" is exactly what you want to see after something breaks.
 adminRoutes.use('*', auditAll);
 
-adminRoutes.use('/dashboard', requireAdmin);
-adminRoutes.use('/assessments/*', requireAdmin);
-adminRoutes.use('/assessments', requireAdmin);
-adminRoutes.use('/candidates/*', requireAdmin);
-adminRoutes.use('/candidates', requireAdmin);
-adminRoutes.use('/invites/*', requireAdmin);
-adminRoutes.use('/links/*', requireAdmin);
-adminRoutes.use('/links', requireAdmin);
+// None of these areas belong to a cohort, so every one of them takes
+// `requireFullAdmin`: a facilitator account is refused the lot.
+adminRoutes.use('/dashboard', requireFullAdmin);
+adminRoutes.use('/assessments/*', requireFullAdmin);
+adminRoutes.use('/assessments', requireFullAdmin);
+adminRoutes.use('/candidates/*', requireFullAdmin);
+adminRoutes.use('/candidates', requireFullAdmin);
+adminRoutes.use('/invites/*', requireFullAdmin);
+adminRoutes.use('/links/*', requireFullAdmin);
+adminRoutes.use('/links', requireFullAdmin);
 adminRoutes.use('/branding', requireSuperadmin);
-adminRoutes.use('/settings/*', requireAdmin);
-adminRoutes.use('/export/*', requireAdmin);
-adminRoutes.use('/outbox', requireAdmin);
+adminRoutes.use('/settings/*', requireFullAdmin);
+adminRoutes.use('/export/*', requireFullAdmin);
+adminRoutes.use('/outbox', requireFullAdmin);
 
 // ----------------------------------------------------------------- dashboard
 

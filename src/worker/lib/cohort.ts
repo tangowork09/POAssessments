@@ -58,6 +58,12 @@ export interface CohortRow {
   share_reports: number;
   /** Whether a one-time code must verify the roster email. See migration 0017. */
   otp_required: number;
+  /**
+   * Whether the shared generic link still accepts an identity claim. 1 means it
+   * does not, and only a per-member personal link gets in — `otp_required` is
+   * then ignored, not cleared. See migration 0019.
+   */
+  link_only_identity: number;
   created_at: string;
   closed_at: string | null;
 }
@@ -89,6 +95,9 @@ export interface MemberRow {
   function: string;
   email: string;
   active: number;
+  /** Optional attributes, NULL on every roster built before migration 0018. */
+  tenure_band: string | null;
+  reports_to: number | null;
 }
 
 /**
@@ -132,7 +141,8 @@ export const SOCIO_ITEM_INFO: SocioItemInfo[] = SOCIO_ITEMS.map((i) => ({
 export async function loadCohort(env: Env, cohortId: string): Promise<CohortRow | null> {
   return env.DB.prepare(
     `SELECT id, assessment_id, name, organisation, status, min_raters, tie_threshold,
-            min_rated_targets, share_reports, otp_required, created_at, closed_at
+            min_rated_targets, share_reports, otp_required, link_only_identity,
+            created_at, closed_at
        FROM cohorts WHERE id = ?1`,
   )
     .bind(cohortId)
@@ -207,7 +217,7 @@ export async function roundByNo(env: Env, cohortId: string, no: number): Promise
 
 export async function loadRoster(env: Env, cohortId: string): Promise<MemberRow[]> {
   const { results } = await env.DB.prepare(
-    `SELECT id, cohort_id, no, name, function, email, active
+    `SELECT id, cohort_id, no, name, function, email, active, tenure_band, reports_to
        FROM cohort_members WHERE cohort_id = ?1 AND active = 1 ORDER BY no`,
   )
     .bind(cohortId)

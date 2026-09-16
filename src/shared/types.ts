@@ -106,6 +106,13 @@ export interface CandidateCohort {
    * before being bound to a roster position. Off by default.
    */
   otpRequired: boolean;
+  /**
+   * Whether this cohort takes personal links only. True means the identity
+   * step is not offered on the shared generic link at all — the shell draws
+   * the dead-end notice instead of an email form. Off by default, and the
+   * server refuses the claim regardless of what the client chooses to draw.
+   */
+  linkOnly: boolean;
   roster: CohortRosterMember[];
   /**
    * The respondent's own roster position, once identified. Their row is
@@ -120,6 +127,17 @@ export interface CandidateCohort {
   allowedTargetIds: string[] | null;
 }
 
+/**
+ * How long someone has been here, banded. Optional everywhere: it is a lens the
+ * network is read through, never something the instrument needs to score.
+ *
+ * Banded rather than a hire date because a band is what a facilitator can fill
+ * in from memory for a whole roster in one sitting, and it is the only
+ * granularity the reading ever uses.
+ */
+export const TENURE_BANDS = ['<1y', '1-3y', '3-7y', '7y+'] as const;
+export type TenureBand = (typeof TENURE_BANDS)[number];
+
 export interface CohortRosterMember {
   memberId: string;
   /** Roster position, 1-based. What `cellNo` encodes against. */
@@ -129,6 +147,26 @@ export interface CohortRosterMember {
   func: string;
   /** True once this member has submitted, so the console and roster can say so. */
   responded?: boolean;
+  /**
+   * One of `TENURE_BANDS`, or null for not recorded. Typed as a string rather
+   * than `TenureBand` because it arrives from a column with no CHECK on it: a
+   * band retired from the list has to keep reading back rather than making the
+   * row unparseable.
+   *
+   * Absent — not merely null — on the candidate-facing roster: this is
+   * facilitator information, and the rating screen has no business carrying it.
+   */
+  tenureBand?: string | null;
+  /**
+   * The roster `no` of this member's manager within this cohort, or null for
+   * not recorded / top of the tree. A position, not a member id, so the formal
+   * line survives a rename the way every other address here does. May point at
+   * a position that has since been deactivated; a dangling one reads as not
+   * recorded rather than as an error.
+   *
+   * Absent on the candidate-facing roster, for the same reason as `tenureBand`.
+   */
+  reportsTo?: number | null;
 }
 
 export interface CandidateResponseState {
@@ -247,7 +285,7 @@ export interface EgoStateNarrative {
 
 // --------------------------------------------------------------------- admin
 
-export type AdminRole = 'superadmin' | 'admin';
+export type AdminRole = 'superadmin' | 'admin' | 'cohort_admin';
 
 export interface AdminUser {
   id: string;
@@ -380,6 +418,14 @@ export interface CohortSummary {
    * is bound to a position — two-factor identity, off by default.
    */
   otpRequired: boolean;
+  /**
+   * Whether the shared generic link has stopped accepting identity claims, so
+   * the only way in is a per-member personal link. Off by default. While it is
+   * on, `otpRequired` is ignored rather than cleared — see migration 0019 and
+   * `cohortIdentityMode`, which turns the pair into the one setting a
+   * facilitator actually chooses.
+   */
+  linkOnlyIdentity: boolean;
   /** Memorable alias for the open link, or null. Reached as a bare path. */
   shortSlug: string | null;
   /** Whether the alias resolves. Off keeps the slug reserved and 404s the path. */
@@ -442,6 +488,13 @@ export interface CohortDetail extends CohortSummary {
   roster: (CohortRosterMember & { email: string; active: boolean })[];
   /** Every wave this group has been rated in, oldest first. */
   rounds: CohortRoundSummary[];
+  /**
+   * How many active personal links exist for the current round. Only the
+   * console needs it, and only to answer one question: with personal links as
+   * the only door, is anybody standing outside it? A count below the active
+   * roster size means someone on the list has no way in at all.
+   */
+  personalLinkCount: number;
 }
 
 // --------------------------------------------------------------- cohort trend

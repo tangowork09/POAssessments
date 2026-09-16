@@ -1,7 +1,7 @@
 /** Request schemas. Every public body is parsed through one of these. */
 
 import { z } from 'zod';
-import { AGE_MAX, AGE_MIN, EXPERIENCE_MAX, EXPERIENCE_MIN } from '../../shared/types.js';
+import { AGE_MAX, AGE_MIN, EXPERIENCE_MAX, EXPERIENCE_MIN, TENURE_BANDS } from '../../shared/types.js';
 
 const trimmed = (max: number) => z.string().trim().max(max);
 
@@ -200,6 +200,14 @@ const cohortFields = {
   shareReports: z.boolean(),
   /** Whether a one-time code must verify the roster email. See migration 0017. */
   otpRequired: z.boolean(),
+  /**
+   * Whether the shared generic link has stopped accepting identity claims, so
+   * only a per-member personal link gets in. See migration 0019. Deliberately
+   * a separate field from `otpRequired` rather than one three-valued mode: an
+   * update that turns this on says nothing about the code requirement, so the
+   * stored one survives and comes back when the facilitator switches away.
+   */
+  linkOnlyIdentity: z.boolean(),
 };
 
 export const cohortCreateSchema = z.object({
@@ -214,10 +222,58 @@ export const cohortUpdateSchema = z
   .object({ ...cohortFields, status: z.enum(['draft', 'open', 'closed']) })
   .partial();
 
+/**
+ * The two optional attributes a member may carry: how long they have been here,
+ * and who they formally report to. See migration 0018.
+ *
+ * `.optional()` and no `.default()`, unlike `func` and `email` above. Those two
+ * have a natural empty value — a blank string is a function nobody filled in —
+ * where these have three states that must stay apart: absent (a PATCH that says
+ * nothing about this field, leave it alone), null (explicitly not recorded,
+ * clear it) and a value. Defaulting either one would turn every partial edit of
+ * a name into a silent wipe of the attributes.
+ */
+const memberAttributeFields = {
+  tenureBand: z.enum(TENURE_BANDS).nullable().optional(),
+  // A roster position, so the same 1..200 range positions are capped at
+  // everywhere else. Whether the position actually exists on *this* cohort —
+  // and whether it is the member's own — is checked by `reportsToError`, which
+  // needs the roster and cannot be expressed here.
+  reportsTo: z.number().int().min(1).max(200).nullable().optional(),
+};
+
+/**
+ * The one rule about `reportsTo` a schema cannot state.
+ *
+ * A member schema validates one member in isolation: it sees neither which
+ * roster position that member holds nor which positions exist on the cohort, so
+ * "nobody reports to themselves" and "the manager is on this roster" have to be
+ * asked once the handler has both. Kept here beside the field it guards rather
+ * than inline in the route, so the two places that write a member cannot drift.
+ *
+ * Returns the message to refuse with, or null when the value is acceptable —
+ * including when it is absent or null, which is always acceptable.
+ */
+export function reportsToError(
+  reportsTo: number | null | undefined,
+  ownNo: number | null,
+  rosterNos: ReadonlySet<number>,
+): string | null {
+  if (reportsTo === undefined || reportsTo === null) return null;
+  if (ownNo !== null && reportsTo === ownNo) {
+    return 'Someone cannot report to themselves. Leave it blank if there is nobody above them here.';
+  }
+  if (!rosterNos.has(reportsTo)) {
+    return `Position ${reportsTo} is not on this roster, so nobody can report to it.`;
+  }
+  return null;
+}
+
 export const rosterRowSchema = z.object({
   name: trimmed(120).min(1, 'Every roster row needs a name'),
   func: trimmed(120).default(''),
   email: z.union([emailSchema, z.literal('')]).default(''),
+  ...memberAttributeFields,
 });
 
 /**
@@ -256,6 +312,7 @@ export const rosterMemberSchema = z.object({
   name: trimmed(120).min(1, 'Name is required'),
   func: trimmed(120).default(''),
   email: z.union([emailSchema, z.literal('')]).default(''),
+  ...memberAttributeFields,
 });
 
 /**

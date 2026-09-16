@@ -1,0 +1,2877 @@
+/**
+ * Insights — the debrief workspace.
+ *
+ * The explorer answers "what does this group look like?"; this answers the nine
+ * questions the client actually asked, in their order, in the words they asked
+ * them in. It is the first thing a cohort's network opens on, because a
+ * facilitator with twenty minutes before a debrief needs findings, not a canvas
+ * to pan.
+ *
+ * It used to be nine cards on one long scroll. It is now nine TABS on one fixed
+ * workspace, and the difference is the whole design:
+ *
+ *   CENTRE   the insight's graph, as large as the room allows. Live: hover for
+ *            numbers, click to focus a person across every tab.
+ *   RIGHT    that insight's readings — the sentence the data produced as the
+ *            column's lead, then the charts, rankings and meters beneath it.
+ *   BOTTOM   the same finding per person, as a dense table that scrolls inside
+ *            itself. The row a facilitator looks up when somebody in the room
+ *            says a name.
+ *
+ * Four rules hold it together:
+ *
+ *   1. Every number here is computed at the COHORT'S OWN tie threshold, under
+ *      the two fixed lenses (trust, power_over). Nothing here reads the filter
+ *      drawer, the lens chips or the threshold slider — so the workspace a
+ *      facilitator screenshots is the one the client sees, and two people
+ *      looking at the same cohort are looking at the same thing.
+ *   2. Every derivation is one of the pure functions in model.ts, shared with
+ *      the rail panels. A tab that disagreed with the rail would be a bug in
+ *      one of them, and there is only one of them.
+ *   3. ONE interaction runs the whole workspace: a focused person. Click
+ *      anyone, anywhere — a dot, a bar, a row, a node — and every tab answers
+ *      the same question about them. Focus survives a tab change, which is what
+ *      makes the tab bar a walk through one person's standing rather than nine
+ *      unrelated screens. Focus is emphasis, never a filter: nothing is hidden,
+ *      because the reader is mid-sentence in front of a client and a view that
+ *      empties out is a view that lost the thread.
+ *   4. THE SEATS NEVER MOVE. The constellation is solved once, from the trust
+ *      ties, and every map tab is handed those same positions. Tabs re-theme
+ *      the picture — sizes, rings, which ties are drawn, which half is faded —
+ *      and never re-run the simulation. A client watches one arrangement of
+ *      their own people answer seven questions in a row.
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CohortNetwork } from '../../../../src/shared/types.js';
+import {
+  betweenness,
+  communities,
+  subgroupCohesion,
+  unreciprocatedTies,
+} from '../../../../src/shared/socio-network.js';
+import { fitToBox, forceMapLayout, laneBoxes, nodeRadius, separate, type LayoutBox, type Positions } from './layout.js';
+import { CompareView, POWER_ACCENT, POWER_LENS, TRUST_ACCENT, TRUST_LENS } from './ComparePane.js';
+import { FacetBar } from './FacetBar.js';
+import { DOCK_W, InsightGraph, type NodeDecor } from './InsightGraph.js';
+import { DivergenceChart, QUADRANT_COLOR, QUADRANT_NAME } from './DivergenceChart.js';
+import { MatrixGrid } from './MatrixGrid.js';
+import { toPng } from 'html-to-image';
+import {
+  BarRow,
+  DetailTable,
+  Finding,
+  Avatar,
+  FindingsRail,
+  DeptCompare,
+  PersonCard,
+  PersonSearch,
+  InsightToolbar,
+  Key,
+  MeterLine,
+  Panel,
+  RingKey,
+  ScopePicker,
+  Suppressed,
+  Workspace,
+  type Column,
+  type PersonCell,
+  type PersonProps,
+  type RailStat,
+  type TabDef,
+  type TabGroupDef,
+} from './InsightsChrome.js';
+import { useTooltip, type TipContent } from './Tooltip.js';
+import {
+  anchorTable,
+  anchors as computeAnchors,
+  blockConcentration,
+  buildPaneEdges,
+  clusterHulls,
+  clusterView,
+  concentrationReading,
+  concentrationTable,
+  divergenceMedians,
+  divergencePoints,
+  divergenceTable,
+  facetTable,
+  fadeExcept,
+  joinNames,
+  lensDensity,
+  lensPairs,
+  MATRIX_CAP,
+  MUTED_GREY,
+  oneWayPaneEdges,
+  orderSilos,
+  orderTiesByFocus,
+  paneInDegree,
+  peripheralMembers,
+  placeCallouts,
+  positiveTies,
+  RANK_RING_COLOR,
+  rankDivergence,
+  rankDivergenceLabel,
+  rankTable,
+  relOpenVerdict,
+  SILOS_MODE_COLUMN,
+  SILOS_MODE_LABEL,
+  silosGroups,
+  silosLabel,
+  silosMemberTable,
+  silosModes,
+  silosVerdict,
+  tieEndpoints,
+  tieMatrix,
+  topDecile,
+  topPaneLabels,
+  topBridges,
+  trustPowerOverlapSentence,
+  unionTies,
+  watchLists,
+  type AnchorRow,
+  type ConcentrationTable,
+  type FacetRow,
+  type QuadrantRow,
+  type RankRow,
+  type ShareRow,
+  type SilosMemberRow,
+  type SilosMode,
+  applyScope,
+  EMPTY_SCOPE,
+  scopeIsWhole,
+  scopeOptions,
+  scopedConcentration,
+  type InsightScope,
+} from './model.js';
+
+/**
+ * The virtual box every map tab solves and draws in. Node radii come from
+ * `nodeRadius`, which returns 14–32 whatever the box is: solve sixty of those
+ * in a 500-unit field and they overlap into a single blob. Solving large and
+ * scaling the whole picture down to the pane is what gives the constellation
+ * room to be read, and everything measured in units — names, tie widths, rings
+ * — scales with it.
+ */
+const MAP_BOX: LayoutBox = { w: 1000, h: 520 };
+/**
+ * Room the bridges map gives its margin annotations, in the map's own units.
+ * Every unit of margin is a unit the constellation does not get, so it is the
+ * least that still fits a name and a score at a size somebody can read across
+ * a room — and "fits" is measured, not hoped for: at 220 a perfectly ordinary
+ * name ran out through the left edge of the viewBox and lost its first letter.
+ * `placeCallouts` is given this same number and clamps against it, so the
+ * margin is now the width the annotations are actually laid out in.
+ */
+const CALLOUT_MARGIN = 300;
+/** The size those annotations are drawn at. Matches `.insights-callout-text`. */
+const CALLOUT_FONT_SIZE = 26;
+/** Longest name a callout prints before it starts eliding. */
+const CALLOUT_NAME_MAX = 15;
+/** How many one-way ties the sidebar list prints. The band's grid prints them all. */
+const ONE_WAY_ROWS = 8;
+/** How many bridges the ranked list draws. */
+const BRIDGE_ROWS = 5;
+/** How many names a map prints unprompted, on the tabs that rank by degree. */
+const MAP_LABELS = 8;
+/**
+ * `subgroupCohesion`'s own floor: below this a group's rates are withheld
+ * because two people's behaviour with a decimal point on it identifies both of
+ * them. Named here so the table can SAY the number rather than print a dash.
+ */
+const SILOS_FLOOR = 3;
+/** The colour a structural finding wears: bridges, rank divergence, hubs. */
+const STRUCT_ACCENT = RANK_RING_COLOR;
+/** The colour a flag wears — an isolate's ring, and nothing else. */
+const FLAG_COLOR = '#B54708';
+
+const GROUPS: readonly TabGroupDef[] = [
+  { no: 1, name: 'Individual' },
+  { no: 2, name: 'Relationships' },
+  { no: 3, name: 'Whole network' },
+];
+
+const TABS: readonly TabDef[] = [
+  { id: 'anchors', name: 'Anchors', group: 1, question: 'Who the group leans on' },
+  { id: 'divergence', name: 'Divergence', group: 1, question: 'Influence and trust are not the same people' },
+  { id: 'bridges', name: 'Bridges', group: 1, question: 'Who holds the network together' },
+  { id: 'isolates', name: 'Isolates', group: 1, question: 'Low trust and low influence received' },
+  { id: 'oneway', name: 'One-way trust', group: 2, question: 'Ties that run one way' },
+  { id: 'silos', name: 'Silos', group: 2, question: 'Where trust pools instead of flowing' },
+  { id: 'spread', name: 'Spread', group: 3, question: 'Is trust held by many hands or a few?' },
+  // The stage heading below already IS the client's question, word for word,
+  // so the subline says why the tab is worth opening rather than repeating it.
+  { id: 'compare', name: 'Trust vs power', group: 3, question: 'The single most telling comparison' },
+  { id: 'facets', name: 'Reliability', group: 3, question: 'Two facets of trust, two different interventions' },
+];
+
+/** The heading over each tab's graph — the client's own wording. */
+const TAB_TITLE: Record<string, string> = {
+  anchors: 'Most trusted, most influential',
+  divergence: 'Trust–power divergence',
+  bridges: 'Structural bridges',
+  isolates: 'Isolates and peripheral members',
+  oneway: 'Unreturned trust',
+  silos: 'Cliques and silos',
+  spread: 'Spread or concentrated',
+  compare: 'Who we trust vs who drives decisions',
+  facets: 'Reliability vs openness',
+};
+
+export function InsightsView({
+  net,
+  groupColor,
+  isFull,
+  onToggleFull,
+}: {
+  net: CohortNetwork;
+  /** The function palette the rest of the card uses, so colours agree. */
+  groupColor: Map<string, string>;
+  /** Present mode — the explorer's full-screen takeover, owned by the card. */
+  isFull?: boolean;
+  onToggleFull?: () => void;
+}) {
+  // The cohort's stored threshold, never the slider's. See the file header.
+  const cut = net.tieThreshold;
+
+  // ------------------------------------------------------------------ scope
+  //
+  // The one filter this workspace takes: which part of the roster the nine
+  // questions are about. Departments and tenure bands, multi-select, and the
+  // cut is an induced subgraph — the people who match and only the ties among
+  // them — so every number on every tab reads the same way. Everything below
+  // this block sees `nodes` and `edges` as the scoped cohort; only the map's
+  // seating (rule 4) reads the whole roster, so a scoped department keeps the
+  // places it had on the full constellation.
+  const [scope, setScope] = useState<InsightScope>(EMPTY_SCOPE);
+  const scoped = useMemo(() => applyScope(net.nodes, net.edges, scope), [net.edges, net.nodes, scope]);
+  const nodes = scoped.nodes;
+  const edges = scoped.edges;
+  const whole = scopeIsWhole(scope);
+  /** Two or more departments, read side by side. */
+  const compareOn = !!scope.compare && scope.funcs.size >= 2;
+  const compareFuncs = useMemo(() => [...scope.funcs], [scope.funcs]);
+  const scopeChips = useMemo(() => scopeOptions(net.nodes), [net.nodes]);
+  const toggleIn = useCallback((axis: 'funcs' | 'tenures', key: string, only: boolean) => {
+    setScope((cur) => {
+      const next = new Set(only ? [] : cur[axis]);
+      if (only || !next.has(key)) next.add(key);
+      else next.delete(key);
+      return { ...cur, [axis]: next };
+    });
+  }, []);
+  // A scope that names a department the roster no longer has (a rename
+  // between polls) would show an empty workspace with no chip to clear it.
+  useEffect(() => {
+    const funcs = new Set(scopeChips.funcs.map((f) => f.key));
+    const tenures = new Set(scopeChips.tenures.map((t) => t.key));
+    setScope((cur) => {
+      const f = new Set([...cur.funcs].filter((k) => funcs.has(k)));
+      const t = new Set([...cur.tenures].filter((k) => tenures.has(k)));
+      return f.size === cur.funcs.size && t.size === cur.tenures.size ? cur : { funcs: f, tenures: t };
+    });
+  }, [scopeChips]);
+  const memberNos = useMemo(() => nodes.map((n) => n.no), [nodes]);
+  const nameOf = useMemo(() => {
+    const m = new Map(nodes.map((n) => [n.no, n.name]));
+    return (no: number) => m.get(no) ?? `#${no}`;
+  }, [nodes]);
+  const funcOf = useMemo(() => {
+    const m = new Map(nodes.map((n) => [n.no, n.func.trim()]));
+    return (no: number) => m.get(no) || 'No function recorded';
+  }, [nodes]);
+  const tenureOf = useMemo(() => {
+    const m = new Map(nodes.map((n) => [n.no, (n.tenureBand ?? '').trim()]));
+    return (no: number) => m.get(no) || '—';
+  }, [nodes]);
+  const fillOfFunc = useCallback(
+    (no: number) => groupColor.get(funcOf(no)) ?? MUTED_GREY,
+    [funcOf, groupColor],
+  );
+
+  /**
+   * How many colleagues rated each person. Lives on the scored group result,
+   * not on the roster nodes, and is absent until the first response lands —
+   * which is exactly the case `divergencePoints` falls back to raw counts for.
+   */
+  const coverageOf = useMemo(() => {
+    const m = new Map<number, number>();
+    if (whole) {
+      for (const r of net.group?.members ?? []) m.set(r.memberNo, r.coverage);
+    } else {
+      // Under a scope the engine's figure counts raters outside it; the edge
+      // list is "every pair with at least one rating", so counting scoped
+      // edges in is the same measure over the people shown.
+      for (const e of edges) m.set(e.to, (m.get(e.to) ?? 0) + 1);
+    }
+    return m;
+  }, [edges, net.group, whole]);
+
+  // ---------------------------------------------------------------- focus
+  //
+  // One person, for the whole workspace, across every tab. Hover previews and
+  // click commits, so a reader can sweep a list to find someone and then pin
+  // them for the walk through the other eight tabs.
+  const [focusNo, setFocusNo] = useState<number | null>(null);
+  const [hoverNo, setHoverNo] = useState<number | null>(null);
+  const activeNo = hoverNo ?? focusNo;
+  const pick = useCallback((no: number) => setFocusNo((cur) => (cur === no ? null : no)), []);
+  useEffect(() => {
+    if (focusNo === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFocusNo(null);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [focusNo]);
+  // A focus on someone who leaves the roster between polls is a focus on
+  // nobody, and would leave a dismiss chip naming "#41" in the tab bar.
+  useEffect(() => {
+    if (focusNo !== null && !memberNos.includes(focusNo)) setFocusNo(null);
+  }, [focusNo, memberNos]);
+
+  const [tab, setTab] = useState<string>(TABS[0]!.id);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  // Present mode: the picture takes the screen; the readings become a panel
+  // the presenter can fold away and bring back.
+  const [detailsOpen, setDetailsOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('admin.insights.details') !== 'closed';
+    } catch {
+      return true;
+    }
+  });
+  const toggleDetails = useCallback(() => {
+    setDetailsOpen((v) => {
+      try {
+        localStorage.setItem('admin.insights.details', v ? 'closed' : 'open');
+      } catch {
+        /* private mode */
+      }
+      return !v;
+    });
+  }, []);
+  // The findings rail folds to a numbered strip when the picture needs the
+  // width; the choice is the reader's and it outlives the session.
+  const [railCollapsed, setRailCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('admin.insights.rail') === 'collapsed';
+    } catch {
+      return false;
+    }
+  });
+  const toggleRail = useCallback(() => {
+    setRailCollapsed((v) => {
+      try {
+        localStorage.setItem('admin.insights.rail', v ? 'open' : 'collapsed');
+      } catch {
+        /* private mode: the rail still folds, it just will not remember */
+      }
+      return !v;
+    });
+  }, []);
+
+  const tip = useTooltip();
+  /** Everything a person-shaped mark needs: click to focus, hover to preview. */
+  const personProps: PersonProps = useCallback(
+    (no: number, content: () => TipContent) => ({
+      onClick: () => pick(no),
+      onMouseEnter: (e: React.MouseEvent) => {
+        setHoverNo(no);
+        tip.show(content(), e);
+      },
+      onMouseMove: (e: React.MouseEvent) => tip.move(e),
+      onMouseLeave: () => {
+        setHoverNo(null);
+        tip.hide();
+      },
+    }),
+    [pick, tip],
+  );
+  /** For marks that carry data but are not a person (silos rows, facet bars). */
+  const tipProps = useCallback(
+    (content: () => TipContent) => ({
+      onMouseEnter: (e: React.MouseEvent) => tip.show(content(), e),
+      onMouseMove: (e: React.MouseEvent) => tip.move(e),
+      onMouseLeave: () => tip.hide(),
+    }),
+    [tip],
+  );
+
+  // ------------------------------------------------------- the shared map
+  const allVisible = useMemo(() => new Set(memberNos), [memberNos]);
+  const trustTies = useMemo(() => positiveTies(edges, TRUST_LENS, cut), [cut, edges]);
+  const trustEdges = useMemo(
+    () => buildPaneEdges(edges, TRUST_LENS, cut, allVisible),
+    [allVisible, cut, edges],
+  );
+  const trustIn = useMemo(() => paneInDegree(trustEdges), [trustEdges]);
+  const maxTrustIn = useMemo(() => Math.max(0, ...trustIn.values()), [trustIn]);
+  const radiusTrust = useCallback(
+    (no: number) => nodeRadius(trustIn.get(no) ?? 0, maxTrustIn),
+    [maxTrustIn, trustIn],
+  );
+  /**
+   * The one layout, solved once. Keyed only on the roster and the trust ties —
+   * not on the tab, not on the pane size, not on the focused person — which is
+   * rule 4 in the header made mechanical.
+   */
+  const wholeTrustTies = useMemo(() => positiveTies(net.edges, TRUST_LENS, cut), [cut, net.edges]);
+  const wholeTrustIn = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const t of wholeTrustTies) m.set(t.to, (m.get(t.to) ?? 0) + 1);
+    return m;
+  }, [wholeTrustTies]);
+  const mapPositions: Positions = useMemo(
+    () =>
+      forceMapLayout(
+        net.nodes.map((n) => ({
+          no: n.no,
+          inTies: wholeTrustIn.get(n.no) ?? 0,
+          group: n.func.trim() || '—',
+        })),
+        wholeTrustTies.map((t) => ({ from: t.from, to: t.to, weight: 0.6 })),
+        new Map(),
+        MAP_BOX,
+      ),
+    [net.nodes, wholeTrustIn, wholeTrustTies],
+  );
+  /**
+   * Under a scope the seats are the same seats, zoomed: the people shown keep
+   * the arrangement they had among everyone, scaled up to use the room. A
+   * zoom, not a re-solve — still rule 4, just with a closer camera.
+   */
+  /**
+   * People with no positive trust tie in either direction have no place in
+   * the constellation, and letting the force layout push them to its rim
+   * squeezes everyone else into the middle. They are parked in a lane down
+   * the right edge instead — visibly present, visibly unconnected.
+   */
+  const dockedNos = useMemo(() => {
+    const tied = new Set<number>();
+    for (const t of wholeTrustTies) {
+      tied.add(t.from);
+      tied.add(t.to);
+    }
+    return memberNos.filter((no) => !tied.has(no));
+  }, [memberNos, wholeTrustTies]);
+  const dock = useMemo(
+    () => (dockedNos.length > 0 ? { members: dockedNos, label: 'No trust ties' } : null),
+    [dockedNos],
+  );
+  /**
+   * The stage's real proportions, in map units. Pictures are drawn into this
+   * box rather than a fixed one, so a wide stage gets a wide picture instead
+   * of a letterboxed one. Measured off the stage body; re-measured on resize
+   * and whenever a tab swaps the body in.
+   */
+  const [stageBox, setStageBox] = useState<LayoutBox>(MAP_BOX);
+  /** The stage in real pixels, for turning CSS sizes into map units. */
+  const [stagePxW, setStagePxW] = useState(1000);
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    let raf = 0;
+    const measure = () => {
+      const body = root.querySelector<HTMLElement>('.ins-stage-body');
+      if (!body) return;
+      const bw = body.clientWidth;
+      const bh = body.clientHeight;
+      if (bw < 50 || bh < 50) return;
+      const h = Math.round(Math.max(360, Math.min(900, (1000 * bh) / bw)) / 10) * 10;
+      setStageBox((cur) => (cur.h === h ? cur : { w: 1000, h }));
+      setStagePxW((cur) => (Math.abs(cur - bw) < 4 ? cur : bw));
+    };
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(measure);
+    });
+    ro.observe(root);
+    const body = root.querySelector<HTMLElement>('.ins-stage-body');
+    if (body) ro.observe(body);
+    measure();
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+  }, [tab]);
+  /**
+   * Dots are sized for a 1000×520 box; a wider, shorter stage gets them
+   * scaled down (never up) so sixty people keep their room, and a touch
+   * smaller still because the picture is read at arm's length in a debrief.
+   */
+  const sizeScale = Math.min(1, Math.max(0.6, stageBox.h / 520)) * 0.82;
+  /**
+   * The legend floats over the foot of the picture at a fixed pixel height;
+   * the lanes are laid out in map units. Converting one to the other keeps
+   * the bottom row of lanes clear of it at any stage size.
+   */
+  const laneInset = Math.round((48 * stageBox.w) / Math.max(200, stagePxW)) + 8;
+  const seats: Positions = useMemo(() => {
+    const dockedSet = new Set(dockedNos);
+    const connected = new Set(memberNos.filter((no) => !dockedSet.has(no)));
+    // Comparing departments: seat each one inside its own lane.
+    if (compareOn) {
+      const boxes = laneBoxes(compareFuncs.length, stageBox, 18, 40, laneInset);
+      const out: Positions = new Map();
+      compareFuncs.forEach((f, i) => {
+        const b = boxes[i]!;
+        const keep = new Set(
+          nodes.filter((n) => n.func.trim() === f && connected.has(n.no)).map((n) => n.no),
+        );
+        if (keep.size === 0) return;
+        const inner = fitToBox(mapPositions, keep, { w: b.w, h: b.h }, 34);
+        const spread = separate(
+          inner,
+          (no) => nodeRadius(wholeTrustIn.get(no) ?? 0, Math.max(0, ...wholeTrustIn.values())) * sizeScale + 6,
+          { w: b.w, h: b.h },
+          3,
+        );
+        for (const [no, p] of spread) out.set(no, { x: b.x + p.x, y: b.y + p.y });
+      });
+      return out;
+    }
+    const field: LayoutBox = dock ? { w: stageBox.w - DOCK_W - 12, h: stageBox.h } : stageBox;
+    const fitted = fitToBox(mapPositions, connected, field, 48);
+    // Spread on the trust-sized radii — the size most tabs draw — with room
+    // for a ring: after the fit, nobody sits on anybody.
+    const out = separate(fitted, (no) => nodeRadius(wholeTrustIn.get(no) ?? 0, Math.max(0, ...wholeTrustIn.values())) * sizeScale + 8, field, 4);
+    const n = dockedNos.length;
+    const top = 48;
+    const bottom = stageBox.h - 28;
+    dockedNos.forEach((no, i) => {
+      const y = n === 1 ? (top + bottom) / 2 : top + ((bottom - top) * i) / (n - 1);
+      out.set(no, { x: stageBox.w - DOCK_W / 2, y });
+    });
+    return out;
+  }, [compareFuncs, compareOn, dock, dockedNos, laneInset, mapPositions, memberNos, nodes, sizeScale, stageBox, wholeTrustIn]);
+  const trustLabels = useMemo(() => topPaneLabels(trustEdges, MAP_LABELS), [trustEdges]);
+
+  /** The map's hover, hoisted and stable so the memoised graph actually skips. */
+  const onMapHover = useCallback(
+    (no: number, e: React.MouseEvent) => {
+      setHoverNo(no);
+      tip.show(
+        {
+          title: nameOf(no),
+          sub: funcOf(no),
+          rows: [['Trust ties received', String(trustIn.get(no) ?? 0)]],
+        },
+        e,
+      );
+    },
+    [funcOf, nameOf, tip, trustIn],
+  );
+  const onMapLeave = useCallback(() => {
+    setHoverNo(null);
+    tip.hide();
+  }, [tip]);
+
+  // ---- 1 anchors
+  const anchorLists = useMemo(() => computeAnchors(memberNos, edges, cut, 5), [cut, edges, memberNos]);
+  const trustedTop = useMemo(() => new Set(anchorLists.trusted.map((a) => a.no)), [anchorLists]);
+  const powerTop = useMemo(() => new Set(anchorLists.influential.map((a) => a.no)), [anchorLists]);
+  const anchorRows = useMemo(() => anchorTable(memberNos, edges, cut, 5), [cut, edges, memberNos]);
+  const anchorDecor = useCallback(
+    (no: number): NodeDecor | null => {
+      const rings: string[] = [];
+      if (trustedTop.has(no)) rings.push(TRUST_ACCENT);
+      if (powerTop.has(no)) rings.push(POWER_ACCENT);
+      return rings.length > 0 ? { rings } : null;
+    },
+    [powerTop, trustedTop],
+  );
+
+  // ---- 2 divergence
+  const points = useMemo(
+    () => divergencePoints(memberNos, edges, cut, coverageOf.size > 0 ? coverageOf : undefined),
+    [coverageOf, cut, edges, memberNos],
+  );
+  const medians = useMemo(() => divergenceMedians(points), [points]);
+  // Unlimited, so the finding sentence can count everyone off the diagonal;
+  // the two mini-lists show the top five of each.
+  const lists = useMemo(
+    () => watchLists(points, medians, Math.max(1, points.length)),
+    [medians, points],
+  );
+  const divergenceRows = useMemo(() => divergenceTable(points, medians), [medians, points]);
+  const [lifted, setLifted] = useState<'watch' | 'underused' | null>(null);
+
+  // ---- 3 bridges
+  // Every bridge, then the five the sidebar draws. The finding sentence counts
+  // people, and counting them off a list already cut to five let a group with
+  // nine brokers be reported as having five.
+  const bridgeScores = useMemo(() => betweenness(memberNos, trustTies), [memberNos, trustTies]);
+  const allBridges = useMemo(
+    () => topBridges(bridgeScores, Number.MAX_SAFE_INTEGER),
+    [bridgeScores],
+  );
+  const bridges = useMemo(() => allBridges.slice(0, BRIDGE_ROWS), [allBridges]);
+  const bridgeSet = useMemo(() => new Set(bridges.map((b) => b.no)), [bridges]);
+  const bridgeTop3 = useMemo(() => new Set(bridges.slice(0, 3).map((b) => b.no)), [bridges]);
+  /** The ranked bridges, minus the three already named out in the margin. */
+  const bridgeLabels = useMemo(
+    () => new Set([...bridgeSet].filter((no) => !bridgeTop3.has(no))),
+    [bridgeSet, bridgeTop3],
+  );
+  const radiusBridge = useCallback(
+    (no: number) => {
+      const max = allBridges[0]?.score ?? 0;
+      return nodeRadius(bridgeScores.get(no) ?? 0, max);
+    },
+    [allBridges, bridgeScores],
+  );
+  /**
+   * The top three bridges, annotated in the margin. Three is the whole list a
+   * facilitator reads out; below that the leader lines start pointing into the
+   * crowd and the map stops being a picture of the finding.
+   */
+  const bridgeCallouts = useMemo(
+    () =>
+      placeCallouts(
+        bridges.slice(0, 3).flatMap((b) => {
+          const p = seats.get(b.no);
+          if (!p) return [];
+          const name = nameOf(b.no);
+          return [
+            {
+              no: b.no,
+              x: p.x,
+              y: p.y,
+              r: radiusBridge(b.no),
+              text: `${name.length > CALLOUT_NAME_MAX ? `${name.slice(0, CALLOUT_NAME_MAX - 1)}…` : name} · ${b.score.toFixed(2)}`,
+            },
+          ];
+        }),
+        stageBox,
+        { gap: 50, inset: 16, margin: CALLOUT_MARGIN, fontSize: CALLOUT_FONT_SIZE },
+      ),
+    [bridges, seats, nameOf, radiusBridge, stageBox],
+  );
+
+  // ---- 4 the periphery
+  const periphery = useMemo(
+    () =>
+      peripheralMembers(nodes, edges, cut, {
+        coverageOf: coverageOf.size > 0 ? coverageOf : undefined,
+        minRaters: net.minRaters,
+      }),
+    [coverageOf, cut, edges, net.minRaters, nodes],
+  );
+  const peripheralSet = useMemo(
+    () => new Set(periphery.members.map((m) => m.no)),
+    [periphery],
+  );
+  const isolateSet = useMemo(
+    () => new Set(periphery.members.filter((m) => m.kind === 'isolate').map((m) => m.no)),
+    [periphery],
+  );
+
+  // ---- 5 unreturned trust
+  const trustPairs = useMemo(() => lensPairs(edges, TRUST_LENS), [edges]);
+  const oneWayAll = useMemo(() => unreciprocatedTies(trustPairs, cut), [cut, trustPairs]);
+  const oneWay = useMemo(() => oneWayAll.slice(0, ONE_WAY_ROWS), [oneWayAll]);
+  const oneWayShown = useMemo(() => orderTiesByFocus(oneWay, focusNo), [focusNo, oneWay]);
+  const oneWayEdges = useMemo(() => oneWayPaneEdges(oneWayAll), [oneWayAll]);
+  const oneWayFolk = useMemo(() => tieEndpoints(oneWayEdges), [oneWayEdges]);
+
+  // ---- 6 clusters + silos
+  // One community pass, three consumers: the legend, the node colours and the
+  // hulls. A second `communities()` call could disagree with the first, and a
+  // hull drawn around a different partition than the dots inside it is the
+  // worst kind of chart bug — the one that still looks right.
+  const communityOf = useMemo(() => communities(memberNos, trustTies), [memberNos, trustTies]);
+  const clusters = useMemo(() => clusterView(communityOf), [communityOf]);
+  const hulls = useMemo(
+    // Padded off the rim of each cluster's widest node, not off the centres:
+    // nodes run 14 to 32 units and a centre-padded hull tucks in under the very
+    // people it claims to enclose.
+    () => clusterHulls(communityOf, seats, { radiusOf: radiusTrust }),
+    [communityOf, seats, radiusTrust],
+  );
+
+  // ---- departments side by side (Filters → compare)
+  //
+  // Not a territory drawn around people scattered across a shared cloud — on
+  // a map seated by ties, a department's members are everywhere, and its hull
+  // swallows the picture. Each department gets its own LANE instead: its
+  // people re-seated inside their own panel, keeping the arrangement they had
+  // among themselves, so a tie that crosses between panels is visibly a tie
+  // that crosses between departments.
+  const lanes = useMemo(() => {
+    if (!compareOn) return undefined;
+    const boxes = laneBoxes(compareFuncs.length, stageBox, 18, 40, laneInset);
+    return compareFuncs.map((f, i) => {
+      const b = boxes[i]!;
+      const size = nodes.filter((n) => n.func.trim() === f).length;
+      return {
+        label: f,
+        color: groupColor.get(f) ?? MUTED_GREY,
+        note: `${size} ${size === 1 ? 'person' : 'people'}`,
+        ...b,
+      };
+    });
+  }, [compareFuncs, compareOn, groupColor, laneInset, nodes, stageBox]);
+  const deptRows = useMemo(() => {
+    if (!compareOn) return [];
+    return compareFuncs.map((f) => {
+      const members = nodes.filter((n) => n.func.trim() === f).map((n) => n.no);
+      const set = new Set(members);
+      const rowsOf = anchorRows.filter((r) => set.has(r.no));
+      const n = Math.max(1, members.length);
+      let given = 0;
+      let kept = 0;
+      for (const t of trustTies) {
+        if (!set.has(t.from)) continue;
+        given += 1;
+        if (set.has(t.to)) kept += 1;
+      }
+      return {
+        key: f,
+        color: groupColor.get(f) ?? MUTED_GREY,
+        people: members.length,
+        trustIn: rowsOf.reduce((t, r) => t + r.trustIn, 0) / n,
+        powerIn: rowsOf.reduce((t, r) => t + r.powerIn, 0) / n,
+        within: given > 0 ? kept / given : null,
+        isolates: members.filter((no) => isolateSet.has(no)).length,
+        oneWayOut: oneWayAll.filter((t) => set.has(t.a)).length,
+      };
+    });
+  }, [anchorRows, compareFuncs, compareOn, groupColor, isolateSet, nodes, oneWayAll, trustTies]);
+  /** Trust ties whose two ends are in different compared departments. */
+  const crossTies = useMemo(() => {
+    if (!compareOn) return 0;
+    const funcOfNo = new Map(nodes.map((n) => [n.no, n.func.trim()]));
+    const picked = new Set(compareFuncs);
+    return trustTies.filter((t) => {
+      const a = funcOfNo.get(t.from);
+      const b = funcOfNo.get(t.to);
+      return a !== undefined && b !== undefined && picked.has(a) && picked.has(b) && a !== b;
+    }).length;
+  }, [compareFuncs, compareOn, nodes, trustTies]);
+  const [litDept, setLitDept] = useState<string | null>(null);
+  const litDeptSet = useMemo(() => {
+    if (!litDept) return null;
+    return new Set(nodes.filter((n) => n.func.trim() === litDept).map((n) => n.no));
+  }, [litDept, nodes]);
+  const matrix = useMemo(
+    () => tieMatrix(trustPairs, cut, communityOf, MATRIX_CAP),
+    [communityOf, cut, trustPairs],
+  );
+  const clusterColorOf = useCallback(
+    (no: number) => clusters.fillByNo.get(no) ?? MUTED_GREY,
+    [clusters],
+  );
+  const silosOptions = useMemo(() => silosModes(nodes), [nodes]);
+  const [silosMode, setSilosMode] = useState<SilosMode>('function');
+  const activeSilosMode: SilosMode = silosOptions.includes(silosMode) ? silosMode : 'function';
+  const silos = useMemo(
+    () => orderSilos(subgroupCohesion(silosGroups(nodes, activeSilosMode), trustTies), activeSilosMode),
+    [activeSilosMode, nodes, trustTies],
+  );
+  const silosLabelOf = useMemo(() => silosLabel(nodes, activeSilosMode), [activeSilosMode, nodes]);
+  const silosRows = useMemo(
+    () => silosMemberTable(nodes, activeSilosMode, trustTies),
+    [activeSilosMode, nodes, trustTies],
+  );
+  /** Who is in each silos row, so hovering a row lights them on the map. */
+  const silosMembers = useMemo(() => {
+    const m = new Map<string, Set<number>>();
+    for (const g of silosGroups(nodes, activeSilosMode)) {
+      if (g.group === null) continue;
+      (m.get(g.group) ?? m.set(g.group, new Set()).get(g.group)!).add(g.no);
+    }
+    return m;
+  }, [activeSilosMode, nodes]);
+  const [silosHover, setSilosHover] = useState<string | null>(null);
+
+  // ---- 7 spread or concentrated
+  const spread = useMemo(
+    () =>
+      [
+        { key: TRUST_LENS, name: 'Trust', color: TRUST_ACCENT },
+        { key: POWER_LENS, name: 'Power over', color: POWER_ACCENT },
+      ].map((l) => ({
+        ...l,
+        density: lensDensity(edges, l.key, cut),
+        concentration: whole
+          ? blockConcentration(net.group?.networks, l.key)
+          : scopedConcentration(memberNos, edges, l.key, cut),
+      })),
+    [cut, edges, memberNos, net.group, whole],
+  );
+  const trustShares = useMemo(
+    () => concentrationTable(memberNos, edges, TRUST_LENS, cut),
+    [cut, edges, memberNos],
+  );
+  const powerShares = useMemo(
+    () => concentrationTable(memberNos, edges, POWER_LENS, cut),
+    [cut, edges, memberNos],
+  );
+  const hubs = useMemo(() => topDecile(trustIn, 0.1), [trustIn]);
+  /**
+   * A contour around "the few hands" — the same hull machinery the clusters
+   * use, over one made-up community of one decile. The halo says who; the
+   * outline says how much of the map they are, which is the actual finding.
+   */
+  const hubHull = useMemo(() => {
+    if (hubs.size < 3) return [];
+    const one = new Map<number, number>();
+    for (const no of hubs) one.set(no, 0);
+    return clusterHulls(one, seats, { radiusOf: radiusTrust }).map((h) => ({
+      ...h,
+      label: 'The few hands',
+      fill: STRUCT_ACCENT,
+    }));
+  }, [hubs, seats, radiusTrust]);
+  const spreadShares = useMemo(() => {
+    const power = new Map(powerShares.rows.map((r) => [r.no, r]));
+    return trustShares.rows.map((r) => ({ trust: r, power: power.get(r.no) ?? null }));
+  }, [powerShares, trustShares]);
+
+  // ---- 8 the two panes
+  const rankGaps = useMemo(() => rankDivergence(memberNos, edges, cut, 3), [cut, edges, memberNos]);
+  const ringed = useMemo(() => new Set(rankGaps.map((d) => d.no)), [rankGaps]);
+  const rankOf = useMemo(() => new Map(rankGaps.map((d) => [d.no, d])), [rankGaps]);
+  const rankRows = useMemo(() => rankTable(memberNos, edges, cut), [cut, edges, memberNos]);
+  const overlapSentence = trustPowerOverlapSentence(
+    anchorLists.trusted.map((a) => a.no),
+    anchorLists.influential.map((a) => a.no),
+    nameOf,
+  );
+
+  // ---- 9 the two facets of trust
+  const relDensity = useMemo(() => lensDensity(edges, 'reliability', cut), [cut, edges]);
+  const openDensity = useMemo(() => lensDensity(edges, 'openness', cut), [cut, edges]);
+  const relOpen = relOpenVerdict(relDensity.density, openDensity.density);
+  const facetRows = useMemo(() => facetTable(memberNos, edges, cut), [cut, edges, memberNos]);
+  const [facetLens, setFacetLens] = useState<'reliability' | 'openness'>('reliability');
+  const facetEdges = useMemo(
+    () => buildPaneEdges(edges, facetLens, cut, allVisible),
+    [allVisible, cut, edges, facetLens],
+  );
+  const facetIn = useMemo(() => paneInDegree(facetEdges), [facetEdges]);
+  const maxFacetIn = useMemo(() => Math.max(0, ...facetIn.values()), [facetIn]);
+  const radiusFacet = useCallback(
+    (no: number) => nodeRadius(facetIn.get(no) ?? 0, maxFacetIn),
+    [facetIn, maxFacetIn],
+  );
+  const facetLabels = useMemo(() => topPaneLabels(facetEdges, MAP_LABELS), [facetEdges]);
+
+  // -------------------------------------------------------------- shared bits
+  const nameCol = useCallback(
+    <T extends { no: number }>(head = 'Name'): Column<T> => ({
+      key: 'name',
+      head,
+      sort: (a, b) => nameOf(a.no).localeCompare(nameOf(b.no)),
+      cell: (r) => (
+        <span className="ins-grid-person">
+          <Avatar name={nameOf(r.no)} color={fillOfFunc(r.no)} size={22} />
+          <span className="ins-grid-name">{nameOf(r.no)}</span>
+        </span>
+      ),
+    }),
+    [fillOfFunc, nameOf],
+  );
+  const funcCol = useCallback(
+    <T extends { no: number }>(): Column<T> => ({
+      key: 'func',
+      head: 'Function',
+      width: 170,
+      sort: (a, b) => funcOf(a.no).localeCompare(funcOf(b.no)),
+      cell: (r) => funcOf(r.no),
+    }),
+    [funcOf],
+  );
+
+  const tabDef = TABS.find((t) => t.id === tab) ?? TABS[0]!;
+
+  /** Scales for the in-cell data bars: one per measure, cohort-wide, so a bar
+   *  means the same length on every tab that draws it. */
+  const colMax = useMemo(
+    () => ({
+      trustIn: Math.max(1, ...anchorRows.map((r) => r.trustIn)),
+      powerIn: Math.max(1, ...anchorRows.map((r) => r.powerIn)),
+      within: Math.max(1, ...silosRows.map((r) => Math.max(r.withinTies, r.outTies))),
+      share: Math.max(0.01, ...spreadShares.map((r) => Math.max(r.trust.share, r.power?.share ?? 0))),
+      facet: Math.max(1, ...facetRows.map((r) => Math.max(r.reliabilityIn, r.opennessIn))),
+    }),
+    [anchorRows, facetRows, silosRows, spreadShares],
+  );
+
+  /** The one number per question the rail shows beside its name. */
+  const stats: Record<string, RailStat | null> = {
+    anchors: anchorLists.trusted[0]
+      ? { value: String(anchorLists.trusted[0].count), title: 'Most trust ties received by one person', tone: 'ok' }
+      : null,
+    divergence: { value: `${lists.watch.length} · ${lists.underused.length}`, title: 'Watch list · underused', tone: lists.watch.length > 0 ? 'warn' : 'muted' },
+    bridges: allBridges[0] ? { value: allBridges[0].score.toFixed(2), title: 'Highest betweenness', tone: 'accent' } : null,
+    isolates: { value: String(isolateSet.size), title: 'People with no positive ties at all', tone: isolateSet.size > 0 ? 'warn' : 'ok' },
+    oneway: { value: String(oneWayAll.length), title: 'Unreturned trust ties', tone: oneWayAll.length > 0 ? 'warn' : 'ok' },
+    silos: { value: silosVerdict(silos) ? 'Pooled' : 'Flows', title: 'Does trust pool inside groups?', tone: silosVerdict(silos) ? 'warn' : 'ok' },
+    spread: spread[0]?.concentration !== null && spread[0]?.concentration !== undefined
+      ? { value: spread[0].concentration.toFixed(2), title: 'Trust concentration, 0 flat to 1 one person', tone: spread[0].concentration >= 0.5 ? 'warn' : 'ok' }
+      : null,
+    compare: (() => {
+      const t = new Set(anchorLists.trusted.map((a) => a.no));
+      const both = anchorLists.influential.filter((a) => t.has(a.no)).length;
+      const n = Math.max(anchorLists.trusted.length, anchorLists.influential.length);
+      return n > 0 ? { value: `${both}/${n}`, title: 'Top names on both lists', tone: both === n ? 'ok' : 'accent' } : null;
+    })(),
+    facets:
+      relDensity.density !== null && openDensity.density !== null
+        ? { value: `${Math.round(relDensity.density * 100)}·${Math.round(openDensity.density * 100)}%`, title: 'Reliability · openness density', tone: Math.abs(relDensity.density - openDensity.density) >= 0.15 ? 'warn' : 'ok' }
+        : null,
+  };
+
+  // Keys 1–9 walk the questions, unless the reader is typing somewhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      const i = Number(e.key) - 1;
+      if (!Number.isInteger(i) || i < 0 || i >= TABS.length) return;
+      setTab(TABS[i]!.id);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  /** The stage body — picture and legend — as a PNG, named for the question. */
+  const exportStage = useCallback(() => {
+    const body = rootRef.current?.querySelector<HTMLElement>('.ins-stage-body');
+    if (!body) return;
+    void toPng(body, { pixelRatio: 2, backgroundColor: '#FFFFFF' }).then((url) => {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `insights-${tab}-round${net.roundNo}.png`;
+      a.click();
+    });
+  }, [net.roundNo, tab]);
+
+  /**
+   * The nine findings at once, for the rail. Each is the very expression its
+   * tab leads with, so the rail and the open tab can never disagree.
+   */
+  const silosFinding = silosVerdict(silos)
+    ? activeSilosMode === 'tenure'
+      ? 'Trust pools inside tenure bands more than it flows between them.'
+      : activeSilosMode === 'team'
+        ? 'Trust pools inside teams more than it flows between them.'
+        : 'Trust pools inside functions more than it flows between them.'
+    : clusterFinding(clusters.entries.filter((c) => !c.singleton).length);
+  const oneWayFindingText = oneWayFinding(
+    oneWayAll.length,
+    oneWayAll[0] ? `${nameOf(oneWayAll[0].a)} → ${nameOf(oneWayAll[0].b)}` : null,
+  );
+  const findings: Record<string, string | null> = {
+    anchors: anchorFinding(anchorLists, nameOf),
+    divergence: divergenceFinding(lists),
+    bridges: bridgeFinding(allBridges, nameOf),
+    isolates: peripheryFinding(periphery.members.length, isolateSet.size),
+    oneway: oneWayFindingText,
+    silos: silosFinding,
+    spread: spreadFinding(spread),
+    compare: overlapSentence,
+    facets: relOpen,
+  };
+
+  /** Everyone on the picture, for the search box. */
+  const searchPeople = useMemo(
+    () => nodes.map((n) => ({ no: n.no, name: n.name, func: n.func.trim(), color: fillOfFunc(n.no) })),
+    [fillOfFunc, nodes],
+  );
+
+  /** The focused person's standing on all nine questions, for the card. */
+  const personCard = useMemo(() => {
+    if (focusNo === null) return null;
+    const no = focusNo;
+    const anchor = anchorRows.find((r) => r.no === no);
+    const quad = divergenceRows.find((r) => r.no === no);
+    const bridgeIx = allBridges.findIndex((b) => b.no === no);
+    const bridge = bridgeIx >= 0 ? allBridges[bridgeIx] : undefined;
+    const edge = periphery.members.find((m) => m.no === no);
+    const given = oneWayAll.filter((t) => t.a === no).length;
+    const got = oneWayAll.filter((t) => t.b === no).length;
+    const fill = clusters.fillByNo.get(no);
+    const cluster = clusters.entries.find((e) => e.fill === fill && !e.singleton)?.label;
+    const share = spreadShares.find((r) => r.trust.no === no)?.trust.share;
+    const facet = facetRows.find((r) => r.no === no);
+    const rank = rankRows.find((r) => r.no === no);
+    const quadShort: Record<string, string> = { watch: 'Watch list', anchor: 'Trusted + influential', peripheral: 'Peripheral', underused: 'Underused asset' };
+    const cells: PersonCell[] = [
+      { tab: 'anchors', label: 'Trust · influence in', value: `${anchor?.trustIn ?? 0} · ${anchor?.powerIn ?? 0}`, share: (anchor?.trustIn ?? 0) / colMax.trustIn },
+      { tab: 'divergence', label: 'Quadrant', value: quad ? quadShort[quad.quadrant] ?? QUADRANT_NAME[quad.quadrant] : '—', tone: quad?.quadrant === 'watch' ? 'warn' : quad?.quadrant === 'anchor' ? 'ok' : undefined },
+      { tab: 'bridges', label: 'Bridge rank', value: bridge ? `#${bridgeIx + 1} · ${bridge.score.toFixed(2)}` : 'Not a bridge' },
+      { tab: 'isolates', label: 'At the edge', value: edge ? (edge.kind === 'isolate' ? 'Isolate' : 'Peripheral') : 'No', tone: edge ? 'warn' : 'ok' },
+      { tab: 'oneway', label: 'One-way trust', value: `${given} out · ${got} in`, tone: given + got > 0 ? 'warn' : undefined },
+      { tab: 'silos', label: 'Cluster', value: cluster ?? 'Unclustered' },
+      { tab: 'spread', label: 'Share of trust', value: share !== undefined ? `${(share * 100).toFixed(1)}%` : '—', share: share !== undefined ? share / colMax.share : null },
+      { tab: 'compare', label: 'Trust · power rank', value: rank ? `#${rank.trustRank} · #${rank.powerRank}` : '—' },
+      { tab: 'facets', label: 'Reliability − openness', value: facet ? (facet.gap > 0 ? `+${facet.gap}` : String(facet.gap)) : '—' },
+    ];
+    return (
+      <PersonCard
+        name={nameOf(no)}
+        color={fillOfFunc(no)}
+        meta={`${funcOf(no)}${tenureOf(no) !== '—' ? ` · ${tenureOf(no)}` : ''} · rated by ${coverageOf.get(no) ?? 0}`}
+        cells={cells}
+        activeTab={tab}
+        onPick={setTab}
+        onClear={() => setFocusNo(null)}
+      />
+    );
+  }, [allBridges, anchorRows, clusters, colMax, coverageOf, divergenceRows, facetRows, fillOfFunc, focusNo, funcOf, nameOf, oneWayAll, periphery.members, rankRows, spreadShares, tab, tenureOf]);
+
+  return (
+    <div
+      className={`insights${isFull ? ' is-theatre' : ''}${isFull && !detailsOpen ? ' is-details-closed' : ''}`}
+      ref={rootRef}
+    >
+      <InsightToolbar
+        scope={
+          <ScopePicker
+            funcs={scopeChips.funcs}
+            tenures={scopeChips.tenures}
+            activeFuncs={scope.funcs}
+            activeTenures={scope.tenures}
+            onToggleFunc={(k, only) => toggleIn('funcs', k, only)}
+            onToggleTenure={(k, only) => toggleIn('tenures', k, only)}
+            onClear={() => setScope(EMPTY_SCOPE)}
+            colorOf={(k) => groupColor.get(k) ?? MUTED_GREY}
+            shown={nodes.length}
+            total={net.nodes.length}
+            compare={!!scope.compare}
+            onToggleCompare={(on) => setScope((cur) => ({ ...cur, compare: on }))}
+          />
+        }
+        search={
+          <PersonSearch
+            people={searchPeople}
+            scopedOut={!whole}
+            onPick={(no) => setFocusNo(no)}
+          />
+        }
+        focus={
+          focusNo !== null ? (
+            <button
+              className="insights-focus-chip"
+              onClick={() => setFocusNo(null)}
+              title="Clear the focus (Esc)"
+            >
+              <span
+                className="insights-focus-dot"
+                style={{ background: fillOfFunc(focusNo) }}
+                aria-hidden="true"
+              />
+              Focused: <b>{nameOf(focusNo)}</b>
+              <span className="insights-focus-x" aria-hidden="true">
+                ×
+              </span>
+            </button>
+          ) : null
+        }
+        note={
+          <>
+            Tie threshold {cut.toFixed(1)} · {net.roundName}
+          </>
+        }
+        isFull={isFull}
+        onToggleFull={onToggleFull}
+        details={
+          isFull ? (
+            <button
+              type="button"
+              className={`ins-present is-details${detailsOpen ? ' is-on' : ''}`}
+              onClick={toggleDetails}
+              aria-pressed={detailsOpen}
+              title={detailsOpen ? 'Hide the details panel' : 'Show the details panel'}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="16" rx="2" />
+                <path d="M15 4v16" />
+              </svg>
+              Details
+            </button>
+          ) : null
+        }
+      />
+
+      <div className="ins-body">
+      <FindingsRail
+        tabs={TABS}
+        groups={GROUPS}
+        active={tab}
+        onPick={setTab}
+        findingOf={(id) => findings[id] ?? null}
+        statOf={(id) => stats[id] ?? null}
+        collapsed={railCollapsed}
+        onToggle={toggleRail}
+      />
+      {/* Keyed on the tab AND the scope so each panel's bars grow in once, on
+          arrival, and a re-scoped band opens on its own order. */}
+      <div className="ins-panels" key={`${tab}:${[...scope.funcs, '|', ...scope.tenures].join(',')}`}>
+        {/* ---------------------------------------------------- 1 anchors */}
+        {tab === 'anchors' ? (
+          <Workspace
+            id={tab}
+            title={TAB_TITLE.anchors!}
+            question={tabDef.question}
+            onExport={exportStage}
+            lead={
+              <>
+                {compareOn && deptRows.length > 0 ? (
+                  <DeptCompare
+                    rows={deptRows}
+                    crossTies={crossTies}
+                    active={litDept}
+                    onPick={(k) => setLitDept((cur) => (cur === k ? null : k))}
+                  />
+                ) : null}
+                {personCard}
+              </>
+            }
+            finding={findings[tab] ?? null}
+            bandTitle="Every member, both standings"
+            bandNote={`${anchorRows.length} people`}
+            centre={
+              <InsightGraph
+                nodes={nodes}
+                positions={seats}
+                dock={dock}
+                sizeScale={sizeScale}
+                lanes={lanes}
+                highlight={litDeptSet}
+                box={stageBox}
+                edges={trustEdges}
+                sizeOf={radiusTrust}
+                colorOf={fillOfFunc}
+                decorate={anchorDecor}
+                labelFor={trustLabels}
+                activeNo={activeNo}
+                onPick={pick}
+                onHover={onMapHover}
+                onLeave={onMapLeave}
+                label="The trust network, with the five most trusted and the five most influential ringed"
+              />
+            }
+            legend={
+              <div className="ins-legend-row">
+                <RingKey color={TRUST_ACCENT}>Most trusted</RingKey>
+                <RingKey color={POWER_ACCENT}>Most influential</RingKey>
+                <span className="ins-legend-note">Node size: trust ties received</span>
+              </div>
+            }
+            sidebar={
+              <>
+                <Finding text={null} />
+                <Panel title="Most trusted" accent={TRUST_ACCENT}>
+                  <RankList
+                    colorOf={fillOfFunc}
+                    entries={anchorLists.trusted}
+                    bold={anchorLists.both}
+                    fill={TRUST_ACCENT}
+                    activeNo={activeNo}
+                    nameOf={nameOf}
+                    funcOf={funcOf}
+                    unit="trust ties received"
+                    personProps={personProps}
+                  />
+                </Panel>
+                <Panel title="Most influential" accent={POWER_ACCENT}>
+                  <RankList
+                    colorOf={fillOfFunc}
+                    entries={anchorLists.influential}
+                    bold={anchorLists.both}
+                    fill={POWER_ACCENT}
+                    activeNo={activeNo}
+                    nameOf={nameOf}
+                    funcOf={funcOf}
+                    unit="power-over ties received"
+                    personProps={personProps}
+                  />
+                  <p className="ins-panel-foot">Names in bold appear on both lists.</p>
+                </Panel>
+              </>
+            }
+            band={
+              <DetailTable<AnchorRow>
+                rows={anchorRows}
+                rowKey={(r) => r.no}
+                personNo={(r) => r.no}
+                activeNo={activeNo}
+                personProps={personProps}
+                tip={(r) => ({
+                  title: nameOf(r.no),
+                  sub: funcOf(r.no),
+                  rows: [
+                    ['Trust ties received', String(r.trustIn)],
+                    ['Power-over ties received', String(r.powerIn)],
+                  ],
+                })}
+                empty="Nobody is on the roster yet."
+                columns={[
+                  nameCol<AnchorRow>(),
+                  funcCol<AnchorRow>(),
+                  {
+                    key: 'trust',
+                    head: 'Trust in',
+                    right: true,
+                    width: 96,
+                    sort: (a, b) => a.trustIn - b.trustIn,
+                    cell: (r) => r.trustIn,
+                    bar: (r) => r.trustIn / colMax.trustIn,
+                    barColor: TRUST_ACCENT,
+                  },
+                  {
+                    key: 'power',
+                    head: 'Influence in',
+                    right: true,
+                    width: 116,
+                    sort: (a, b) => a.powerIn - b.powerIn,
+                    cell: (r) => r.powerIn,
+                    bar: (r) => r.powerIn / colMax.powerIn,
+                    barColor: POWER_ACCENT,
+                  },
+                  {
+                    key: 'both',
+                    head: 'On both lists',
+                    right: true,
+                    width: 122,
+                    sort: (a, b) => Number(a.onBoth) - Number(b.onBoth),
+                    cell: (r) =>
+                      r.onBoth ? <span className="insights-tag is-tenure">both</span> : <span className="ins-dash">—</span>,
+                  },
+                ]}
+              />
+            }
+          />
+        ) : null}
+
+        {/* ------------------------------------------------- 2 divergence */}
+        {tab === 'divergence' ? (
+          <Workspace
+            id={tab}
+            title={TAB_TITLE.divergence!}
+            question={tabDef.question}
+            onExport={exportStage}
+            lead={
+              <>
+                {compareOn && deptRows.length > 0 ? (
+                  <DeptCompare
+                    rows={deptRows}
+                    crossTies={crossTies}
+                    active={litDept}
+                    onPick={(k) => setLitDept((cur) => (cur === k ? null : k))}
+                  />
+                ) : null}
+                {personCard}
+              </>
+            }
+            finding={findings[tab] ?? null}
+            bandTitle="Every member, placed"
+            bandNote={points[0]?.normalised ? 'Rates are per colleague who rated them' : 'Raw tie counts'}
+            centre={
+              <DivergenceChart
+                box={stageBox}
+                points={points}
+                medians={medians}
+                activeNo={activeNo}
+                lifted={lifted}
+                nameOf={nameOf}
+                funcOf={funcOf}
+                personProps={personProps}
+                onClearFocus={() => setFocusNo(null)}
+              />
+            }
+            sidebar={
+              <>
+                <Finding
+                  text={null}
+                  caption="Influence without goodwill is a friction point and a succession risk; trusted people without influence are often overlooked for stretch roles."
+                />
+                <div onMouseEnter={() => setLifted('watch')} onMouseLeave={() => setLifted(null)}>
+                  <Panel title="Watch list" sub="Influence ahead of trust" accent={QUADRANT_COLOR.watch}>
+                    <QuadrantList
+                      colorOf={fillOfFunc}
+                      entries={lists.watch.slice(0, 5)}
+                      fill={QUADRANT_COLOR.watch}
+                      activeNo={activeNo}
+                      nameOf={nameOf}
+                      funcOf={funcOf}
+                      personProps={personProps}
+                    />
+                  </Panel>
+                </div>
+                <div onMouseEnter={() => setLifted('underused')} onMouseLeave={() => setLifted(null)}>
+                  <Panel
+                    title="Underused assets"
+                    sub="Trust ahead of influence"
+                    accent={QUADRANT_COLOR.underused}
+                  >
+                    <QuadrantList
+                      colorOf={fillOfFunc}
+                      entries={lists.underused.slice(0, 5)}
+                      fill={QUADRANT_COLOR.underused}
+                      activeNo={activeNo}
+                      nameOf={nameOf}
+                      funcOf={funcOf}
+                      personProps={personProps}
+                    />
+                  </Panel>
+                </div>
+              </>
+            }
+            band={
+              <DetailTable<QuadrantRow>
+                rows={divergenceRows}
+                rowKey={(r) => r.no}
+                personNo={(r) => r.no}
+                activeNo={activeNo}
+                personProps={personProps}
+                tip={(r) => ({
+                  title: nameOf(r.no),
+                  sub: `${funcOf(r.no)} · ${QUADRANT_NAME[r.quadrant]}`,
+                  rows: [
+                    ['Trust ties received', String(r.trustCount)],
+                    ['Power-over ties received', String(r.powerCount)],
+                  ],
+                })}
+                empty="Nobody to place yet."
+                columns={[
+                  nameCol<QuadrantRow>(),
+                  funcCol<QuadrantRow>(),
+                  {
+                    key: 'trust',
+                    head: 'Trust',
+                    note: r0Note(points),
+                    right: true,
+                    width: 104,
+                    sort: (a, b) => a.trust - b.trust,
+                    cell: (r) => (r.normalised ? r.trust.toFixed(2) : r.trustCount),
+                  },
+                  {
+                    key: 'power',
+                    head: 'Influence',
+                    note: r0Note(points),
+                    right: true,
+                    width: 104,
+                    sort: (a, b) => a.power - b.power,
+                    cell: (r) => (r.normalised ? r.power.toFixed(2) : r.powerCount),
+                  },
+                  {
+                    key: 'quadrant',
+                    head: 'Quadrant',
+                    width: 210,
+                    sort: (a, b) => QUADRANT_NAME[a.quadrant].localeCompare(QUADRANT_NAME[b.quadrant]),
+                    cell: (r) => (
+                      <span className="ins-quadtag" style={{ color: QUADRANT_COLOR[r.quadrant] }}>
+                        <i style={{ background: QUADRANT_COLOR[r.quadrant] }} aria-hidden="true" />
+                        {QUADRANT_NAME[r.quadrant]}
+                      </span>
+                    ),
+                  },
+                ]}
+              />
+            }
+          />
+        ) : null}
+
+        {/* ---------------------------------------------------- 3 bridges */}
+        {tab === 'bridges' ? (
+          <Workspace
+            id={tab}
+            title={TAB_TITLE.bridges!}
+            question={tabDef.question}
+            onExport={exportStage}
+            lead={
+              <>
+                {compareOn && deptRows.length > 0 ? (
+                  <DeptCompare
+                    rows={deptRows}
+                    crossTies={crossTies}
+                    active={litDept}
+                    onPick={(k) => setLitDept((cur) => (cur === k ? null : k))}
+                  />
+                ) : null}
+                {personCard}
+              </>
+            }
+            finding={findings[tab] ?? null}
+            bandTitle="Everyone who sits between others"
+            bandNote={`${allBridges.length} of ${nodes.length} people`}
+            centre={
+              <InsightGraph
+                nodes={nodes}
+                positions={seats}
+                dock={dock}
+                sizeScale={sizeScale}
+                lanes={lanes}
+                highlight={litDeptSet}
+                box={stageBox}
+                edges={trustEdges}
+                sizeOf={radiusBridge}
+                colorOf={fillOfFunc}
+                fadeOf={fadeExcept(bridgeSet, 0.5)}
+                edgeFadeOf={(e) =>
+                  bridgeSet.has(e.from) || bridgeSet.has(e.to) ? 0.55 : 0.08
+                }
+                decorate={(no) => (bridgeTop3.has(no) ? { rings: [STRUCT_ACCENT] } : null)}
+                labelFor={bridgeLabels}
+                callouts={bridgeCallouts}
+                margin={CALLOUT_MARGIN}
+                activeNo={activeNo}
+                onPick={pick}
+                onHover={onMapHover}
+                onLeave={onMapLeave}
+                label="The trust network, sized by betweenness, with its top three bridges named in the margin"
+              />
+            }
+            legend={
+              <div className="ins-legend-row">
+                <RingKey color={STRUCT_ACCENT}>Named in the margin</RingKey>
+                <span className="ins-legend-note">Node size: betweenness</span>
+              </div>
+            }
+            sidebar={
+              <>
+                <Finding
+                  text={null}
+                  caption="Losing a bridge fragments the team more than losing a star — relevant to succession and retention."
+                />
+                <Panel title="Most between" sub="Normalised betweenness">
+                  {bridges.length === 0 ? (
+                    <p className="hint">
+                      No one sits between others under the trust lens — this group has no bridges to
+                      lose.
+                    </p>
+                  ) : (
+                    bridges.map((b) => (
+                      <BarRow
+                        key={b.no}
+                        name={nameOf(b.no)}
+                        avatar={fillOfFunc(b.no)}
+                        meta={funcOf(b.no)}
+                        value={b.score.toFixed(2)}
+                        share={b.share}
+                        fill={STRUCT_ACCENT}
+                        active={activeNo === b.no}
+                        {...personProps(b.no, () => ({
+                          title: nameOf(b.no),
+                          sub: funcOf(b.no),
+                          rows: [
+                            ['Betweenness', b.score.toFixed(2)],
+                            ['Of the top bridge', `${Math.round(b.share * 100)}%`],
+                          ],
+                        }))}
+                      />
+                    ))
+                  )}
+                </Panel>
+              </>
+            }
+            band={
+              <DetailTable<{ no: number; score: number; share: number }>
+                rows={allBridges}
+                rowKey={(r) => r.no}
+                personNo={(r) => r.no}
+                activeNo={activeNo}
+                personProps={personProps}
+                tip={(r) => ({
+                  title: nameOf(r.no),
+                  sub: funcOf(r.no),
+                  rows: [['Betweenness', r.score.toFixed(3)]],
+                })}
+                empty="Nobody sits between anybody here — every tie is direct."
+                columns={[
+                  nameCol<{ no: number; score: number; share: number }>(),
+                  funcCol<{ no: number; score: number; share: number }>(),
+                  {
+                    key: 'score',
+                    head: 'Betweenness',
+                    right: true,
+                    width: 128,
+                    sort: (a, b) => a.score - b.score,
+                    cell: (r) => r.score.toFixed(3),
+                    bar: (r) => r.share,
+                    barColor: STRUCT_ACCENT,
+                  },
+                  {
+                    key: 'share',
+                    head: 'Of the top bridge',
+                    right: true,
+                    width: 152,
+                    sort: (a, b) => a.share - b.share,
+                    cell: (r) => `${Math.round(r.share * 100)}%`,
+                  },
+                ]}
+              />
+            }
+          />
+        ) : null}
+
+        {/* --------------------------------------------------- 4 isolates */}
+        {tab === 'isolates' ? (
+          <Workspace
+            id={tab}
+            title={TAB_TITLE.isolates!}
+            question={tabDef.question}
+            onExport={exportStage}
+            lead={
+              <>
+                {compareOn && deptRows.length > 0 ? (
+                  <DeptCompare
+                    rows={deptRows}
+                    crossTies={crossTies}
+                    active={litDept}
+                    onPick={(k) => setLitDept((cur) => (cur === k ? null : k))}
+                  />
+                ) : null}
+                {personCard}
+              </>
+            }
+            finding={findings[tab] ?? null}
+            bandTitle="At the edge of both lenses"
+            bandNote={`${periphery.members.length} of ${nodes.length} people`}
+            centre={
+              <InsightGraph
+                nodes={nodes}
+                positions={seats}
+                dock={dock}
+                sizeScale={sizeScale}
+                lanes={lanes}
+                highlight={litDeptSet}
+                box={stageBox}
+                edges={trustEdges}
+                sizeOf={radiusTrust}
+                colorOf={fillOfFunc}
+                fadeOf={fadeExcept(peripheralSet, 0.25)}
+                edgeFadeOf={() => 0.08}
+                decorate={(no) => (isolateSet.has(no) ? { warn: FLAG_COLOR } : null)}
+                labelFor={peripheralSet}
+                activeNo={activeNo}
+                onPick={pick}
+                onHover={onMapHover}
+                onLeave={onMapLeave}
+                label="The trust network with its peripheral members at full colour and everyone else pushed back"
+              />
+            }
+            legend={
+              <div className="ins-legend-row">
+                <RingKey color={FLAG_COLOR}>No ties at all</RingKey>
+                <span className="ins-legend-note">Everyone else is faded, never hidden</span>
+              </div>
+            }
+            sidebar={
+              <>
+                <Finding
+                  text={null}
+                  caption="A newer hire or a support function can sit here by role; anyone else may be an inclusion problem worth a conversation."
+                />
+                {periphery.members.length === 0 ? (
+                  <Panel title="At the edge">
+                    <p className="hint">
+                      Nobody sits at the edge of both lenses — every rated person carries some
+                      standing.
+                    </p>
+                  </Panel>
+                ) : (
+                  <Panel title="At the edge" sub="Isolates first, then the bottom band on both lenses">
+                    <div className="insights-rows">
+                      {periphery.members.map((m) => (
+                        <button
+                          key={m.no}
+                          type="button"
+                          className={`insights-row is-tappable is-stack${activeNo === m.no ? ' is-active' : ''}`}
+                          {...personProps(m.no, () => ({
+                            title: nameOf(m.no),
+                            sub: funcOf(m.no),
+                            rows: [
+                              ['Trust ties received', String(m.trustIn)],
+                              ['Power-over ties received', String(m.powerIn)],
+                            ],
+                          }))}
+                        >
+                          <span className="insights-row-name">{nameOf(m.no)}</span>
+                          <span className="insights-row-meta">{funcOf(m.no)}</span>
+                          {m.kind === 'isolate' ? (
+                            <span className="insights-tag is-isolate">no ties at all</span>
+                          ) : null}
+                          {m.newerHire ? <span className="insights-tag is-tenure">newer hire</span> : null}
+                          <span className="insights-row-val">
+                            {m.trustIn} trust · {m.powerIn} power
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </Panel>
+                )}
+                {periphery.thinlyRated.length > 0 ? (
+                  <Panel title="Too thinly rated to call">
+                    {/* The floor that removed these people from the reading
+                        above, stated where the reading is — a silent exclusion
+                        would let the tab be read as a complete list of the
+                        group's edge. */}
+                    <Suppressed n={net.minRaters} unit="responses">
+                      {periphery.thinlyRated.length === 1
+                        ? 'One person is'
+                        : `${periphery.thinlyRated.length} people are`}{' '}
+                      rated by too few colleagues for the group to have said where they sit:{' '}
+                      {joinNames(periphery.thinlyRated.map((t) => `${nameOf(t.no)} (${t.coverage})`))}.
+                    </Suppressed>
+                  </Panel>
+                ) : null}
+              </>
+            }
+            band={
+              <DetailTable<(typeof periphery.members)[number]>
+                rows={periphery.members}
+                rowKey={(r) => r.no}
+                personNo={(r) => r.no}
+                activeNo={activeNo}
+                personProps={personProps}
+                tip={(r) => ({
+                  title: nameOf(r.no),
+                  sub: funcOf(r.no),
+                  rows: [
+                    ['Trust ties received', String(r.trustIn)],
+                    ['Power-over ties received', String(r.powerIn)],
+                  ],
+                })}
+                empty="Nobody sits at the edge of both lenses."
+                columns={[
+                  nameCol<(typeof periphery.members)[number]>(),
+                  funcCol<(typeof periphery.members)[number]>(),
+                  {
+                    key: 'tenure',
+                    head: 'Tenure',
+                    width: 130,
+                    sort: (a, b) => tenureOf(a.no).localeCompare(tenureOf(b.no)),
+                    cell: (r) => (
+                      <>
+                        {tenureOf(r.no)}
+                        {r.newerHire ? <span className="insights-tag is-tenure">newer</span> : null}
+                      </>
+                    ),
+                  },
+                  {
+                    key: 'trust',
+                    head: 'Trust in',
+                    right: true,
+                    width: 96,
+                    sort: (a, b) => a.trustIn - b.trustIn,
+                    cell: (r) => r.trustIn,
+                    bar: (r) => r.trustIn / colMax.trustIn,
+                    barColor: TRUST_ACCENT,
+                  },
+                  {
+                    key: 'power',
+                    head: 'Influence in',
+                    right: true,
+                    width: 116,
+                    sort: (a, b) => a.powerIn - b.powerIn,
+                    cell: (r) => r.powerIn,
+                    bar: (r) => r.powerIn / colMax.powerIn,
+                    barColor: POWER_ACCENT,
+                  },
+                  {
+                    key: 'coverage',
+                    head: 'Rated by',
+                    right: true,
+                    width: 106,
+                    sort: (a, b) => (coverageOf.get(a.no) ?? 0) - (coverageOf.get(b.no) ?? 0),
+                    cell: (r) =>
+                      coverageOf.has(r.no) ? coverageOf.get(r.no) : <span className="ins-dash">—</span>,
+                  },
+                ]}
+              />
+            }
+          />
+        ) : null}
+
+        {/* ----------------------------------------------- 5 one-way trust */}
+        {tab === 'oneway' ? (
+          <Workspace
+            id={tab}
+            title={TAB_TITLE.oneway!}
+            question={tabDef.question}
+            onExport={exportStage}
+            lead={
+              <>
+                {compareOn && deptRows.length > 0 ? (
+                  <DeptCompare
+                    rows={deptRows}
+                    crossTies={crossTies}
+                    active={litDept}
+                    onPick={(k) => setLitDept((cur) => (cur === k ? null : k))}
+                  />
+                ) : null}
+                {personCard}
+              </>
+            }
+            finding={findings[tab] ?? null}
+            bandTall
+            bandTitle="The whole grid"
+            bandNote={
+              matrix.capped
+                ? `The ${matrix.limit} people with the most one-way ties, of ${matrix.total}`
+                : 'Rows give trust, columns receive it'
+            }
+            centre={
+              <InsightGraph
+                nodes={nodes}
+                positions={seats}
+                dock={dock}
+                sizeScale={sizeScale}
+                lanes={lanes}
+                highlight={litDeptSet}
+                box={stageBox}
+                edges={oneWayEdges}
+                sizeOf={radiusTrust}
+                colorOf={fillOfFunc}
+                fadeOf={fadeExcept(oneWayFolk, 0.18)}
+                edgeFadeOf={() => 0.72}
+                labelFor={oneWayFolk}
+                directed
+                activeNo={activeNo}
+                onPick={pick}
+                onHover={onMapHover}
+                onLeave={onMapLeave}
+                label="Only the trust ties that run one way, drawn as arrows from the giver to the person who did not return it"
+              />
+            }
+            legend={
+              <div className="ins-legend-row">
+                <span className="ins-legend-note">
+                  Every arrow is a reach that was not returned. Everything else is ghosted.
+                </span>
+              </div>
+            }
+            sidebar={
+              <>
+                <Finding
+                  text={null}
+                  caption="A trusts B; B does not say the same. One-way ties often predict friction before it surfaces."
+                />
+                <Panel
+                  title="Widest one-way ties"
+                  sub={
+                    oneWayAll.length > oneWay.length
+                      ? `The ${oneWay.length} widest of ${oneWayAll.length} — the grid below draws them all`
+                      : undefined
+                  }
+                >
+                  {oneWayShown.length === 0 ? (
+                    <p className="hint">Every trust tie in this group is returned.</p>
+                  ) : (
+                    <div className="insights-rows">
+                      {oneWayShown.map((t) => {
+                        const on = activeNo === t.a || activeNo === t.b;
+                        return (
+                          <button
+                            key={`${t.a}>${t.b}`}
+                            type="button"
+                            className={`insights-row is-tappable is-oneway${on ? ' is-active' : ''}`}
+                            {...personProps(t.a, () => ({
+                              title: `${nameOf(t.a)} → ${nameOf(t.b)}`,
+                              sub:
+                                t.kind === 'not_returned'
+                                  ? 'Rated back, but below the tie line'
+                                  : 'Never rated back — usually distance or seniority, not rejection',
+                              rows: [
+                                [`${nameOf(t.a)} on ${nameOf(t.b)}`, t.aToB.toFixed(2)],
+                                [`${nameOf(t.b)} back`, t.bToA === null ? 'no rating' : t.bToA.toFixed(2)],
+                              ],
+                            }))}
+                          >
+                            <span className="insights-row-name">
+                              {nameOf(t.a)} <span className="insights-arrow">→</span> {nameOf(t.b)}
+                            </span>
+                            <span
+                              className={`insights-tag ${t.kind === 'not_returned' ? 'is-cool' : 'is-quiet'}`}
+                            >
+                              {t.kind === 'not_returned' ? 'not returned' : 'no basis'}
+                            </span>
+                            <span className="insights-row-val">
+                              {t.aToB.toFixed(1)} · {t.bToA === null ? '—' : t.bToA.toFixed(1)}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </Panel>
+              </>
+            }
+            band={
+              <MatrixGrid
+                matrix={matrix}
+                activeNo={activeNo}
+                nameOf={nameOf}
+                funcOf={funcOf}
+                personProps={personProps}
+              />
+            }
+          />
+        ) : null}
+
+        {/* ------------------------------------------------------ 6 silos */}
+        {tab === 'silos' ? (
+          <Workspace
+            id={tab}
+            title={TAB_TITLE.silos!}
+            question={tabDef.question}
+            onExport={exportStage}
+            lead={
+              <>
+                {compareOn && deptRows.length > 0 ? (
+                  <DeptCompare
+                    rows={deptRows}
+                    crossTies={crossTies}
+                    active={litDept}
+                    onPick={(k) => setLitDept((cur) => (cur === k ? null : k))}
+                  />
+                ) : null}
+                {personCard}
+              </>
+            }
+            finding={findings[tab] ?? null}
+            bandTitle={`Members by ${SILOS_MODE_COLUMN[activeSilosMode].toLowerCase()}`}
+            bandNote={`${silosRows.length} people grouped`}
+            centre={
+              <InsightGraph
+                nodes={nodes}
+                positions={seats}
+                dock={dock}
+                sizeScale={sizeScale}
+                box={stageBox}
+                edges={trustEdges}
+                sizeOf={radiusTrust}
+                colorOf={compareOn ? fillOfFunc : clusterColorOf}
+                lanes={lanes}
+                hulls={compareOn ? undefined : hulls}
+                highlight={litDeptSet ?? (silosHover === null ? null : silosMembers.get(silosHover) ?? null)}
+                labelFor={trustLabels}
+                activeNo={activeNo}
+                onPick={pick}
+                onHover={onMapHover}
+                onLeave={onMapLeave}
+                label="The trust network, coloured and enclosed by the clusters the group actually formed"
+              />
+            }
+            legend={
+              <div className="ins-legend-row">
+                {clusters.entries.map((c) => (
+                  <Key key={c.label} color={c.fill}>
+                    {c.label} <b>{c.size}</b>
+                  </Key>
+                ))}
+                {clusters.entries.length === 0 ? (
+                  <span className="ins-legend-note">No clusters yet.</span>
+                ) : null}
+              </div>
+            }
+            sidebar={
+              <>
+                <Finding text={null} />
+                <Panel
+                  title="Cohesion"
+                  sub="Point at a row to light that group on the map"
+                  action={
+                    silosOptions.length > 1 ? (
+                      <div className="nx-seg nx-seg-sm" role="tablist" aria-label="Group by">
+                        {silosOptions.map((m) => (
+                          <button
+                            key={m}
+                            role="tab"
+                            aria-selected={activeSilosMode === m}
+                            className={`nx-seg-btn${activeSilosMode === m ? ' is-on' : ''}`}
+                            onClick={() => setSilosMode(m)}
+                          >
+                            {SILOS_MODE_LABEL[m]}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null
+                  }
+                >
+                  {silos.length === 0 ? (
+                    <p className="hint">
+                      {activeSilosMode === 'tenure'
+                        ? 'No tenure band has been recorded for this roster.'
+                        : activeSilosMode === 'team'
+                          ? 'No reporting line has been recorded for this roster.'
+                          : 'No function has been recorded for this roster.'}
+                    </p>
+                  ) : (
+                    <table className="insights-table">
+                      <thead>
+                        <tr>
+                          <th>{SILOS_MODE_COLUMN[activeSilosMode]}</th>
+                          <th className="ta-right">Size</th>
+                          <th className="ta-right">Within</th>
+                          <th className="ta-right">Outward</th>
+                        </tr>
+                      </thead>
+                      <tbody onMouseLeave={() => setSilosHover(null)}>
+                        {silos.map((s) => {
+                          const rowTip = tipProps(() => ({
+                            title: silosLabelOf(s.key),
+                            sub: s.suppressed
+                              ? `${s.size} people — too small to report rates without identifying individuals`
+                              : `${s.size} people`,
+                            rows: [
+                              ['Within', `${s.withinTies} of ${s.withinPossible} possible pairs`],
+                              ['Outward', `${s.outTies} of ${s.outPossible} possible pairs`],
+                            ],
+                          }));
+                          return (
+                            <tr
+                              key={s.key}
+                              className={silosHover === s.key ? 'is-on' : undefined}
+                              {...rowTip}
+                              onMouseEnter={(e) => {
+                                setSilosHover(s.key);
+                                rowTip.onMouseEnter(e);
+                              }}
+                            >
+                              {/* The column ellipsises a long function name so
+                                  the three numeric columns keep their width;
+                                  the title carries the name in full. */}
+                              <td title={silosLabelOf(s.key)}>{silosLabelOf(s.key)}</td>
+                              <td className="ta-right">{s.size}</td>
+                              {/* A suppressed group used to print two
+                                  em-dashes, which reads as "no ties" rather
+                                  than as "withheld". The row now says which. */}
+                              {s.suppressed ? (
+                                <td colSpan={2} className="insights-cell-suppressed">
+                                  Fewer than {SILOS_FLOOR} people — not shown
+                                </td>
+                              ) : (
+                                <>
+                                  <td className="ta-right">
+                                    {s.withinRate === null ? '—' : `${Math.round(s.withinRate * 100)}%`}
+                                  </td>
+                                  <td className="ta-right">
+                                    {s.outRate === null ? '—' : `${Math.round(s.outRate * 100)}%`}
+                                  </td>
+                                </>
+                              )}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                  <p className="ins-panel-foot">
+                    The tinted regions are the clusters the group formed, whatever the org chart says;
+                    a cluster of two is listed but not enclosed, because a two-person outline reads as
+                    a mistake.
+                  </p>
+                </Panel>
+              </>
+            }
+            band={
+              <DetailTable<SilosMemberRow>
+                rows={silosRows}
+                rowKey={(r) => r.no}
+                personNo={(r) => r.no}
+                activeNo={activeNo}
+                personProps={personProps}
+                tip={(r) => ({
+                  title: nameOf(r.no),
+                  sub: silosLabelOf(r.group),
+                  rows: [
+                    ['Ties inside the group', String(r.withinTies)],
+                    ['Ties outside it', String(r.outTies)],
+                  ],
+                })}
+                empty="Nobody on this roster carries the grouping this table needs."
+                columns={[
+                  nameCol<SilosMemberRow>(),
+                  {
+                    key: 'group',
+                    head: SILOS_MODE_COLUMN[activeSilosMode],
+                    width: 210,
+                    sort: (a, b) => silosLabelOf(a.group).localeCompare(silosLabelOf(b.group)),
+                    cell: (r) => silosLabelOf(r.group),
+                  },
+                  {
+                    key: 'within',
+                    head: 'Within-group ties',
+                    right: true,
+                    width: 152,
+                    sort: (a, b) => a.withinTies - b.withinTies,
+                    cell: (r) => r.withinTies,
+                    bar: (r) => r.withinTies / colMax.within,
+                    barColor: TRUST_ACCENT,
+                  },
+                  {
+                    key: 'out',
+                    head: 'Ties outside',
+                    right: true,
+                    width: 128,
+                    sort: (a, b) => a.outTies - b.outTies,
+                    cell: (r) => r.outTies,
+                    bar: (r) => r.outTies / colMax.within,
+                    barColor: STRUCT_ACCENT,
+                  },
+                  {
+                    key: 'mix',
+                    head: 'Outward share',
+                    right: true,
+                    width: 134,
+                    sort: (a, b) => outwardShare(a) - outwardShare(b),
+                    cell: (r) =>
+                      r.withinTies + r.outTies === 0 ? (
+                        <span className="ins-dash">—</span>
+                      ) : (
+                        `${Math.round(outwardShare(r) * 100)}%`
+                      ),
+                  },
+                ]}
+              />
+            }
+          />
+        ) : null}
+
+        {/* ----------------------------------------------------- 7 spread */}
+        {tab === 'spread' ? (
+          <Workspace
+            id={tab}
+            title={TAB_TITLE.spread!}
+            question={tabDef.question}
+            onExport={exportStage}
+            lead={
+              <>
+                {compareOn && deptRows.length > 0 ? (
+                  <DeptCompare
+                    rows={deptRows}
+                    crossTies={crossTies}
+                    active={litDept}
+                    onPick={(k) => setLitDept((cur) => (cur === k ? null : k))}
+                  />
+                ) : null}
+                {personCard}
+              </>
+            }
+            finding={findings[tab] ?? null}
+            bandTitle="Share of every tie received"
+            bandNote={
+              trustShares.halfCount > 0
+                ? `${trustShares.halfCount} of ${nodes.length} people hold half the trust ties`
+                : 'No trust ties received yet'
+            }
+            centre={
+              <InsightGraph
+                nodes={nodes}
+                positions={seats}
+                dock={dock}
+                sizeScale={sizeScale}
+                lanes={lanes}
+                highlight={litDeptSet}
+                box={stageBox}
+                edges={trustEdges}
+                sizeOf={radiusTrust}
+                colorOf={fillOfFunc}
+                hulls={compareOn ? undefined : hubHull}
+                fadeOf={(no) => (hubs.has(no) ? 1 : (trustIn.get(no) ?? 0) > 0 ? 0.78 : 0.42)}
+                decorate={(no) => (hubs.has(no) ? { rings: [STRUCT_ACCENT] } : null)}
+                labelFor={hubs}
+                activeNo={activeNo}
+                onPick={pick}
+                onHover={onMapHover}
+                onLeave={onMapLeave}
+                label="The trust network sized by ties received, with the top tenth of the group ringed"
+              />
+            }
+            legend={
+              <div className="ins-legend-row">
+                <RingKey color={STRUCT_ACCENT}>The few hands — top tenth</RingKey>
+                <span className="ins-legend-note">Faded: nobody has chosen them yet</span>
+              </div>
+            }
+            sidebar={
+              <>
+                <Finding text={null} />
+                {spread.map((l) => (
+                  <Panel key={l.key} title={l.name} accent={l.color}>
+                    <div className="insights-meter-bars">
+                      <div
+                        {...tipProps(() => ({
+                          title: `${l.name} density`,
+                          sub: 'Of the pairs rated under this lens, the share that reached the tie line',
+                          rows: [['Ties', `${l.density.ties} of ${l.density.ratedPairs} rated pairs`]],
+                        }))}
+                      >
+                        <MeterLine
+                          label="Density"
+                          value={l.density.density}
+                          color={l.color}
+                          note={`${l.density.ties} of ${l.density.ratedPairs} rated pairs`}
+                        />
+                      </div>
+                      <div
+                        {...tipProps(() => ({
+                          title: `${l.name} concentration`,
+                          sub: '0 = everyone equally chosen, 1 = one person holds every tie',
+                          rows: [
+                            ['Reading', concentrationReading(l.concentration) ?? 'not scored for this lens yet'],
+                          ],
+                        }))}
+                      >
+                        <MeterLine
+                          label="Concentration"
+                          value={l.concentration}
+                          color={l.color}
+                          note={concentrationReading(l.concentration) ?? 'not scored for this lens yet'}
+                        />
+                      </div>
+                    </div>
+                  </Panel>
+                ))}
+                <Panel title="How few hold half">
+                  <p className="ins-panel-body">
+                    {halfSentence('trust', trustShares, nodes.length)}{' '}
+                    {halfSentence('power-over', powerShares, nodes.length)}
+                  </p>
+                </Panel>
+              </>
+            }
+            band={
+              <DetailTable<{ trust: ShareRow; power: ShareRow | null }>
+                rows={spreadShares}
+                rowKey={(r) => r.trust.no}
+                personNo={(r) => r.trust.no}
+                activeNo={activeNo}
+                personProps={personProps}
+                tip={(r) => ({
+                  title: nameOf(r.trust.no),
+                  sub: funcOf(r.trust.no),
+                  rows: [
+                    ['Trust ties received', String(r.trust.count)],
+                    ['Share of all trust ties', `${(r.trust.share * 100).toFixed(1)}%`],
+                    ['Running total', `${Math.round(r.trust.cumulative * 100)}%`],
+                  ],
+                })}
+                empty="No ties have been received yet."
+                columns={[
+                  {
+                    key: 'name',
+                    head: 'Name',
+                    sort: (a, b) => nameOf(a.trust.no).localeCompare(nameOf(b.trust.no)),
+                    cell: (r) => <span className="ins-grid-name">{nameOf(r.trust.no)}</span>,
+                  },
+                  {
+                    key: 'func',
+                    head: 'Function',
+                    width: 160,
+                    sort: (a, b) => funcOf(a.trust.no).localeCompare(funcOf(b.trust.no)),
+                    cell: (r) => funcOf(r.trust.no),
+                  },
+                  {
+                    key: 'trust',
+                    head: 'Trust share',
+                    right: true,
+                    width: 118,
+                    sort: (a, b) => a.trust.share - b.trust.share,
+                    cell: (r) => `${(r.trust.share * 100).toFixed(1)}%`,
+                    bar: (r) => r.trust.share / colMax.share,
+                    barColor: TRUST_ACCENT,
+                  },
+                  {
+                    key: 'cum',
+                    head: 'Running total',
+                    note: 'trust',
+                    right: true,
+                    width: 138,
+                    sort: (a, b) => a.trust.cumulative - b.trust.cumulative,
+                    cell: (r) => (
+                      <span className={r.trust.cumulative <= 0.5 && r.trust.count > 0 ? 'ins-half' : undefined}>
+                        {Math.round(r.trust.cumulative * 100)}%
+                      </span>
+                    ),
+                  },
+                  {
+                    key: 'power',
+                    head: 'Power share',
+                    right: true,
+                    width: 124,
+                    bar: (r) => (r.power ? r.power.share / colMax.share : null),
+                    barColor: POWER_ACCENT,
+                    sort: (a, b) => (a.power?.share ?? 0) - (b.power?.share ?? 0),
+                    cell: (r) =>
+                      r.power === null ? <span className="ins-dash">—</span> : `${(r.power.share * 100).toFixed(1)}%`,
+                  },
+                ]}
+              />
+            }
+          />
+        ) : null}
+
+        {/* --------------------------------------------- 8 trust vs power */}
+        {tab === 'compare' ? (
+          <Workspace
+            id={tab}
+            title={TAB_TITLE.compare!}
+            question={tabDef.question}
+            onExport={exportStage}
+            lead={
+              <>
+                {compareOn && deptRows.length > 0 ? (
+                  <DeptCompare
+                    rows={deptRows}
+                    crossTies={crossTies}
+                    active={litDept}
+                    onPick={(k) => setLitDept((cur) => (cur === k ? null : k))}
+                  />
+                ) : null}
+                {personCard}
+              </>
+            }
+            finding={findings[tab] ?? null}
+            bandTitle="Standing on each side"
+            bandNote="Competition ranks — equal counts take equal rank"
+            centre={
+              <ComparePair
+                nodes={nodes}
+                edges={edges}
+                cut={cut}
+                visible={allVisible}
+                groupColor={groupColor}
+                ringed={ringed}
+                activeNo={activeNo}
+                onSelect={pick}
+                onHover={(no, e, ctx) => {
+                  setHoverNo(no);
+                  const gap = rankOf.get(no);
+                  tip.show(
+                    {
+                      title: nameOf(no),
+                      sub: gap ? `${funcOf(no)} · ${rankDivergenceLabel(gap)}` : funcOf(no),
+                      rows: [
+                        [
+                          ctx.pane === 'power' ? 'Power-over ties received' : 'Trust ties received',
+                          String(ctx.inDegree),
+                        ],
+                      ],
+                    },
+                    e,
+                  );
+                }}
+                onLeave={onMapLeave}
+              />
+            }
+            sidebar={
+              <>
+                <Finding text={null} />
+                <Panel title="Standing shifts most" sub="Ringed in both panes">
+                  {rankGaps.length === 0 ? (
+                    <p className="hint">
+                      Nobody's standing differs between the two lenses — the group trusts the people it
+                      lets decide.
+                    </p>
+                  ) : (
+                    <div className="insights-rows">
+                      {rankGaps.map((d) => (
+                        <button
+                          key={d.no}
+                          type="button"
+                          className={`insights-row is-tappable is-stack${activeNo === d.no ? ' is-active' : ''}`}
+                          {...personProps(d.no, () => ({
+                            title: nameOf(d.no),
+                            sub: funcOf(d.no),
+                            rows: [
+                              ['Trusted', `#${d.trustRank}`],
+                              ['Drives decisions', `#${d.powerRank}`],
+                            ],
+                          }))}
+                        >
+                          <span className="insights-row-name">{nameOf(d.no)}</span>
+                          <span className="insights-row-meta">{rankDivergenceLabel(d)}</span>
+                          <span className="insights-row-val">{d.delta} places</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </Panel>
+                <Panel title="Reading the panes">
+                  <div className="ins-legend-col">
+                    <Key color={TRUST_ACCENT}>Left: positive trust ties</Key>
+                    <Key color={POWER_ACCENT}>Right: positive power-over ties</Key>
+                    <RingKey color={STRUCT_ACCENT}>Standing differs most between the two</RingKey>
+                  </div>
+                  <p className="ins-panel-foot">
+                    Both panes share one layout: a person who is a hub on the left and a leaf on the
+                    right has not moved, which is the whole comparison.
+                  </p>
+                </Panel>
+              </>
+            }
+            band={
+              <DetailTable<RankRow>
+                rows={rankRows}
+                rowKey={(r) => r.no}
+                personNo={(r) => r.no}
+                activeNo={activeNo}
+                personProps={personProps}
+                tip={(r) => ({
+                  title: nameOf(r.no),
+                  sub: funcOf(r.no),
+                  rows: [
+                    ['Trusted', `#${r.trustRank} · ${r.trustCount} ties`],
+                    ['Drives decisions', `#${r.powerRank} · ${r.powerCount} ties`],
+                  ],
+                })}
+                empty="Nobody is on the roster yet."
+                columns={[
+                  nameCol<RankRow>(),
+                  funcCol<RankRow>(),
+                  {
+                    key: 'trustRank',
+                    head: 'Trusted',
+                    note: 'rank',
+                    right: true,
+                    width: 104,
+                    sort: (a, b) => b.trustRank - a.trustRank,
+                    cell: (r) => `#${r.trustRank}`,
+                  },
+                  {
+                    key: 'powerRank',
+                    head: 'Drives decisions',
+                    note: 'rank',
+                    right: true,
+                    width: 148,
+                    sort: (a, b) => b.powerRank - a.powerRank,
+                    cell: (r) => `#${r.powerRank}`,
+                  },
+                  {
+                    key: 'delta',
+                    head: 'Places apart',
+                    right: true,
+                    width: 126,
+                    sort: (a, b) => a.delta - b.delta,
+                    cell: (r) =>
+                      r.delta === 0 ? (
+                        <span className="ins-dash">level</span>
+                      ) : (
+                        <span className="ins-delta">{r.delta}</span>
+                      ),
+                  },
+                ]}
+              />
+            }
+          />
+        ) : null}
+
+        {/* ------------------------------------------------ 9 reliability */}
+        {tab === 'facets' ? (
+          <Workspace
+            id={tab}
+            title={TAB_TITLE.facets!}
+            question={tabDef.question}
+            onExport={exportStage}
+            lead={
+              <>
+                {compareOn && deptRows.length > 0 ? (
+                  <DeptCompare
+                    rows={deptRows}
+                    crossTies={crossTies}
+                    active={litDept}
+                    onPick={(k) => setLitDept((cur) => (cur === k ? null : k))}
+                  />
+                ) : null}
+                {personCard}
+              </>
+            }
+            finding={findings[tab] ?? null}
+            bandTitle="Both facets, per person"
+            bandNote="Widest gap first"
+            centre={
+              <InsightGraph
+                nodes={nodes}
+                positions={seats}
+                dock={dock}
+                sizeScale={sizeScale}
+                lanes={lanes}
+                highlight={litDeptSet}
+                box={stageBox}
+                edges={facetEdges}
+                sizeOf={radiusFacet}
+                colorOf={fillOfFunc}
+                labelFor={facetLabels}
+                activeNo={activeNo}
+                onPick={pick}
+                onHover={(no, e) => {
+                  setHoverNo(no);
+                  tip.show(
+                    {
+                      title: nameOf(no),
+                      sub: funcOf(no),
+                      rows: [
+                        [
+                          facetLens === 'reliability'
+                            ? 'Delivers as promised — ties received'
+                            : 'Safe to be open — ties received',
+                          String(facetIn.get(no) ?? 0),
+                        ],
+                      ],
+                    },
+                    e,
+                  );
+                }}
+                onLeave={onMapLeave}
+                label={
+                  facetLens === 'reliability'
+                    ? 'The network of "delivers as promised" ties'
+                    : 'The network of "safe to be open" ties'
+                }
+              />
+            }
+            centreAside={
+              <div className="nx-seg nx-seg-sm ins-lens-seg" role="tablist" aria-label="Edge lens">
+                {(['reliability', 'openness'] as const).map((f) => (
+                  <button
+                    key={f}
+                    role="tab"
+                    aria-selected={facetLens === f}
+                    className={`nx-seg-btn${facetLens === f ? ' is-on' : ''}`}
+                    onClick={() => setFacetLens(f)}
+                  >
+                    {f === 'reliability' ? 'Delivers as promised' : 'Safe to be open'}
+                  </button>
+                ))}
+              </div>
+            }
+            sidebar={
+              <>
+                <Finding
+                  text={null}
+                  caption="The two facets need different interventions: openness is a psychological-safety conversation, reliability is an accountability one."
+                />
+                {relDensity.density === null && openDensity.density === null ? (
+                  <Panel title="The two facets">
+                    <p className="hint">Not enough rated pairs under these two lenses yet.</p>
+                  </Panel>
+                ) : (
+                  <Panel title="The two facets" sub="Density over the pairs each was rated on">
+                    <div className="ins-facets">
+                      <div
+                        {...tipProps(() => ({
+                          title: 'Delivers as promised',
+                          sub: 'The reliability item, read as its own lens',
+                          rows: [['Ties', `${relDensity.ties} of ${relDensity.ratedPairs} rated pairs`]],
+                        }))}
+                      >
+                        <FacetBar label="Delivers as promised" stat={relDensity} color="#0F7A63" />
+                      </div>
+                      <div
+                        {...tipProps(() => ({
+                          title: 'Safe to be open',
+                          sub: 'The openness item, read as its own lens',
+                          rows: [['Ties', `${openDensity.ties} of ${openDensity.ratedPairs} rated pairs`]],
+                        }))}
+                      >
+                        <FacetBar label="Safe to be open" stat={openDensity} color="#3FA08A" />
+                      </div>
+                    </div>
+                  </Panel>
+                )}
+                <Panel title="Widest gaps" sub="Signed: the direction is the conversation">
+                  {facetRows.filter((r) => r.gap !== 0).length === 0 ? (
+                    <p className="hint">Nobody is read differently on the two facets.</p>
+                  ) : (
+                    facetRows
+                      .filter((r) => r.gap !== 0)
+                      .slice(0, 5)
+                      .map((r) => (
+                        <BarRow
+                          key={r.no}
+                          name={nameOf(r.no)}
+                          avatar={fillOfFunc(r.no)}
+                          meta={r.gap > 0 ? 'Depended on, less confided in' : 'Confided in, less depended on'}
+                          value={`${r.gap > 0 ? '+' : ''}${r.gap}`}
+                          share={Math.abs(r.gap) / Math.max(1, Math.abs(facetRows[0]?.gap ?? 1))}
+                          fill={r.gap > 0 ? '#0F7A63' : '#3FA08A'}
+                          active={activeNo === r.no}
+                          {...personProps(r.no, () => ({
+                            title: nameOf(r.no),
+                            sub: funcOf(r.no),
+                            rows: [
+                              ['Delivers as promised', String(r.reliabilityIn)],
+                              ['Safe to be open', String(r.opennessIn)],
+                            ],
+                          }))}
+                        />
+                      ))
+                  )}
+                </Panel>
+              </>
+            }
+            band={
+              <DetailTable<FacetRow>
+                rows={facetRows}
+                rowKey={(r) => r.no}
+                personNo={(r) => r.no}
+                activeNo={activeNo}
+                personProps={personProps}
+                tip={(r) => ({
+                  title: nameOf(r.no),
+                  sub: funcOf(r.no),
+                  rows: [
+                    ['Delivers as promised', String(r.reliabilityIn)],
+                    ['Safe to be open', String(r.opennessIn)],
+                  ],
+                })}
+                empty="Nobody is on the roster yet."
+                columns={[
+                  nameCol<FacetRow>(),
+                  funcCol<FacetRow>(),
+                  {
+                    key: 'rel',
+                    head: 'Delivers',
+                    note: 'ties in',
+                    right: true,
+                    width: 110,
+                    sort: (a, b) => a.reliabilityIn - b.reliabilityIn,
+                    cell: (r) => r.reliabilityIn,
+                    bar: (r) => r.reliabilityIn / colMax.facet,
+                    barColor: '#0F7A63',
+                  },
+                  {
+                    key: 'open',
+                    head: 'Safe to be open',
+                    note: 'ties in',
+                    right: true,
+                    width: 150,
+                    sort: (a, b) => a.opennessIn - b.opennessIn,
+                    cell: (r) => r.opennessIn,
+                    bar: (r) => r.opennessIn / colMax.facet,
+                    barColor: '#3FA08A',
+                  },
+                  {
+                    key: 'gap',
+                    head: 'Gap',
+                    right: true,
+                    width: 96,
+                    sort: (a, b) => Math.abs(a.gap) - Math.abs(b.gap),
+                    cell: (r) =>
+                      r.gap === 0 ? (
+                        <span className="ins-dash">level</span>
+                      ) : (
+                        <span className="ins-delta">{r.gap > 0 ? `+${r.gap}` : r.gap}</span>
+                      ),
+                  },
+                ]}
+              />
+            }
+          />
+        ) : null}
+      </div>
+      </div>
+
+      {tip.layer}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------ the two panes
+
+/**
+ * The compare pair, measuring itself.
+ *
+ * It is the one centre that is not a single picture, and the one that has to
+ * lay out in the pixels it is given: two panes side by side each solve in their
+ * own virtual box, and the box's aspect has to match the pane's or sixty nodes
+ * letterbox into a strip. The height is rounded to a coarse step so dragging a
+ * window edge does not re-run the simulation on every frame.
+ */
+function ComparePair({
+  nodes,
+  edges,
+  cut,
+  visible,
+  groupColor,
+  ringed,
+  activeNo,
+  onSelect,
+  onHover,
+  onLeave,
+}: {
+  nodes: CohortNetwork['nodes'];
+  edges: CohortNetwork['edges'];
+  cut: number;
+  visible: Set<number>;
+  groupColor: Map<string, string>;
+  ringed: ReadonlySet<number>;
+  activeNo: number | null;
+  onSelect: (no: number) => void;
+  onHover: (no: number, e: React.MouseEvent, ctx: { pane: string; inDegree: number }) => void;
+  onLeave: () => void;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [size, setSize] = useState({ w: 900, h: 460 });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      // Layout size, not the rendered rectangle: the pane sits inside the
+      // zoom transform and its client rect scales with it.
+      setSize({ w: Math.max(320, el.offsetWidth), h: Math.max(220, el.offsetHeight) });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const stacked = size.w < 480;
+  const panePxW = Math.max(240, stacked ? size.w - 20 : (size.w - 30) / 2);
+  const panePxH = Math.max(200, stacked ? (size.h - 30) / 2 : size.h - 20);
+  const paneScale = 1000 / panePxW;
+  const paneBox: LayoutBox = useMemo(
+    // Rounded to 40 units: a two-pixel resize must not re-solve sixty nodes.
+    () => ({ w: 1000, h: Math.max(400, Math.round((panePxH * paneScale) / 40) * 40) }),
+    [paneScale, panePxH],
+  );
+  const positions = useMemo(() => {
+    const ties = unionTies(edges, [TRUST_LENS, POWER_LENS], cut);
+    const inTies = new Map<number, number>();
+    for (const t of ties) inTies.set(t.to, (inTies.get(t.to) ?? 0) + 1);
+    return forceMapLayout(
+      nodes.map((n) => ({
+        no: n.no,
+        inTies: inTies.get(n.no) ?? 0,
+        group: n.func.trim() || '—',
+      })),
+      ties.map((t) => ({ from: t.from, to: t.to, weight: 0.6 })),
+      new Map(),
+      paneBox,
+    );
+  }, [cut, edges, nodes, paneBox]);
+
+  return (
+    <div className="ins-panes" ref={ref}>
+      <CompareView
+        nodes={nodes}
+        edges={edges}
+        visible={visible}
+        positions={positions}
+        paneBox={paneBox}
+        stacked={stacked}
+        cut={cut}
+        fillOf={(n) => groupColor.get(n.func.trim()) ?? MUTED_GREY}
+        focus={null}
+        selectedNo={activeNo}
+        matches={null}
+        showLabels
+        ringed={ringed}
+        onSelect={onSelect}
+        onHover={onHover}
+        onLeave={onLeave}
+        labelSize={Math.round(12.5 * paneScale)}
+      />
+    </div>
+  );
+}
+
+// ------------------------------------------------------------- small lists
+
+function RankList({
+  entries,
+  bold,
+  fill,
+  activeNo,
+  nameOf,
+  funcOf,
+  colorOf,
+  unit,
+  personProps,
+}: {
+  entries: { no: number; count: number }[];
+  bold: ReadonlySet<number>;
+  fill: string;
+  activeNo: number | null;
+  nameOf: (no: number) => string;
+  funcOf: (no: number) => string;
+  colorOf: (no: number) => string;
+  unit: string;
+  personProps: PersonProps;
+}) {
+  if (entries.length === 0) return <p className="hint">Nobody has reached the tie line here yet.</p>;
+  const max = entries[0]!.count;
+  return (
+    <>
+      {entries.map((e, i) => (
+        <BarRow
+          key={e.no}
+          rank={i + 1}
+          avatar={colorOf(e.no)}
+          name={nameOf(e.no)}
+          meta={funcOf(e.no)}
+          value={String(e.count)}
+          share={max > 0 ? e.count / max : 0}
+          fill={fill}
+          bold={bold.has(e.no)}
+          active={activeNo === e.no}
+          {...personProps(e.no, () => ({
+            title: nameOf(e.no),
+            sub: funcOf(e.no),
+            rows: [[capitalise(unit), String(e.count)]],
+          }))}
+        />
+      ))}
+    </>
+  );
+}
+
+interface QuadEntry {
+  no: number;
+  trustCount: number;
+  powerCount: number;
+  gap: number;
+}
+
+function QuadrantList({
+  entries,
+  fill,
+  activeNo,
+  nameOf,
+  funcOf,
+  colorOf,
+  personProps,
+}: {
+  entries: QuadEntry[];
+  fill: string;
+  activeNo: number | null;
+  nameOf: (no: number) => string;
+  funcOf: (no: number) => string;
+  colorOf: (no: number) => string;
+  personProps: PersonProps;
+}) {
+  if (entries.length === 0) return <p className="hint">Nobody sits in this quadrant.</p>;
+  const max = entries[0]!.gap || 1;
+  return (
+    <>
+      {entries.map((e) => (
+        <BarRow
+          key={e.no}
+          avatar={colorOf(e.no)}
+          name={nameOf(e.no)}
+          meta={funcOf(e.no)}
+          value={`${e.trustCount} · ${e.powerCount}`}
+          share={e.gap / max}
+          fill={fill}
+          active={activeNo === e.no}
+          {...personProps(e.no, () => ({
+            title: nameOf(e.no),
+            sub: funcOf(e.no),
+            rows: [
+              ['Trust ties received', String(e.trustCount)],
+              ['Power-over ties received', String(e.powerCount)],
+            ],
+          }))}
+        />
+      ))}
+    </>
+  );
+}
+
+// ------------------------------------------------------------ small helpers
+
+function outwardShare(r: SilosMemberRow): number {
+  const total = r.withinTies + r.outTies;
+  return total === 0 ? 0 : r.outTies / total;
+}
+
+/** The unit under a divergence column header — the axes change with coverage. */
+function r0Note(points: readonly { normalised: boolean }[]): string {
+  return points[0]?.normalised ? 'per rater' : 'ties';
+}
+
+function halfSentence(lens: string, t: ConcentrationTable, roster: number): string {
+  if (t.total === 0 || t.halfCount === 0) return `No ${lens} ties have been received yet.`;
+  const pct = Math.round((t.halfCount / Math.max(1, roster)) * 100);
+  return `${t.halfCount} of ${roster} people — ${pct}% of the group — hold half of all ${lens} ties received.`;
+}
+
+// ------------------------------------------------------- the finding lines
+//
+// One sentence per tab, written from the numbers rather than about them. They
+// are deliberately flat: the caption under each carries the interpretation, and
+// a finding that editorialised twice would be an opinion wearing a bar chart.
+
+function anchorFinding(
+  a: { trusted: { no: number; count: number }[]; influential: { no: number; count: number }[]; both: Set<number> },
+  nameOf: (no: number) => string,
+): string | null {
+  const t = a.trusted[0];
+  const i = a.influential[0];
+  if (!t && !i) return null;
+  // The common case worth saying once rather than twice: the same person tops
+  // both lists.
+  if (t && i && t.no === i.no) {
+    return `${nameOf(t.no)} tops both lists — ${t.count} trust ${
+      t.count === 1 ? 'tie' : 'ties'
+    } received and ${i.count} on power over.`;
+  }
+  const parts: string[] = [];
+  if (t) parts.push(`the group leans on ${nameOf(t.no)} most (${t.count} trust ${t.count === 1 ? 'tie' : 'ties'})`);
+  if (i) parts.push(`${nameOf(i.no)} carries the most weight in decisions (${i.count})`);
+  const overlap =
+    a.both.size > 0
+      ? ` ${joinNames([...a.both].map(nameOf))} ${a.both.size === 1 ? 'holds' : 'hold'} both.`
+      : ' Nobody holds both.';
+  return `${capitalise(parts.join('; '))}.${overlap}`;
+}
+
+function divergenceFinding(lists: { watch: unknown[]; underused: unknown[] }): string {
+  const w = lists.watch.length;
+  const u = lists.underused.length;
+  if (w === 0 && u === 0) return 'Trust and influence sit with the same people here — nobody falls off the diagonal.';
+  return `${w} ${w === 1 ? 'person holds' : 'people hold'} influence ahead of trust; ${u} ${
+    u === 1 ? 'is trusted' : 'are trusted'
+  } ahead of their influence.`;
+}
+
+function bridgeFinding(bridges: { no: number; score: number }[], nameOf: (no: number) => string): string | null {
+  const top = bridges[0];
+  if (!top) return null;
+  return `${nameOf(top.no)} carries more of the group's connection than anyone else; ${
+    bridges.length === 1 ? 'no one else routes traffic at all' : `${bridges.length - 1} others also sit between people`
+  }.`;
+}
+
+function peripheryFinding(total: number, isolates: number): string | null {
+  if (total === 0) return null;
+  return `${total} ${total === 1 ? 'person sits' : 'people sit'} at the edge of both lenses${
+    isolates > 0 ? `, ${isolates} of them with no positive ties at all` : ''
+  }.`;
+}
+
+function oneWayFinding(count: number, widest: string | null): string | null {
+  if (count === 0) return null;
+  return `${count} ${count === 1 ? 'tie runs' : 'ties run'} one way${widest ? `; the widest is ${widest}` : ''}.`;
+}
+
+function clusterFinding(clusters: number): string {
+  if (clusters === 0) return 'Trust has not pooled into any cluster yet.';
+  if (clusters === 1) return 'Trust holds together as one cluster rather than pooling into pockets.';
+  return `Trust has pooled into ${clusters} distinct clusters.`;
+}
+
+function spreadFinding(spread: { name: string; concentration: number | null }[]): string | null {
+  const read = spread
+    .map((l) => ({ name: l.name.toLowerCase(), reading: concentrationReading(l.concentration) }))
+    .filter((l): l is { name: string; reading: string } => l.reading !== null);
+  if (read.length === 0) return null;
+  // Both lenses landing on the same reading is one sentence, not two.
+  if (read.length > 1 && read.every((l) => l.reading === read[0]!.reading)) {
+    return `${capitalise(joinNames(read.map((l) => l.name)))} are both ${read[0]!.reading}.`;
+  }
+  return `${capitalise(read.map((l) => `${l.name} is ${l.reading}`).join('; '))}.`;
+}
+
+function capitalise(s: string): string {
+  return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
+}

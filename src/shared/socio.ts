@@ -78,6 +78,27 @@ export const SOCIO_SCALE_SHORT_LABELS = ['Not at all', 'Slightly', 'Moderately',
  */
 export const SOCIO_SUPPORT_GAP_ITEM = 12;
 
+/**
+ * The two facets the Trust block is read along when a finer lens is wanted.
+ *
+ * Item 8 is *reliability* trust — delivery on time, as promised, at a quality
+ * you can build on. Item 9 is *openness* trust, the psychological-safety
+ * facet — that you could admit a mistake or ask for help without fear it would
+ * be used against you. The two come apart in real groups: a team can be
+ * entirely dependable and still unsafe to be wrong in front of, and averaging
+ * them into one Trust figure hides exactly that.
+ *
+ * Item 10 is deliberately absent from this split. It is double-barrelled —
+ * "does what they say they will" (reliability) *and* "shares information
+ * openly, including difficult news, early" (openness) — so it spans both
+ * facets and cannot be assigned to either without inventing a reading the
+ * respondent never gave. It is excluded pending a client decision on whether
+ * to split the item in a future revision of the instrument. It still counts in
+ * full toward the overall Trust block, which is unchanged.
+ */
+export const SOCIO_RELIABILITY_ITEM = 8;
+export const SOCIO_OPENNESS_ITEM = 9;
+
 export const SOCIO_BLOCKS: readonly SocioBlock[] = [
   {
     key: 'power_to',

@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import type { AdminRole } from '../../../src/shared/types.js';
+import { roleLabel } from '../../../src/shared/roles.js';
 
 /**
  * Page head — the loudest of the three heading levels in the console.
@@ -454,7 +455,7 @@ export function StatusPill({ status }: { status: string }) {
 export function RolePill({ role }: { role: AdminRole }) {
   return (
     <span className={`pill ${role === 'superadmin' ? 'pill-accent' : 'pill-plain'} pill-xs`}>
-      {role === 'superadmin' ? 'Super admin' : 'Admin'}
+      {roleLabel(role)}
     </span>
   );
 }

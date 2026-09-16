@@ -67,10 +67,12 @@ function cohortOf(row: CohortReportRow): CohortRow {
     organisation: row.organisation,
     status: row.status,
     min_raters: row.min_raters,
-    // Not selected by the report query and not read by rendering: whether the
-    // completion screen promises a report has no bearing on what the report says.
+    // Not selected by the report query and not read by rendering: how someone
+    // proved who they were on the way in, and whether the completion screen
+    // promises a report, have no bearing on what the report says.
     share_reports: 0,
     otp_required: 0,
+    link_only_identity: 0,
     tie_threshold: row.tie_threshold,
     min_rated_targets: row.min_rated_targets,
     created_at: row.cohort_created_at,

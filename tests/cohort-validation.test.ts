@@ -5,8 +5,15 @@ import {
   cohortCreateSchema,
   cohortIdentitySchema,
   cohortUpdateSchema,
+  reportsToError,
+  rosterMemberSchema,
   rosterSetSchema,
 } from '../src/worker/lib/validation.js';
+import {
+  LINK_ONLY_REFUSAL,
+  cohortIdentityMode,
+  cohortIdentityPatch,
+} from '../src/shared/cohort-identity.js';
 import { roundName } from '../src/worker/lib/cohort.js';
 import { cohortPdfName } from '../src/worker/lib/cohort-report-render.js';
 
@@ -72,6 +79,87 @@ describe('cohortUpdateSchema', () => {
   });
 });
 
+describe('the identity flags on a cohort update', () => {
+  it('accepts either flag on its own, and both together', () => {
+    expect(cohortUpdateSchema.parse({ linkOnlyIdentity: true })).toEqual({ linkOnlyIdentity: true });
+    expect(cohortUpdateSchema.parse({ otpRequired: true })).toEqual({ otpRequired: true });
+    expect(cohortUpdateSchema.parse({ otpRequired: false, linkOnlyIdentity: true })).toEqual({
+      otpRequired: false,
+      linkOnlyIdentity: true,
+    });
+  });
+
+  it('refuses anything that is not a boolean, rather than coercing it', () => {
+    expect(cohortUpdateSchema.safeParse({ linkOnlyIdentity: 'true' }).success).toBe(false);
+    expect(cohortUpdateSchema.safeParse({ linkOnlyIdentity: 1 }).success).toBe(false);
+    expect(cohortUpdateSchema.safeParse({ linkOnlyIdentity: null }).success).toBe(false);
+  });
+
+  /**
+   * The same defaulted-optional trap the rest of this schema was built to
+   * avoid. If the field defaulted, a PATCH that only renamed a cohort would
+   * carry `linkOnlyIdentity: false` with it and quietly reopen the shared link
+   * on a cohort a facilitator had deliberately shut.
+   */
+  it('stays absent when the patch says nothing about it', () => {
+    const parsed = cohortUpdateSchema.parse({ name: 'Acme leadership' });
+    expect('linkOnlyIdentity' in parsed).toBe(false);
+    expect('otpRequired' in parsed).toBe(false);
+  });
+});
+
+describe('the three identity modes', () => {
+  it('reads the stored flags as the one setting a facilitator chose', () => {
+    expect(cohortIdentityMode({ otpRequired: false, linkOnlyIdentity: false })).toBe('open');
+    expect(cohortIdentityMode({ otpRequired: true, linkOnlyIdentity: false })).toBe('otp');
+    expect(cohortIdentityMode({ otpRequired: false, linkOnlyIdentity: true })).toBe('link_only');
+  });
+
+  /**
+   * The fourth combination is not a fourth mode. With the typed-identity step
+   * gone there is nothing left for a code to verify, so `otpRequired` is not
+   * consulted — which is exactly what makes it safe to leave stored.
+   */
+  it('ignores a code requirement while personal links are the only door', () => {
+    expect(cohortIdentityMode({ otpRequired: true, linkOnlyIdentity: true })).toBe('link_only');
+  });
+
+  it('sets both flags for the two modes that still ask for an email', () => {
+    expect(cohortIdentityPatch('open')).toEqual({ linkOnlyIdentity: false, otpRequired: false });
+    expect(cohortIdentityPatch('otp')).toEqual({ linkOnlyIdentity: false, otpRequired: true });
+  });
+
+  /**
+   * The point of the omission: a facilitator who runs a round on personal links
+   * and switches back must get the code requirement they had, not a silent
+   * downgrade to the open door.
+   */
+  it('says nothing about the code requirement when switching to personal links', () => {
+    const patch = cohortIdentityPatch('link_only');
+    expect(patch.linkOnlyIdentity).toBe(true);
+    expect('otpRequired' in patch).toBe(false);
+  });
+
+  it('round-trips every mode through the flags it produces', () => {
+    for (const mode of ['open', 'otp', 'link_only'] as const) {
+      const patch = cohortIdentityPatch(mode);
+      // Whatever was stored before, applied under the patch's own rules.
+      const stored = { otpRequired: true, linkOnlyIdentity: true };
+      expect(
+        cohortIdentityMode({
+          otpRequired: patch.otpRequired ?? stored.otpRequired,
+          linkOnlyIdentity: patch.linkOnlyIdentity,
+        }),
+      ).toBe(mode);
+    }
+  });
+
+  it('states the refusal once, so every door words it the same way', () => {
+    expect(LINK_ONLY_REFUSAL).toContain('personal invitation links');
+    expect(LINK_ONLY_REFUSAL).toContain('cannot start the exercise');
+  });
+});
+
 describe('cohortIdentitySchema', () => {
   it('asks for the enrolled email and nothing else — no roster choice exists', () => {
     const parsed = cohortIdentitySchema.parse({ email: ' Priya@Acme.com ' });
@@ -98,6 +186,71 @@ describe('rosterSetSchema', () => {
   it('rejects an empty roster and a nameless row', () => {
     expect(rosterSetSchema.safeParse({ members: [] }).success).toBe(false);
     expect(rosterSetSchema.safeParse({ members: [{ name: '' }] }).success).toBe(false);
+  });
+});
+
+describe('the optional member attributes', () => {
+  /**
+   * The bug this exists to prevent is the one `cohortUpdateSchema` above
+   * already had once: a defaulted optional. If either attribute defaulted to
+   * null, every roster paste — which carries three columns and says nothing
+   * about tenure or reporting line — would wipe the attributes a facilitator
+   * had typed in by hand, and every PATCH that renamed someone would do the
+   * same. Absent has to stay absent, distinct from an explicit null.
+   */
+  it('leaves an unmentioned attribute absent rather than defaulting it to null', () => {
+    const parsed = rosterSetSchema.parse({ members: [{ name: 'Priya Raman' }] });
+    expect(parsed.members[0]).toEqual({ name: 'Priya Raman', func: '', email: '' });
+    expect('tenureBand' in parsed.members[0]).toBe(false);
+    expect('reportsTo' in parsed.members[0]).toBe(false);
+  });
+
+  it('keeps an explicit null, which is how an attribute is cleared', () => {
+    const parsed = rosterMemberSchema.parse({ name: 'Priya', tenureBand: null, reportsTo: null });
+    expect(parsed.tenureBand).toBeNull();
+    expect(parsed.reportsTo).toBeNull();
+  });
+
+  it('accepts a band from the list and a roster position', () => {
+    const parsed = rosterMemberSchema.parse({ name: 'Priya', tenureBand: '3-7y', reportsTo: 4 });
+    expect(parsed.tenureBand).toBe('3-7y');
+    expect(parsed.reportsTo).toBe(4);
+  });
+
+  it('refuses a band nobody defined and a position that is not one', () => {
+    expect(rosterMemberSchema.safeParse({ name: 'P', tenureBand: '2y' }).success).toBe(false);
+    expect(rosterMemberSchema.safeParse({ name: 'P', reportsTo: 0 }).success).toBe(false);
+    expect(rosterMemberSchema.safeParse({ name: 'P', reportsTo: 2.5 }).success).toBe(false);
+  });
+});
+
+describe('reportsToError', () => {
+  const roster = new Set([1, 2, 3]);
+
+  it('treats absent and null as acceptable — not recorded is the common case', () => {
+    expect(reportsToError(undefined, 1, roster)).toBeNull();
+    expect(reportsToError(null, 1, roster)).toBeNull();
+  });
+
+  it('accepts a colleague who is on the roster', () => {
+    expect(reportsToError(2, 1, roster)).toBeNull();
+  });
+
+  it('refuses a line drawn to the member themselves', () => {
+    expect(reportsToError(1, 1, roster)).toMatch(/cannot report to themselves/);
+  });
+
+  it('refuses a position that is not on this cohort', () => {
+    expect(reportsToError(9, 1, roster)).toMatch(/not on this roster/);
+  });
+
+  /**
+   * Adding someone to the roster asks with their position-to-be, which is not
+   * yet on the cohort — so it fails the existence check, which is the right
+   * refusal for a person who cannot yet report to anyone but themselves.
+   */
+  it('has no self to compare against when the member has no position yet', () => {
+    expect(reportsToError(2, null, roster)).toBeNull();
   });
 });
 

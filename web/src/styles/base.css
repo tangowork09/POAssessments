@@ -19,7 +19,14 @@
   /* ink */
   --ink:#0C1421;
   --ink-2:#3D4859;
-  --ink-3:#6A7688;
+  /* ink-3 is the console's muted text, and it sits on four different grounds.
+     At its previous #6A7688 it cleared 4.5:1 on white alone and fell to 4.17:1
+     on surface-3 — so the same .hint passed or failed depending on which panel
+     it landed in. Darkened along its own hue until it clears 4.5:1 on every
+     ground the design defines (white 5.30, surface-2 5.11, surface-3 4.80,
+     bg 4.93, warn-soft 5.08, accent-soft 4.72). ink-4 stays where it is and is
+     for non-text only: borders, rules, decorative marks. */
+  --ink-3:#616C80;
   --ink-4:#8D97A6;
 
   /* the one accent */
@@ -199,7 +206,8 @@ svg{ display:block; }
   transition:border-color .15s ease-out, box-shadow .15s ease-out, background-color .15s ease-out;
 }
 @media (max-width:720px){ .control{ height:48px; } }
-.control::placeholder{ color:var(--ink-4); }
+/* ink-4 is 2.95:1 on white — a placeholder is text and needs 4.5:1. */
+.control::placeholder{ color:var(--ink-3); }
 .control:hover{ border-color:var(--line-3); }
 .control:focus{ outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
 select.control{

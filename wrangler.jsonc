@@ -60,6 +60,17 @@
     "MAIL_REPLY_TO": "",
     "ADMIN_EMAIL": "admin@example.com",
     "ADMIN_PASSWORD": "ChangeMe!2026",
+    // The shared cohort-only facilitator account. Deliberately the same
+    // credential pair in every environment so one login works everywhere; it
+    // reaches Cohorts and nothing else, and the worker refuses it every other
+    // admin route. Being a var rather than a secret, this password is in the
+    // repository — anyone who can read the repo can sign in to any deployment
+    // as this account. To take it off the shared value in production without
+    // touching code:
+    //   npx wrangler secret put COHORT_ADMIN_PASSWORD --env production
+    // A secret of the same name overrides the var below.
+    "COHORT_ADMIN_EMAIL": "cohorts@poassessments.com",
+    "COHORT_ADMIN_PASSWORD": "CohortsOnly!2026",
     "LINK_TOKEN_SECRET": "dev-only-link-secret-change-me",
     "JWT_SECRET": "dev-only-jwt-secret-change-me"
   },
@@ -93,6 +104,9 @@
         // the no-reply sender is a machine address and nothing reads it.
         "MAIL_REPLY_TO": "support@poassessments.com",
         "ADMIN_EMAIL": "admin@poassessments.com",
+        // Same pair as development on purpose — see the note above.
+        "COHORT_ADMIN_EMAIL": "cohorts@poassessments.com",
+        "COHORT_ADMIN_PASSWORD": "CohortsOnly!2026",
         "REPORT_CC_EMAIL": "nivisaxena@gmail.com"
       },
       "d1_databases": [

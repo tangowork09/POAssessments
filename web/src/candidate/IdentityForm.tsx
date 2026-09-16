@@ -3,24 +3,33 @@
  * the facilitator has switched two-way binding on, the six-digit code mailed
  * to it.
  *
- * There is no name picker in either mode. A list of who is in the group is the
+ * There is no name picker in any mode. A list of who is in the group is the
  * facilitator's information, and a link that reaches the wrong inbox must not
  * hand over sixty names. The enrolled email is the claim; with OTP on, the
  * mailed code is the proof the inbox is actually held by whoever is typing.
+ *
+ * A cohort set to personal links only has no claim to make at all on the shared
+ * link: it draws a dead end instead of a form, because a form that will be
+ * refused whatever is typed into it is worse than no form — it tells the
+ * respondent to keep guessing.
  */
 
 import { useEffect, useRef, useState } from 'react';
 import { ApiError } from '../lib/api.js';
+import { LINK_ONLY_REFUSAL } from '../../../src/shared/cohort-identity.js';
 import type { CandidateCohort } from '../../../src/shared/types.js';
 
 export function IdentityForm({
   cohort,
+  linkKind,
   initialEmail,
   onSubmit,
   onRequestCode,
   onBack,
 }: {
   cohort: CandidateCohort;
+  /** Which door this respondent arrived through. A personal link is never barred. */
+  linkKind: 'personal' | 'generic';
   initialEmail: string;
   onSubmit: (identity: { email: string; otp?: string }) => Promise<void>;
   /** Asks the server to mail a code; resolves with its lifetime in minutes. */
@@ -124,6 +133,35 @@ export function IdentityForm({
     } finally {
       setBusy(false);
     }
+  }
+
+  // No email form and no code step: on this cohort the shared link is not a
+  // way in, and the server refuses the claim whatever arrives. Saying so here
+  // is the whole difference between "your link is broken" and "you have the
+  // wrong link, look in your inbox for the right one".
+  if (cohort.linkOnly && linkKind === 'generic') {
+    return (
+      <div className="stage">
+        <div className="card formcard is-identity rise">
+          <div className="card-body">
+            <span className="eyebrow">Wrong link</span>
+            <h2 className="display">Look for your own invitation</h2>
+            <p className="lede">{LINK_ONLY_REFUSAL}</p>
+            <p className="hint" style={{ marginTop: 14 }}>
+              Every person in {cohort.name} was sent a link of their own, which signs them in
+              without anything to type. Check your inbox — and your spam folder — for it. If you
+              cannot find it, ask your facilitator to send yours again.
+            </p>
+          </div>
+
+          <div className="form-foot">
+            <button type="button" className="btn btn-ghost" onClick={onBack}>
+              Back
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (step === 'code') {

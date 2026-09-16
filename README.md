@@ -89,13 +89,55 @@ by accident.
 
 ### Administrator roles
 
-| Role | Branding | Everything else |
-| --- | --- | --- |
-| `superadmin` | yes | yes |
-| `admin` | **no** — nav item hidden, routes answer 403 | yes |
+| Role | Cohorts | Dashboard, assessments, candidates, invites, links | Activity, branding |
+| --- | --- | --- | --- |
+| `superadmin` | yes | yes | yes |
+| `admin` | yes | yes | **no** — nav item hidden, routes answer 403 |
+| `cohort_admin` | yes | **no** — nav items hidden, routes answer 403 | no |
 
 The account seeded from `ADMIN_EMAIL` on first boot is the `superadmin` — it owns
 the deployment. Client administrators are created as plain `admin`.
+
+`src/shared/roles.ts` is the single answer to "may this role do that". The worker
+guards and the console navigation both read it, so an area cannot be hidden in
+the UI while its routes stay open, or the reverse. Adding an area means adding
+one line to `ACCESS`.
+
+#### The cohort-only account
+
+`cohort_admin` is a facilitator: the Cohorts panel and nothing else. The console
+renders one nav item, drops the group heading above it, and opens on
+`/admin/cohorts` — there is no dashboard for it to land on. Every other admin
+route answers `403 {"error":"Your account manages cohorts only."}` whether it is
+reached by typing the URL or by calling the API directly.
+
+It is one shared account rather than one per person, and the same credential pair
+in every environment, seeded from `COHORT_ADMIN_EMAIL` / `COHORT_ADMIN_PASSWORD`:
+
+```
+email:    cohorts@poassessments.com
+password: CohortsOnly!2026
+```
+
+Unlike `ADMIN_*` it is **reconciled on every boot**, not seeded once — `seedAdmin`
+only ever runs into an empty table, and this account has to appear in deployments
+that are long past their first boot. The configured password is therefore
+authoritative: rotating it is a config edit and a deploy, not a hand-written
+bcrypt hash in the database. The role is re-asserted each boot too, so a stray
+`UPDATE` raising the account to `admin` cannot pass unnoticed. Leave either
+variable unset in an environment and the account is not created there at all.
+
+Because it is a `var` and not a secret, **this password is in the repository** —
+anyone who can read the repo can sign in to any deployment as this account. That
+is the deliberate trade for one memorable shared login. To take production off the
+shared value without touching code:
+
+```bash
+npx wrangler secret put COHORT_ADMIN_PASSWORD --env production
+```
+
+A secret of the same name overrides the var, and the next deploy reconciles the
+stored hash to it.
 
 ---
 
@@ -289,6 +331,10 @@ boot:
 email:    admin@example.com
 password: ChangeMe!2026
 ```
+
+…alongside the shared cohort-only account described under *Administrator roles*
+(`cohorts@poassessments.com` / `CohortsOnly!2026`), which sees the Cohorts panel
+and nothing else.
 
 Sign in at <http://localhost:8787/admin>. With no `RESEND_API_KEY` set, every
 email is written to the `mail_outbox` table and echoed to the console — the

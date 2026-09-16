@@ -86,19 +86,50 @@ export function EmployeesTable({
 
   const dossierMember = dossierNo !== null ? memberByNo.get(dossierNo) ?? null : null;
   const dossierNode = dossierNo !== null ? net.nodes.find((n) => n.no === dossierNo) ?? null : null;
+  // Folded by default: the table is the appendix, the network is the page.
+  const [folded, setFolded] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('admin.network.people') !== 'open';
+    } catch {
+      return true;
+    }
+  });
+  const toggleFold = () => {
+    setFolded((v) => {
+      try {
+        localStorage.setItem('admin.network.people', v ? 'open' : 'closed');
+      } catch {
+        /* private mode */
+      }
+      return !v;
+    });
+  };
 
   return (
-    <section className="card emp-card">
+    <section className={`card emp-card${folded ? ' is-folded' : ''}`}>
       <div className="card-body">
-        <div className="emp-head">
-          <div>
+        <button
+          type="button"
+          className="emp-fold"
+          onClick={toggleFold}
+          aria-expanded={!folded}
+          aria-controls="emp-fold-body"
+        >
+          <div className="emp-fold-text">
             <h2>People</h2>
             <p className="hint">
               Every person in the group. Click anyone for their full profile — how the group rates
               them, and how it moves over time.
             </p>
           </div>
-        </div>
+          <span className="emp-fold-count">{rows.length} people</span>
+          <span className="emp-fold-chev" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </span>
+        </button>
+        <div className="emp-fold-body" id="emp-fold-body">
 
         <DataTable
           rows={rows}
@@ -182,6 +213,7 @@ export function EmployeesTable({
             },
           ]}
         />
+        </div>
       </div>
 
       {dossierNode ? (

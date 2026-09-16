@@ -1,0 +1,29 @@
+-- Personal links as the only door into a cohort, off by default.
+--
+-- Migration 0017 closed with the observation that per-member magic links need
+-- no flag of their own: one unguessable link each, emailed, generated up front
+-- from the roster. That is true of *issuing* them. It is not true of relying on
+-- them — because issuing personal links does not take the generic link away.
+-- Both doors stay open, and the exercise is only ever as strong as its weakest
+-- one. Today, with `otp_required` off, that weakest door is wide: the shared
+-- link reaches every inbox in the group, and anyone holding it claims any
+-- roster position by typing that colleague's work email. In an organisation
+-- where everybody's address is everybody's first initial and surname, the
+-- email is a name, not a secret.
+--
+-- With `link_only_identity` on, the shared generic link stops accepting an
+-- identity claim at all. Entry is only through a personal link — the strongest
+-- identity the platform has: an unguessable token bound to one person before
+-- they ever open it, with nothing to type and nobody to impersonate. Where
+-- `otp_required` protects the email channel by proving the inbox is held, this
+-- removes the typed-identity step entirely; there is no address to guess
+-- because there is no address to type.
+--
+-- The two flags are kept apart rather than folded into one mode column. While
+-- `link_only_identity` is set, `otp_required` is simply ignored — but it is not
+-- overwritten, so a facilitator who tries personal links for a round and
+-- switches back gets the code requirement they had before rather than a silent
+-- downgrade to the open door. Per cohort, like 0017, because it is a
+-- per-engagement risk decision; default 0, so every cohort that exists behaves
+-- exactly as it did.
+ALTER TABLE cohorts ADD COLUMN link_only_identity INTEGER NOT NULL DEFAULT 0;

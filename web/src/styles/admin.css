@@ -61,7 +61,12 @@
   display:grid; gap:6px; margin-bottom:8px;
 }
 .side-card b{ color:var(--ink); font-size:11px; font-weight:650; letter-spacing:.06em; text-transform:uppercase; }
-.side-card-email{ color:var(--ink-2); font-size:12.5px; word-break:break-all; }
+.side-card-email{ color:var(--ink-2); font-size:12.5px; }
+/* An address too long for the rail breaks at the @ rather than mid-word: each
+   half is its own inline box, so that is the first opportunity the line
+   breaker reaches. `anywhere` is the fallback for a half that still will not
+   fit. */
+.side-card-email > span{ display:inline-block; overflow-wrap:anywhere; }
 .side-card-role{ display:block; }
 
 .side-toggle{ display:none; }
@@ -190,7 +195,7 @@ thead th.dt-sortable:hover{ color:var(--ink-2); }
   font:inherit; font-size:11.5px; font-weight:500; color:var(--ink);
   background:var(--surface); border:1px solid var(--line-2); border-radius:var(--r-1);
 }
-.dt-filter::placeholder{ color:var(--ink-4); font-weight:450; text-transform:none; letter-spacing:0; }
+.dt-filter::placeholder{ color:var(--ink-3); font-weight:450; text-transform:none; letter-spacing:0; }
 .dt-filter:focus{ outline:2px solid var(--accent-soft, #cfe0f5); outline-offset:0; border-color:var(--accent); }
 
 .dt-none{ padding:20px 14px; color:var(--ink-3); font-size:13px; }
@@ -586,7 +591,10 @@ td.row-actions > * + *{ margin-left:6px; }
 
 /* A deactivated roster row is still shown: its position is permanently
    spoken for, and hiding it would make the numbering look like a bug. */
-tbody tr.is-muted td{ color:var(--ink-4); }
+/* The superseded-link rows in the cohort list. Muted, not unreadable: at
+   ink-4 the whole row sat at 2.95:1, and it is the row you read to decide
+   whether to put a link back. */
+tbody tr.is-muted td{ color:var(--ink-3); }
 tbody tr.is-muted td b{ font-weight:500; }
 
 textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-size:12.5px; line-height:1.6; resize:vertical; }
@@ -599,9 +607,9 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
   border:1px solid var(--line); border-radius:var(--r-3); background:var(--surface-2);
   padding:12px 14px; display:flex; flex-direction:column; gap:2px;
 }
-.co-stat-label{ font-size:10px; letter-spacing:.07em; text-transform:uppercase; color:var(--ink-4); font-weight:650; }
+.co-stat-label{ font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-2); font-weight:650; }
 .co-stat-value{ font-size:20px; font-weight:700; letter-spacing:-.03em; color:var(--ink); font-variant-numeric:tabular-nums; }
-.co-stat-note{ font-size:11px; color:var(--ink-4); }
+.co-stat-note{ font-size:12px; color:var(--ink-3); }
 
 /* Inline editing inside a table row: the full-height control is built for a
    form, and five of them in a row make it scroll. */
@@ -632,7 +640,7 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
   letter-spacing: .07em;
   text-transform: uppercase;
   font-weight: 650;
-  color: var(--ink-4);
+  color: var(--ink-2);
 }
 .slug-origin {
   font-family: var(--mono);
@@ -663,7 +671,7 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
   background: var(--ok-soft, #e4f3ec);
 }
 .slug-state.is-off {
-  color: var(--ink-4);
+  color: var(--ink-3);
   background: var(--surface-3, #eef2f5);
 }
 
@@ -683,10 +691,10 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
 .upload-zone:disabled{ opacity:.6; cursor:progress; }
 .upload-zone-icon{ color:var(--accent); }
 .upload-zone-title{ font-size:14.5px; font-weight:640; color:var(--ink); }
-.upload-zone-sub{ font-size:11.5px; color:var(--ink-3); line-height:1.45; max-width:340px; }
+.upload-zone-sub{ font-size:12.5px; color:var(--ink-3); line-height:1.5; max-width:340px; text-wrap:pretty; }
 .cohort-create-or{
   align-self:center; font-size:11px; font-weight:650; letter-spacing:.08em;
-  text-transform:uppercase; color:var(--ink-4); padding:0 2px;
+  text-transform:uppercase; color:var(--ink-3); padding:0 2px;
 }
 .cohort-create-form{ display:flex; flex-direction:column; gap:8px; justify-content:center; }
 
@@ -701,6 +709,21 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
 }
 .share-toggle > div{ min-width:0; }
 .share-toggle .btn{ flex:none; }
+
+/* The identity choice is one question with three answers, so it fills the row
+   rather than sitting beside a switch that is not there. */
+.identity-modes{ display:block; }
+.identity-choices{ display:flex; flex-direction:column; gap:4px; }
+.identity-choice{
+  display:flex; align-items:flex-start; gap:8px;
+  padding:6px 9px; border:1px solid var(--line); border-radius:var(--r-2);
+  background:var(--surface); cursor:pointer; line-height:1.4;
+  transition:border-color .15s ease-out, background-color .15s ease-out;
+}
+.identity-choice:hover{ border-color:var(--line-3); }
+.identity-choice input{ margin:2px 0 0; accent-color:var(--accent); flex:none; }
+.identity-choice.is-on{ border-color:var(--accent); background:var(--accent-soft); }
+.identity-choice.is-on b{ color:var(--accent-3); }
 
 /* ============================================================
    SIDEBAR — collapsible rail
@@ -726,34 +749,185 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
 }
 
 /* ============================================================
-   COHORT DETAIL — high-density pass
+   COHORT DETAIL
+
+   Density, not shrinkage. The earlier pass reached the density it wanted by
+   overriding every shared component inside this page — 26px buttons, 28px
+   controls, 9.5px labels — which bought about a screen and a half of vertical
+   space and cost the console its one vocabulary: a button here did not look
+   like a button anywhere else, and the smallest labels dropped under 3:1
+   against white.
+
+   This pass takes the room back from layout instead. Seven stacked panels
+   became five tabs of one subject each, so nothing needs to be small to fit,
+   and what stays compact — table rows, inline controls — is compact at sizes
+   that are still legible and still shared with the rest of the console.
    ============================================================ */
-.cohort-detail{ display:flex; flex-direction:column; gap:6px; }
-.cohort-detail .panel-head{ margin-bottom:0; }
-.cohort-detail .card-body{ padding:10px 14px; }
-.cohort-detail .card-body h2{ font-size:14px; margin:0 0 2px; }
-.cohort-detail .hint{ font-size:11.5px; line-height:1.4; }
-.cohort-detail .btn-row{ margin:8px 0; gap:6px; }
-.cohort-detail .btn-sm{ height:26px; padding:0 10px; font-size:12px; min-height:26px; }
-.cohort-detail .btn{ min-height:0; }
-.cohort-detail .co-stats{ margin-top:8px; gap:6px; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
-.cohort-detail .co-stat{ padding:5px 10px; flex-direction:row; align-items:baseline; gap:7px; }
-.cohort-detail .co-stat-label{ font-size:9.5px; }
-.cohort-detail .co-stat-value{ font-size:14px; }
-.cohort-detail .co-stat-note{ font-size:10.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.cohort-detail .linkbox{ margin:6px 0; padding:4px 4px 4px 10px; }
-.cohort-detail .linkbox code{ font-size:11px; }
-.cohort-detail tbody td{ padding:5px 8px; font-size:12.5px; }
-.cohort-detail thead th{ padding:5px 8px; }
-.cohort-detail .dt-filters th{ top:24px; padding:2px 6px 4px; }
-.cohort-detail .dt-filter{ padding:2px 6px; font-size:11px; }
-.cohort-detail .dt-foot{ padding-top:5px; font-size:11.5px; }
-.cohort-detail .control{ min-height:28px; padding:3px 8px; font-size:12.5px; }
-.cohort-detail textarea.control{ font-size:11.5px; line-height:1.45; }
-.cohort-detail .share-toggle{ margin:6px 0; padding:7px 10px; font-size:12px; }
-.cohort-detail .banner{ padding:8px 12px; font-size:12.5px; }
-.cohort-detail .slugbox{ margin:6px 0; padding:6px 10px; gap:8px; }
-.cohort-detail .slug-hint{ font-size:10.5px; }
+.cohort-detail{ display:flex; flex-direction:column; }
+
+/* ---------- the standing header ---------- */
+.co-hero{
+  background:var(--surface); border:1px solid var(--line);
+  border-radius:var(--r-4) var(--r-4) 0 0; border-bottom:0;
+  padding:18px 20px 16px;
+}
+.co-hero-top{ display:flex; align-items:flex-start; gap:12px; flex-wrap:wrap; }
+.co-back{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:32px; height:32px; flex:none; margin-top:1px; border-radius:var(--r-2);
+  color:var(--ink-2); background:var(--surface); border:1px solid var(--line-2);
+  transition:background-color .15s ease-out, color .15s ease-out, border-color .15s ease-out;
+}
+.co-back:hover{ background:var(--surface-2); color:var(--ink); border-color:var(--line-3); }
+
+.co-hero-id{ min-width:0; flex:1 1 320px; }
+.co-hero-name{
+  font-size:25px; font-weight:680; letter-spacing:-.026em; line-height:1.15;
+  color:var(--ink); text-wrap:balance;
+}
+.co-hero-meta{
+  display:flex; flex-wrap:wrap; gap:4px 10px; margin-top:4px;
+  font-size:13px; color:var(--ink-3);
+}
+/* A middot between the facts rather than around them: no leading separator on
+   a cohort with no organisation named. */
+.co-hero-meta span + span::before{ content:"·"; margin-right:10px; color:var(--line-3); }
+/* The status word is stored lowercase; it is capitalised wherever it is shown
+   so the list and the header say it the same way. */
+.co-status{ text-transform:capitalize; }
+.co-hero-status{ flex:none; margin-top:6px; }
+.co-hero-actions{ display:flex; gap:8px; flex-wrap:wrap; margin-left:auto; }
+
+/* ---------- the readings ---------- */
+.co-hero-stats{
+  display:grid; gap:10px; margin:16px 0 4px;
+  grid-template-columns:minmax(220px,1.6fr) repeat(3,minmax(120px,1fr));
+}
+@media (max-width:900px){
+  .co-hero-stats{ grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
+  .co-progress{ grid-column:1 / -1; }
+}
+.co-progress{
+  border:1px solid var(--line); border-radius:var(--r-3); background:var(--surface-2);
+  padding:10px 14px 12px; display:flex; flex-direction:column; justify-content:center; gap:8px;
+}
+.co-progress-head{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+.co-progress-val{ font-size:14px; font-weight:650; color:var(--ink); }
+.co-progress-val em{ font-style:normal; font-weight:550; color:var(--ink-3); }
+
+/* ---------- tabs ---------- */
+/* Sticky, and the hero above is not. The tabs are 40px of the screen and are
+   what you reach for from the bottom of a fifty-row roster; the readings are
+   what you take in on arrival, and a header tall enough to hold them would
+   have eaten a fifth of a laptop viewport all the way down the page. */
+.co-tabs{
+  position:sticky; top:var(--topbar-h); z-index:20;
+  display:flex; gap:2px; padding:0 20px;
+  background:var(--surface);
+  border:1px solid var(--line); border-top:0;
+  border-radius:0 0 var(--r-4) var(--r-4);
+  box-shadow:var(--shadow-1);
+  overflow-x:auto; scrollbar-width:none;
+}
+.co-tabs::-webkit-scrollbar{ display:none; }
+/* Below this the five labels cannot fit on one line, so the row is a scroller
+   and says so: the fade is the only thing that distinguishes "five tabs, one
+   clipped" from "four tabs". Above it they always fit and there is nothing to
+   hint at. */
+@media (max-width:560px){
+  .co-tabs{
+    -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 32px),transparent);
+            mask-image:linear-gradient(90deg,#000 calc(100% - 32px),transparent);
+  }
+}
+.co-tab{
+  flex:none; padding:10px 14px; font-size:13.5px; font-weight:580;
+  color:var(--ink-3); border-bottom:2px solid transparent; margin-bottom:-1px;
+  white-space:nowrap;
+  transition:color .15s ease-out, border-color .15s ease-out;
+}
+.co-tab:hover{ color:var(--ink); }
+.co-tab.is-on{ color:var(--accent); border-bottom-color:var(--accent); }
+.co-tab:focus-visible{ outline-offset:-3px; }
+
+/* Keyed on the tab, so switching replays it — 120ms of settle that says the
+   panel underneath changed, which a bare swap of two full-width tables does
+   not. */
+.co-tabpanel{
+  display:flex; flex-direction:column; gap:16px;
+  padding:16px 0 0;
+  /* `backwards`, never `both`: a fill-forwards transform stays on the panel
+     for good, and a transformed ancestor is the containing block for every
+     position:fixed overlay inside it — popovers and tooltips would then land
+     offset by the panel's own position. */
+  animation:co-tab-in .16s cubic-bezier(.22,.7,.3,1) backwards;
+}
+@keyframes co-tab-in{ from{ opacity:0; transform:translateY(4px); } to{ opacity:1; transform:none; } }
+@media (prefers-reduced-motion:reduce){ .co-tabpanel{ animation:none; } }
+/* The entrance animation fills both ways, so it leaves an identity transform
+   on the panel for good — and a transformed ancestor is the containing block
+   for anything position:fixed inside it. With the explorer in full screen the
+   panel must carry no transform at all, or "full screen" is the card's box. */
+.co-tabpanel:has(.net-explorer.is-full){ animation:none; }
+
+/* ---------- the compact scale ---------- */
+/* Everything below keeps a shared component's identity and takes one step down
+   the same ladder, rather than inventing a smaller one. */
+.cohort-detail .card-body{ padding:16px 18px; }
+.cohort-detail .card-body > .hint:first-child{ margin-top:0; }
+.cohort-detail .btn-row{ margin:12px 0; gap:8px; }
+.cohort-detail tbody td{ padding:7px 10px; font-size:13px; }
+.cohort-detail thead th{ padding:7px 10px; }
+.cohort-detail .dt-filters th{ top:27px; padding:3px 8px 5px; }
+.cohort-detail .control{ height:36px; }
+.cohort-detail .control-sm{ height:34px; }
+.cohort-detail textarea.control{ height:auto; }
+.cohort-detail .linkbox{ margin:0; }
+.cohort-detail .slugbox,
+.cohort-detail .share-toggle{ margin:12px 0 0; }
+
+/* ---------- an aside that is not an error ---------- */
+/* The rater-floor warning used to be a bold .hint, which put a sentence that
+   stops the primary button in the same grey as the paragraph explaining what
+   the panel is for. It is not a failure either, so it is not the red banner. */
+.notice{
+  display:block; padding:10px 14px; margin-bottom:12px;
+  border:1px solid var(--warn-line); border-radius:var(--r-2);
+  background:var(--warn-soft); color:var(--ink-2);
+  font-size:13px; line-height:1.5; text-wrap:pretty;
+}
+.notice b{ color:var(--warn); font-weight:640; }
+
+/* ---------- panel-body first-child spacing ---------- */
+/* A card head already carries the panel's top padding. The first action row or
+   inline form under it therefore starts flush rather than adding a second gap. */
+.btn-row-first,
+.inline-form-first{ margin-top:0; }
+.cohort-detail .btn-row-first,
+.cohort-detail .inline-form-first{ margin-top:0; }
+
+/* ---------- autosave state, said in the card head ---------- */
+/* Never had a rule: the assignments grid saves on every tick and reported it
+   as unstyled body text sitting against the heading. */
+.save-badge{
+  display:inline-flex; align-items:center; gap:6px; min-height:22px;
+  font-size:12px; font-weight:580; color:var(--ink-3); white-space:nowrap;
+  transition:color .15s ease-out;
+}
+.save-badge::before{
+  content:""; width:6px; height:6px; border-radius:50%; background:currentColor;
+}
+.save-badge:empty{ display:none; }
+.save-badge.is-saving{ color:var(--ink-3); }
+.save-badge.is-saved{ color:var(--ok); }
+.save-badge.is-error{ color:var(--danger); font-weight:640; }
+
+/* ---------- the response bar in the list table ---------- */
+.co-cellmeter-val{ display:block; font-size:13px; color:var(--ink); }
+.co-cellmeter-val em{ font-style:normal; color:var(--ink-3); }
+/* display:block because the table cell uses a <span>: the shared rule sets a
+   height, and a height on an inline box is ignored. */
+.progress-strip-sm{ display:block; height:4px; margin-top:5px; max-width:120px; }
 
 /* ============================================================
    NETWORK — the live sociometry map
@@ -826,7 +1000,7 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
 .net-ego-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .net-kv{ display:grid; grid-template-columns:1fr 1fr; gap:6px 10px; margin:8px 0; }
 .net-kv > div{ background:var(--surface); border:1px solid var(--line); border-radius:var(--r-2); padding:5px 8px; }
-.net-kv dt{ font-size:9.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-4); font-weight:650; }
+.net-kv dt{ font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-2); font-weight:650; }
 .net-kv dd{ font-size:14px; font-weight:650; color:var(--ink); font-variant-numeric:tabular-nums; margin:1px 0 0; }
 .net-list{ margin-top:10px; }
 .net-list h4{ font-size:11.5px; font-weight:650; color:var(--ink-2); margin:0 0 4px; }
@@ -899,26 +1073,8 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
 .net-spark-x{ font-size:8px; fill:var(--ink-4); }
 
 /* ============================================================
-   COHORT DETAIL — topbar, tabs, full-bleed Overview
+   COHORT NETWORK — full-bleed tab
    ============================================================ */
-.cohort-topbar{ display:flex; align-items:center; gap:12px; padding:0; margin-top:-10px; }
-.cohort-back{
-  display:inline-flex; align-items:center; justify-content:center;
-  width:32px; height:32px; flex:none; border-radius:var(--r-2);
-  color:var(--ink-2); background:var(--surface); border:1px solid var(--line-2);
-}
-.cohort-back:hover{ background:var(--surface-2); color:var(--ink); border-color:var(--ink-4); }
-.cohort-title{ font-size:22px; font-weight:720; letter-spacing:-.02em; color:var(--ink); margin:0; }
-.cohort-org{ font-size:13px; color:var(--ink-3); }
-
-.cohort-tabs{ display:flex; gap:2px; border-bottom:1px solid var(--line); margin:0; }
-.cohort-tab{
-  padding:8px 16px; font-size:13.5px; font-weight:580; color:var(--ink-3);
-  border-bottom:2px solid transparent; margin-bottom:-1px;
-}
-.cohort-tab:hover{ color:var(--ink); }
-.cohort-tab.is-on{ color:var(--accent); border-bottom-color:var(--accent); }
-
 /* The Overview network breaks out of the card chrome and fills the width, with
    a tall canvas and the metrics as a full-height right rail. */
 .net-card-bleed{ border:0; box-shadow:none; background:transparent; }
@@ -959,6 +1115,9 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
 .nx-seg-btn{ padding:5px 12px; font-size:12.5px; font-weight:580; color:var(--ink-3); border-radius:8px; }
 .nx-seg-btn:hover{ color:var(--ink); }
 .nx-seg-btn.is-on{ background:var(--surface); color:var(--accent); box-shadow:var(--shadow-1); }
+/* The rail is narrow: the same control, sized for a panel rather than a toolbar. */
+.nx-seg-sm{ display:flex; width:100%; border-radius:8px; }
+.nx-seg-sm .nx-seg-btn{ flex:1; padding:3px 7px; font-size:11px; border-radius:6px; }
 
 .nx-search{ display:inline-flex; align-items:center; gap:7px; padding:0 10px; height:34px; min-width:190px; flex:1 1 190px; max-width:280px;
   background:var(--surface-2); border:1px solid var(--line-2); border-radius:10px; color:var(--ink-4); }
@@ -1133,19 +1292,6 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
 .nx-rail-body .net-kv > div{ box-shadow:var(--shadow-1); }
 .nx-rail-body .net-list{ margin-top:14px; padding-top:12px; border-top:1px solid var(--line); }
 
-/* Info tab: same design language as the explorer — roomier cards, real stat tiles. */
-.cohort-detail .card{ border-radius:14px; }
-.cohort-detail .card-body{ padding:14px 18px; }
-.cohort-detail .card-body h2{ font-size:15px; margin:0 0 4px; }
-.cohort-detail .hint{ font-size:12px; line-height:1.45; }
-.cohort-detail .co-stats{ gap:8px; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
-.cohort-detail .co-stat{ flex-direction:column; align-items:flex-start; gap:1px; padding:9px 12px; background:var(--surface); box-shadow:var(--shadow-1); }
-.cohort-detail .co-stat-label{ font-size:9.5px; }
-.cohort-detail .co-stat-value{ font-size:20px; letter-spacing:-.02em; }
-.cohort-detail .co-stat-note{ font-size:10.5px; }
-.cohort-detail .btn-sm{ height:30px; padding:0 12px; font-size:12.5px; min-height:30px; }
-.cohort-detail .linkbox{ border-radius:10px; }
-.cohort-detail .slugbox{ border-radius:10px; }
 
 /* Right rail hero + role chips + magic-link cell */
 .rail-hero{ display:flex; align-items:center; gap:14px; margin-bottom:12px; }
@@ -1225,6 +1371,7 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
   padding:10px 12px 12px; background:var(--bg); display:flex; flex-direction:column; gap:8px;
 }
 .net-explorer.is-full .nx-stage{ position:relative; grid-template-columns:1fr; flex:1; min-height:0; }
+.net-explorer.is-full .nx-stage.is-insights{ height:auto; }
 .net-explorer.is-full .nx-canvas{ height:100%; }
 /* The rail floats over the canvas, glassy, and its own chevron shows/hides it. */
 .net-explorer.is-full .nx-rail{
@@ -1305,3 +1452,1055 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
 .pairlist-name{ font-size:12.5px; font-weight:600; color:var(--ink); }
 .pairlist-func{ font-size:11px; color:var(--ink-4); margin-left:auto; }
 .pairlist-mean{ font-size:12.5px; font-weight:700; font-variant-numeric:tabular-nums; min-width:30px; text-align:right; }
+
+/* ============================================================
+   INSIGHTS — the debrief workspace
+   ------------------------------------------------------------
+   Nine tabs, one frame, one spatial rhythm. Every tab is the same
+   three surfaces in the same three places — graph centre stage,
+   readings down the right, the per-person band along the bottom —
+   so a reader learns the geography once and then reads data.
+
+   The frame is fixed, not scrolled: at 900px of viewport height
+   and up the whole tab fits, and below that the workspace scrolls
+   inside itself rather than growing the page. Print flattens it
+   back into a column so the active tab comes out clean.
+
+   One interaction runs it: a focused person. `.is-active` /
+   `.is-on` means "this mark is that person" on every surface —
+   bars, rows, dots, map nodes, table rows — so the vocabulary is
+   learned once. Every value comes from the token ladder in
+   base.css.
+   ============================================================ */
+.nx-stage.is-insights{
+  /* A flex column, not a grid: a grid's auto row grows to its content and a
+     100%-height child grows with it, so the workspace was 3000px tall inside
+     a clipped 600px box and "scrolled inside itself" the moment anything took
+     focus. A flex child with basis 0 and min-height 0 is exactly the box.
+     `clip`, not `hidden`: a hidden box is still a scroll container, and focus
+     or find-in-page will scroll it with no way back. */
+  display:flex; flex-direction:column; min-height:560px; overflow:clip;
+  padding:2px 0 0; margin:0; border-radius:0;
+  background:transparent;
+}
+.net-explorer.is-full .nx-stage.is-insights{ margin:0; }
+/* Outside the bleed layout the explorer has no height of its own, so the
+   workspace has to name one or the whole frame collapses to its content. */
+/* Fills the viewport under the sticky chrome (site top bar + cohort tabs)
+   once the reader scrolls the workspace up to it; Present mode takes the
+   whole screen instead. */
+/* `flex:none`: inside the explorer's column the stage is a flex item, and a
+   flex item's height is its basis, not its `height` — without this the frame
+   sat at its min-height whatever the viewport. */
+.net-explorer:not(.is-full) .nx-stage.is-insights{ flex:none; height:auto; min-height:0; }
+.net-explorer:not(.is-full) .nx-stage.is-insights .insights{ flex:none; }
+.net-explorer.is-bleed:not(.is-full):has(.nx-stage.is-insights){ height:auto; min-height:0; }
+
+.insights{
+  /* Local semantic z-scale: sticky table heads, then the tooltip above
+     everything including the full-screen takeover (z 120). */
+  --z-sticky:6;
+  --z-tip:140;
+  --ease:cubic-bezier(.22,.7,.3,1);
+  display:flex; flex-direction:column; gap:8px; min-width:0; min-height:0; flex:1 1 0; height:auto;
+}
+
+/* ---------- the frame ----------
+   Graph and readings share the top row; the detail band runs the full width
+   underneath both, because a six-column table needs the width more than the
+   sidebar needs the height. */
+.ins-body{ flex:1; min-height:0; min-width:0; display:flex; gap:14px; }
+/* A question arrives: a short rise-and-fade on the whole frame, once. */
+.ins-ws{ animation:insWsIn .2s var(--ease) both; }
+@keyframes insWsIn{ from{ opacity:0; transform:translateY(4px); } }
+.ins-panels{ flex:1; min-height:0; min-width:0; display:flex; }
+.ins-ws{
+  flex:1; min-width:0; min-height:0; display:grid; gap:10px 14px;
+  grid-template-columns:minmax(0,1fr) 316px;
+  /* The picture takes a good share of the viewport; the band takes what ten
+     rows need. The frame grows to fit both and the page scrolls a little —
+     never the band, never the frame. */
+  grid-template-rows:clamp(440px, 56vh, 680px) auto;
+}
+.ins-ws.is-band-tall{ grid-template-rows:clamp(440px, 56vh, 680px) auto; }
+
+.ins-stage,
+.ins-side,
+.ins-band,
+.ins-rail{ min-width:0; min-height:0; background:var(--surface); }
+/* One drawn surface: the picture. Everything else is the same sheet, ruled. */
+/* Placement: picture top-left, table under it, readings down the whole right
+   edge — the column is the debrief's margin notes and runs the full height. */
+.ins-stage{ grid-column:1; grid-row:1; border:1px solid var(--line-2); border-radius:var(--r-4); box-shadow:var(--shadow-2); }
+.ins-side{ grid-column:2; grid-row:1 / -1; border-left:1px solid var(--line); border-radius:0; padding-left:2px; }
+.ins-band{ grid-column:1; grid-row:2; border-top:1px solid var(--line-2); border-radius:0; }
+.ins-rail{ border-right:1px solid var(--line); border-radius:0; }
+
+/* ---------- centre stage ---------- */
+.ins-stage{ display:flex; flex-direction:column; overflow:clip; }
+/* Label and controls share the first line; the headline gets the whole
+   second line, so no control can ever squeeze the sentence. */
+.ins-stage-head{
+  display:grid; grid-template-columns:minmax(0,1fr) auto; grid-template-areas:'label aside' 'head head';
+  column-gap:12px; row-gap:4px; align-items:center; flex:none;
+  padding:10px 18px 11px; border-bottom:1px solid var(--line);
+}
+.ins-stage-titles{ display:contents; }
+.ins-stage-label{ grid-area:label; }
+.ins-stage-head h3{ grid-area:head; }
+.ins-stage-aside{ grid-area:aside; }
+.ins-stage-label{
+  margin:0; display:flex; align-items:baseline; gap:6px; min-width:0;
+  font-size:12px; color:var(--ink-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.ins-stage-label b{ font-weight:640; color:var(--ink-2); }
+.ins-stage-label span{ color:var(--ink-4); }
+/* The headline is the finding: the one line read aloud in the room. */
+.ins-stage-head h3{
+  margin:0; font-size:17px; font-weight:660; line-height:1.3; letter-spacing:-.016em; color:var(--ink);
+  text-wrap:balance; max-width:64ch;
+}
+.ins-stage-head p{ margin:0; }
+.ins-stage-aside{ display:flex; align-items:center; gap:8px; }
+.ins-stage-body{
+  flex:1; min-width:0; min-height:0; position:relative; display:flex;
+  padding:4px 8px 8px;
+  background:
+    radial-gradient(circle at 28% 22%, color-mix(in srgb, var(--accent-soft) 55%, var(--surface)) 0%, var(--surface) 58%),
+    var(--surface);
+  background-clip:padding-box;
+  border-radius:0 0 var(--r-4) var(--r-4);
+}
+/* A faint dot grid: the picture is on a surface, not floating in a box. */
+.ins-stage-body::before{
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background-image:radial-gradient(var(--nx-dot) 1px, transparent 1.3px);
+  background-size:22px 22px; opacity:.55;
+  mask-image:radial-gradient(ellipse at center, #000 45%, transparent 100%);
+  -webkit-mask-image:radial-gradient(ellipse at center, #000 45%, transparent 100%);
+}
+.ins-stage-body > *{ position:relative; }
+.ins-stage-btn{
+  display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 10px 0 8px;
+  font-size:11.5px; font-weight:600; color:var(--ink-3);
+  border:1px solid var(--line-2); border-radius:var(--r-3); background:var(--surface);
+  transition:color .15s ease-out, border-color .15s ease-out;
+}
+.ins-stage-btn:hover{ color:var(--ink); border-color:var(--ink-4); }
+/* The dock lane: the unconnected, parked and labelled. */
+.ins-dock line{ stroke:var(--line-2); stroke-width:2; stroke-dasharray:6 8; stroke-linecap:round; }
+.ins-dock-label{ font-size:19px; font-weight:640; fill:var(--ink-4); letter-spacing:.02em; }
+/* A control that changes what the picture draws — a lens switch — sits on the
+   picture too, top-right, out of the headline's way. */
+.ins-stage-float{
+  position:absolute; left:12px; top:10px; z-index:1;
+  display:flex; align-items:center; gap:8px;
+  padding:3px; border-radius:var(--r-3);
+  background:var(--nx-glass); border:1px solid var(--line);
+  backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+}
+/* The legend sits on the picture, where it is read: bottom-left, on a light
+   plate so it survives a tie running under it. */
+.ins-legend-float{
+  position:absolute; left:12px; bottom:10px; z-index:1; max-width:calc(100% - 24px);
+  padding:6px 10px; border-radius:var(--r-3);
+  background:var(--nx-glass); border:1px solid var(--line);
+  backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+  pointer-events:none;
+}
+.ins-legend-float .ins-legend-row{ row-gap:4px; }
+/* The picture is a flex item, not a percentage-height block: a percentage
+   against a flex parent with no stated height is the one way an SVG in this
+   layout collapses to nothing. */
+.ins-graph,
+.insights-quad{ flex:1 1 auto; min-width:0; min-height:0; width:100%; display:block; }
+/* The compare pair lays out in the pixels it is given, so it needs a box with
+   a definite size rather than an SVG that letterboxes into one. */
+.ins-panes{ position:absolute; inset:6px 10px 10px; min-width:0; min-height:0; }
+.ins-lens-seg{ width:auto; }
+
+.ins-graph-node{ transition:opacity .2s ease-out; }
+.ins-graph-node circle{ transition:stroke .15s ease-out, stroke-width .15s ease-out; }
+.ins-graph-node:hover circle:last-of-type{ stroke:var(--ink-3); stroke-width:3.5; }
+.ins-graph-tie{ transition:opacity .2s ease-out; }
+.nxc-node circle{ transition:stroke .15s ease-out, stroke-width .15s ease-out; }
+.nxc-node:hover circle{ stroke:var(--ink-3); stroke-width:3; }
+.insights-map-name{
+  font-size:11px; font-weight:600; fill:var(--ink-2); pointer-events:none;
+  paint-order:stroke; stroke:var(--surface); stroke-width:3px;
+}
+.insights-map-name.is-active{ fill:var(--ink); }
+
+/* ---------- the readings column ----------
+   One card, ruled into sections. Three stacked cards would be nested cards,
+   which is always wrong, and the rules read as one column rather than as a
+   pile of unrelated boxes. */
+.ins-side{ display:flex; flex-direction:column; overflow-y:auto; overscroll-behavior:contain; }
+/* Sticky at the top of the column it leads: the lists beneath it scroll, the
+   sentence they are evidence for does not. */
+.ins-finding{
+  flex:none; padding:10px 16px 12px; border-bottom:1px solid var(--line);
+}
+.ins-finding:empty{ display:none; }
+/* The sentence the data produced: the lead of the whole column, and the only
+   thing on the tab written in prose. */
+.ins-finding-lead{
+  margin:0; font-size:14px; font-weight:600; line-height:1.45; color:var(--ink);
+  letter-spacing:-.005em; text-wrap:pretty;
+}
+/* The client's fixed framing under it — a different kind of writing, so a
+   different weight and a rule between them. */
+.ins-finding-note{
+  margin:0; font-size:12px; line-height:1.5; color:var(--ink-2); text-wrap:pretty;
+}
+.ins-finding-lead + .ins-finding-note{ margin-top:8px; padding-top:8px; border-top:1px solid var(--line); }
+.ins-panel{ padding:12px 16px; border-top:1px solid var(--line); }
+.ins-panel:first-child{ border-top:0; }
+.ins-panel-head{ display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+.ins-panel-title{
+  display:inline-flex; align-items:center; gap:7px;
+  font-size:12px; font-weight:660; color:var(--ink-2); letter-spacing:0;
+}
+/* A panel with an accent is a panel about one lens: mark it with a disc and
+   keep the words in ink — coloured type in five hues is a rainbow, a dot is a key. */
+.ins-panel-title.has-accent::before{
+  content:''; width:8px; height:8px; border-radius:50%; flex:none;
+  background:var(--panel-accent);
+}
+.ins-panel-head .nx-seg-sm{ margin-left:auto; width:auto; }
+.ins-panel-sub{ margin:-5px 0 9px; font-size:11.5px; line-height:1.45; color:var(--ink-3); }
+.ins-panel-body{ margin:0; font-size:12.5px; line-height:1.55; color:var(--ink-2); text-wrap:pretty; }
+.ins-panel-foot{ margin:9px 0 0; font-size:11px; line-height:1.5; color:var(--ink-3); }
+.ins-facets{ display:flex; flex-direction:column; gap:8px; }
+
+/* ---------- the detail band ---------- */
+.ins-band{ display:flex; flex-direction:column; overflow:clip; }
+.ins-band-head{
+  display:flex; align-items:baseline; gap:12px; flex:none;
+  padding:10px 4px 8px; border-bottom:1px solid var(--line);
+}
+.ins-band-head h4{ margin:0; font-size:12.5px; font-weight:640; color:var(--ink); }
+.ins-band-head span{ margin-left:auto; font-size:11.5px; color:var(--ink-3); }
+.ins-band-body{ flex:1; min-height:0; overflow:visible; }
+/* Present mode is the one fixed frame: there the band scrolls inside itself. */
+.net-explorer.is-full .ins-ws{ grid-template-rows:minmax(300px,1fr) minmax(0, 46%); }
+.net-explorer.is-full .ins-band-body{ overflow:auto; overscroll-behavior:contain; }
+.ins-band-body > .hint{ padding:16px; }
+
+/* Dense but calm: hairlines rather than borders, tabular figures so a column
+   of numbers is a column, and a sticky head because the band scrolls inside
+   itself rather than growing the page. */
+.ins-grid-wrap{ width:100%; min-width:0; }
+/* `min-width:0` undoes the sheet-wide 620px floor on tables: this one lives
+   in a flexible column and must fit it, not the other way round. */
+.ins-grid{
+  width:100%; min-width:0; table-layout:fixed; border-collapse:collapse;
+  font-variant-numeric:tabular-nums;
+}
+.ins-grid thead th{
+  position:sticky; top:0; z-index:var(--z-sticky);
+  padding:7px 8px; text-align:left; vertical-align:bottom;
+  font-size:10px; letter-spacing:.065em; text-transform:uppercase; font-weight:700;
+  color:var(--ink-3); background:var(--surface); white-space:nowrap;
+}
+/* A border on a sticky cell scrolls away from it in every engine; a shadow
+   drawn from the cell itself does not. */
+.ins-grid thead th::after{
+  content:''; position:absolute; left:0; right:0; bottom:0; height:1px; background:var(--line-2);
+}
+.ins-grid th.ta-right,
+.ins-grid td.ta-right{ text-align:right; }
+.ins-grid th.is-sortable button{
+  display:inline-flex; align-items:center; gap:6px;
+  font:inherit; letter-spacing:inherit; text-transform:inherit; color:inherit;
+  border-radius:var(--r-1); transition:color .15s ease-out;
+}
+.ins-grid th.is-sortable button:hover{ color:var(--ink); }
+.ins-grid th.is-sorted button{ color:var(--accent-3); }
+.ins-grid-arrow{ font-size:9px; color:var(--ink-4); }
+.ins-grid th.is-sorted .ins-grid-arrow{ color:var(--accent); }
+.ins-grid-note{
+  display:block; margin-top:2px;
+  font-size:9.5px; letter-spacing:0; text-transform:none; font-weight:500; color:var(--ink-3);
+}
+.ins-grid td{
+  padding:6px 8px; font-size:12px; line-height:1.4; color:var(--ink-2);
+  border-bottom:1px solid var(--line);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.ins-grid-name{ color:var(--ink); font-weight:600; }
+.ins-grid tbody tr{ transition:background-color .12s ease-out; }
+.ins-grid tbody tr.is-tappable{ cursor:pointer; }
+.ins-grid tbody tr:hover td{ background:var(--surface-2); }
+.ins-grid tbody tr.is-on td{ background:var(--accent-soft); }
+.ins-grid td .insights-tag{ margin-left:8px; }
+.ins-dash{ color:var(--ink-3); }
+.ins-delta{ font-weight:680; color:var(--ink); }
+/* The rows above the halfway line on the concentration band — the answer to
+   "how few is a few", read straight off the column. */
+.ins-half{ font-weight:700; color:var(--accent-3); }
+.ins-quadtag{ display:inline-flex; align-items:center; gap:7px; font-weight:600; }
+.ins-quadtag i{ width:7px; height:7px; border-radius:50%; flex:none; }
+
+/* ---------- keys ---------- */
+.ins-key{
+  display:inline-flex; align-items:center; gap:6px;
+  font-size:11.5px; color:var(--ink-3); white-space:nowrap;
+}
+.ins-key i{ width:9px; height:9px; border-radius:50%; flex:none; }
+.ins-key i.is-ring{ width:11px; height:11px; background:transparent; border:2px solid; }
+.ins-key b{ color:var(--ink-2); font-variant-numeric:tabular-nums; }
+.ins-legend-row{
+  display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:5px 14px;
+}
+.ins-legend-col{ display:flex; flex-direction:column; gap:7px; }
+.ins-legend-note{ font-size:11.5px; color:var(--ink-3); }
+
+/* ---------- ranked bars ---------- */
+.insights-bar{
+  display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:2px 9px;
+  align-items:center; width:100%; margin:0; padding:6px 8px;
+  text-align:left; font:inherit; color:inherit; cursor:pointer;
+  background:transparent; border:1px solid transparent; border-radius:var(--r-3);
+  transition:background-color .15s ease-out, border-color .15s ease-out;
+}
+.insights-bar + .insights-bar{ margin-top:2px; }
+.insights-bar:hover{ background:var(--surface-2); border-color:var(--line); }
+.insights-bar.is-active{ background:var(--accent-soft); border-color:var(--accent-line); }
+.insights-bar-lead{ display:inline-flex; align-items:center; gap:7px; }
+.insights-bar-lead:empty{ display:none; }
+.insights-bar-rank{
+  width:14px; flex:none; font-size:11px; font-weight:640; color:var(--ink-4);
+  font-variant-numeric:tabular-nums; text-align:right;
+}
+.insights-bar-text{ min-width:0; display:flex; flex-direction:column; gap:1px; }
+.insights-bar-name{
+  font-size:13px; font-weight:600; color:var(--ink);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.insights-bar-name.is-both{ font-weight:780; }
+.insights-bar-meta{
+  font-size:11.5px; color:var(--ink-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.insights-bar-val{ font-size:12px; color:var(--ink-2); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.insights-bar .net-bar-track{ grid-column:1 / -1; margin-top:3px; }
+
+/* ---------- row lists: periphery, one-way ties, rank gaps ---------- */
+.insights-rows{ display:flex; flex-direction:column; }
+.insights-row{
+  display:flex; align-items:center; gap:8px; width:100%; padding:8px 12px;
+  text-align:left; font:inherit; color:inherit;
+  border:1px solid transparent; border-radius:var(--r-3); background:transparent;
+  transition:background-color .15s ease-out, border-color .15s ease-out;
+}
+.insights-rows{ gap:2px; }
+.insights-row.is-tappable{ cursor:pointer; }
+.insights-row.is-tappable:hover{ background:var(--surface-2); border-color:var(--line); }
+.insights-row.is-active{ background:var(--accent-soft); border-color:var(--accent-line); }
+/* A one-way tie names two people and a verdict; in a 340px column that is two
+   lines, and forcing it onto one turned both names into ellipses. */
+.insights-row.is-oneway{ flex-wrap:wrap; row-gap:5px; }
+.insights-row.is-oneway .insights-row-name{ flex:1 0 100%; }
+/* The same two-line treatment wherever a row carries a name AND a sentence
+   about it: a rank pair beside a name in a 340px column left both as stumps
+   ("Kavya …", "Samar K…"), and a name a reader cannot read is not a row. */
+.insights-row.is-stack{ flex-wrap:wrap; row-gap:4px; }
+.insights-row.is-stack .insights-row-name{ flex:1 0 100%; }
+.insights-row-name{
+  font-size:13px; font-weight:600; color:var(--ink);
+  min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.insights-row-meta{
+  font-size:11.5px; color:var(--ink-3); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.insights-row-val{
+  margin-left:auto; font-size:12px; color:var(--ink-2); font-variant-numeric:tabular-nums; white-space:nowrap;
+}
+.insights-arrow{ color:var(--ink-3); }
+.insights-tag{
+  font-size:9.5px; letter-spacing:.045em; text-transform:uppercase; font-weight:700;
+  padding:3px 8px; border-radius:99px; white-space:nowrap;
+  color:var(--ink-2); background:var(--surface-3);
+}
+.insights-tag.is-cool{ color:var(--danger); background:var(--danger-soft); }
+.insights-tag.is-isolate{ color:var(--ink-2); border:1px dashed var(--line-3); background:transparent; }
+.insights-tag.is-tenure{ color:var(--accent-3); background:var(--accent-soft); }
+.insights-tag.is-quiet{ color:var(--ink-3); background:transparent; border:1px solid var(--line-2); }
+
+/* ---------- the silos cohesion table, in the sidebar ---------- */
+/* Fixed layout so a long function name can never push the numeric columns past
+   the column edge; the label ellipsises instead, and its tooltip carries the
+   full text. */
+/* `min-width:0` is the load-bearing declaration here, not a tidy-up: the sheet
+   sets `table{ min-width:620px }` for the wide admin data tables, and this one
+   lives in a 340px sidebar. Inheriting that floor forced the table to 620px, so
+   `width:100%` never applied and the three numeric columns were laid out past
+   x=460 — off the edge of the column, leaving a table that printed group names
+   and no numbers at all. */
+.insights-table{ width:100%; min-width:0; table-layout:fixed; border-collapse:collapse; }
+/* Numbers here are two or three glyphs and a percent sign. The narrow columns
+   are what buys the name column enough room to be a name rather than an
+   ellipsis, so they are sized to their content and not a pixel wider. */
+.insights-table th:nth-child(2){ width:40px; }
+.insights-table th:nth-child(3){ width:54px; }
+.insights-table th:nth-child(4){ width:62px; }
+.insights-table th:first-child,
+.insights-table td:first-child{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.insights-table th{
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase; color:var(--ink-3); font-weight:700;
+  text-align:left; padding:0 5px 6px; border-bottom:1px solid var(--line);
+}
+/* The header has to sit over the figures it names: `.ta-right` alone loses to
+   the element-plus-class rule above it, which is how these headers ended up
+   left-aligned over right-aligned numbers. */
+.insights-table th.ta-right{ text-align:right; }
+.insights-table td{
+  font-size:12px; color:var(--ink-2); padding:6px 5px; border-bottom:1px solid var(--line);
+  font-variant-numeric:tabular-nums;
+}
+.insights-table td:first-child{ color:var(--ink); font-weight:560; }
+.insights-table tbody tr{ transition:background-color .15s ease-out; cursor:default; }
+.insights-table tbody tr:hover{ background:var(--surface-2); }
+.insights-table tbody tr.is-on{ background:var(--accent-soft); }
+/* A suppressed group used to print two em-dashes, which reads as "no ties"
+   rather than as "withheld". */
+.insights-cell-suppressed{
+  font-size:10.5px; line-height:1.35; color:var(--ink-3);
+  text-align:right; white-space:normal; font-variant-numeric:normal;
+}
+
+/* ---------- density + concentration meters ---------- */
+.insights-meter-bars{ display:flex; flex-direction:column; gap:12px; min-width:0; }
+.insights-meter-line{ display:grid; grid-template-columns:88px minmax(0,1fr) 42px; gap:9px; align-items:center; }
+.insights-meter-label{ font-size:11.5px; color:var(--ink-3); }
+.insights-meter-val{
+  font-size:12.5px; font-weight:680; color:var(--ink); font-variant-numeric:tabular-nums; text-align:right;
+}
+.insights-meter-note{ grid-column:2 / -1; font-size:11px; color:var(--ink-3); }
+
+/* ---------- the quadrant scatter ---------- */
+.insights-quad-tint{ transition:opacity .2s ease-out; }
+.insights-quad-axis{ stroke:var(--line-2); stroke-width:1.5; }
+.insights-quad-median{ stroke:var(--ink-4); stroke-width:1.2; stroke-dasharray:6 6; opacity:.75; }
+.insights-quad-axis-label{ font-size:18px; fill:var(--ink-3); font-weight:600; }
+/* Fixed furniture sits on a solid pill above the dots, so a corner label can
+   never be read through a name and a name can never be read through it. */
+.insights-quad-pill rect{ fill:var(--surface); stroke:var(--line-2); stroke-width:1; opacity:.95; }
+.insights-quad-pill.is-active rect{ stroke:var(--ink); opacity:1; }
+.insights-quad-tick{ font-size:14.5px; fill:var(--ink-3); font-weight:600; }
+.insights-quad-corner{ font-size:17.5px; font-weight:680; letter-spacing:-.01em; opacity:.92; }
+.insights-quad-corner.is-lifted{ opacity:1; text-decoration:underline; text-underline-offset:4px; }
+.insights-quad-guide line{ stroke:var(--ink-4); stroke-width:1.5; }
+.insights-quad-name{
+  font-size:19px; font-weight:600; fill:var(--ink-2); pointer-events:none;
+  paint-order:stroke; stroke:var(--surface); stroke-width:3.5px;
+  transition:opacity .18s ease-out;
+}
+.insights-quad-name.is-active{ fill:var(--ink); font-weight:750; stroke-width:0; }
+.insights-dot{ cursor:pointer; }
+.insights-dot circle{ transition:r .16s var(--ease), opacity .16s ease-out, stroke-width .16s ease-out; }
+
+/* ---------- community hulls ---------- */
+/* Behind the nodes and out of the pointer's way: the hull is an annotation on
+   the people, and it must never be the thing a reader hovers by accident. */
+.insights-hull{
+  pointer-events:none;
+  transition:fill-opacity .18s var(--ease), stroke-opacity .18s var(--ease);
+}
+
+/* ---------- margin annotations on the bridges map ---------- */
+.insights-callout line{ stroke:var(--ink-3); stroke-width:1.6; opacity:.6; }
+.insights-callout-text{
+  font-size:26px; font-weight:700; fill:var(--ink-2); letter-spacing:-.01em;
+  font-variant-numeric:tabular-nums; pointer-events:none;
+}
+
+/* ---------- suppression, made visible ----------
+   The convention across all nine tabs: a floor that removed something says so
+   in the same grey voice everywhere, with the actual number it applied. */
+.insights-suppressed{
+  padding:10px 12px; border:1px dashed var(--line-3); border-radius:var(--r-3);
+  background:var(--surface-2);
+}
+.insights-suppressed-tag{
+  display:block; font-size:10px; letter-spacing:.06em; text-transform:uppercase;
+  font-weight:700; color:var(--ink-3);
+}
+.insights-suppressed p{ margin:6px 0 0; font-size:12px; line-height:1.55; color:var(--ink-2); }
+
+/* ---------- the one-way grid, in the detail band ---------- */
+.insights-matrix-wrap{ min-width:0; padding:12px 14px; }
+.insights-matrix{ width:100%; height:auto; display:block; }
+.insights-matrix-rule{ stroke:var(--line); stroke-width:1; }
+.insights-matrix-diag{ fill:var(--surface-3); opacity:.7; }
+.insights-matrix-band{ fill:var(--accent); opacity:.09; }
+.insights-matrix-cell{ cursor:pointer; transition:opacity .15s ease-out; }
+.insights-matrix-cell:hover{ opacity:1 !important; }
+.insights-matrix-name{
+  font-size:11px; font-weight:600; fill:var(--ink-2); cursor:pointer;
+  transition:fill .15s ease-out;
+}
+.insights-matrix-name.is-col{ font-size:10.5px; }
+.insights-matrix-name:hover{ fill:var(--ink); }
+.insights-matrix-name.is-active{ fill:var(--accent-3); font-weight:750; }
+.insights-legend{
+  display:flex; flex-wrap:wrap; gap:6px 16px; margin-top:10px; font-size:11.5px; color:var(--ink-3);
+}
+.insights-legend i{ display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px; }
+.insights-legend b{ color:var(--ink-2); font-variant-numeric:tabular-nums; }
+.insights-hintline{ margin:8px 0 0; font-size:11px; color:var(--ink-3); }
+
+/* ---------- bar reveal ----------
+   Bars grow once, when their tab arrives — the panel is keyed on the tab id,
+   so switching tabs replays it and nothing else does. The DEFAULT is fully
+   drawn: the keyframes only supply a `from`, so a printed page, a headless
+   capture or a browser that never runs the animation shows a finished bar. */
+.ins-panels .net-bar-fill{ transform-origin:left; animation:insBarIn .42s var(--ease); }
+@keyframes insBarIn{ from{ transform:scaleX(0); } }
+
+/* ---------- the shared tooltip ---------- */
+.ins-tip{
+  position:fixed; top:0; left:0; z-index:var(--z-tip);
+  max-width:280px; padding:9px 12px 10px; pointer-events:none;
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--r-3);
+  box-shadow:var(--shadow-3, 0 12px 32px rgba(12,20,33,.16));
+  opacity:0; transition:opacity .12s ease-out;
+}
+.ins-tip.is-open{ opacity:1; }
+.ins-tip b{ display:block; font-size:13px; font-weight:680; color:var(--ink); letter-spacing:-.01em; }
+.ins-tip-sub{ display:block; margin-top:2px; font-size:11.5px; color:var(--ink-3); line-height:1.4; }
+.ins-tip-rows{ margin:8px 0 0; padding:8px 0 0; border-top:1px solid var(--line); display:grid; gap:4px; }
+.ins-tip-rows > div{ display:flex; align-items:baseline; justify-content:space-between; gap:14px; }
+.ins-tip-rows dt{ font-size:11.5px; color:var(--ink-3); }
+.ins-tip-rows dd{
+  margin:0; font-size:12px; font-weight:680; color:var(--ink); font-variant-numeric:tabular-nums;
+}
+
+/* ---------- short and narrow viewports ----------
+   The frame is fixed where there is room for it. Where there is not, it never
+   scrolls inside itself — that is the one behaviour a reader cannot recover
+   from — it gives up its fixed height and lets the page scroll, with the
+   picture and the band at set heights so the table still scrolls in its own
+   box. Below 1180px of width the rail folds to numbers and the readings
+   column narrows; below 980px everything stacks (further down). */
+@media (max-height:819px){
+  .net-explorer.is-bleed:not(.is-full):has(.nx-stage.is-insights){ height:auto; min-height:0; }
+  .net-explorer:not(.is-full) .nx-stage.is-insights{ height:auto; min-height:0; }
+  .net-explorer:not(.is-full) .nx-stage.is-insights .insights{ flex:none; }
+  .net-explorer:not(.is-full) .ins-ws{ grid-template-rows:420px auto; }
+  .net-explorer:not(.is-full) .ins-ws.is-band-tall{ grid-template-rows:420px auto; }
+}
+@media (max-width:640px){
+  .ins-stage-head{ padding:10px 12px; }
+  .ins-stage-aside{ margin-left:0; width:100%; }
+  .ins-legend-row{ justify-content:flex-start; }
+}
+
+/* ---------- reduced motion ---------- */
+@media (prefers-reduced-motion: reduce){
+  .ins-panels .net-bar-fill{ animation:none; }
+  .insights-focus-chip{ animation:none; }
+  .ins-rail,
+  .ins-rail-item,
+  .ins-graph-node,
+  .ins-graph-node circle,
+  .ins-graph-tie,
+  .insights-hull,
+  .insights-dot circle,
+  .insights-quad-name,
+  .insights-quad-tint,
+  .insights-matrix-cell,
+  .insights-matrix-name,
+  .insights-bar,
+  .insights-row,
+  .ins-grid tbody tr{ transition:none; }
+}
+
+/* ---------- print ----------
+   The active tab, flattened into a column and printed whole: the tab bar and
+   every control fall away, the three surfaces stop scrolling and print at
+   their full length, and the graph keeps a real height rather than collapsing
+   to nothing in a page with no viewport. */
+@media print{
+  .ins-toolbar,
+  .ins-rail,
+  .ins-body{ display:block; }
+  .ins-stage-aside .nx-seg,
+  .ins-panel-head .nx-seg,
+  .ins-grid-arrow{ display:none; }
+  .nx-stage.is-insights,
+  .ins-panels{ display:block; height:auto; min-height:0; overflow:visible; }
+  .ins-ws{ display:block; height:auto; min-height:0; }
+  .ins-stage,
+  .ins-side,
+  .ins-band{
+    height:auto; max-height:none; overflow:visible;
+    break-inside:avoid; page-break-inside:avoid; margin-bottom:12px;
+  }
+  .ins-stage-body{ height:520px; }
+  .ins-band-body{ overflow:visible; }
+  .ins-grid thead th{ position:static; border-bottom:1px solid var(--line-2); }
+  .ins-grid thead th::after{ display:none; }
+  .insights-matrix-wrap{ overflow-x:visible; }
+}
+
+
+/* ---------- the toolbar ----------
+   One row above the workspace. Scope on the left, the focused person and the
+   reading conditions on the right, present mode at the end. Everything on it
+   is a property of the whole workspace, never of one question. */
+.ins-toolbar{
+  display:flex; align-items:center; gap:12px; flex:none; min-height:36px; min-width:0;
+}
+.ins-toolbar-end{ margin-left:auto; display:flex; align-items:center; gap:12px; min-width:0; }
+.ins-toolbar-note{ font-size:11.5px; color:var(--ink-3); white-space:nowrap; }
+.ins-toolbar .insights-focus-chip{ margin:0; }
+.ins-present{
+  display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 10px 0 9px;
+  font-size:12px; font-weight:600; color:var(--ink-2);
+  background:var(--surface); border:1px solid var(--line-2); border-radius:var(--r-3);
+  transition:color .15s ease-out, border-color .15s ease-out, background-color .15s ease-out;
+}
+.ins-present:hover{ color:var(--ink); border-color:var(--ink-4); }
+.ins-present.is-on{ color:var(--accent-3); background:var(--accent-soft); border-color:var(--accent-line); }
+
+/* Scope: one button that states the cut, a popover that makes it. */
+.ins-scope{ display:flex; align-items:center; gap:4px; min-width:0; }
+.ins-scope-btn{
+  display:inline-flex; align-items:center; gap:8px; height:30px; padding:0 9px 0 11px; min-width:0;
+  font-size:12.5px; color:var(--ink-2);
+  background:var(--surface); border:1px solid var(--line-2); border-radius:var(--r-3);
+  transition:color .15s ease-out, border-color .15s ease-out, background-color .15s ease-out;
+}
+.ins-scope-btn:hover:not(:disabled){ color:var(--ink); border-color:var(--ink-4); }
+.ins-scope-btn:disabled{ color:var(--ink-4); cursor:default; }
+.ins-scope-btn[aria-expanded="true"]{ border-color:var(--accent-line); box-shadow:0 0 0 3px var(--accent-soft); }
+.ins-scope-btn.is-scoped{ color:var(--accent-3); background:var(--accent-soft); border-color:var(--accent-line); }
+.ins-scope-key{ font-size:11px; font-weight:600; color:var(--ink-3); }
+.ins-scope-btn.is-scoped .ins-scope-key{ color:var(--accent-3); opacity:.8; }
+.ins-scope-summary{
+  font-weight:600; color:inherit; min-width:0; max-width:36ch;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.ins-scope-btn b{ font-weight:600; font-size:11.5px; color:var(--ink-3); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.ins-scope-btn.is-scoped b{ color:var(--accent-3); }
+.ins-scope-btn svg{ color:var(--ink-4); flex:none; }
+.ins-scope-clear{
+  display:grid; place-items:center; width:26px; height:26px; border-radius:50%;
+  font-size:16px; line-height:1; color:var(--ink-3);
+  transition:background-color .15s ease-out, color .15s ease-out;
+}
+.ins-scope-clear:hover{ background:var(--surface-3); color:var(--ink); }
+.ins-scope-pop{
+  position:fixed; z-index:var(--z-tip); width:min(440px, calc(100vw - 24px));
+  padding:12px 14px 10px; border-radius:var(--r-4);
+  background:var(--surface); border:1px solid var(--line-2); box-shadow:var(--shadow-3);
+  animation:insFocusIn .16s var(--ease) both;
+}
+.ins-scope-pop-head{ display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+.ins-scope-pop-head b{ font-size:13px; font-weight:680; color:var(--ink); }
+.ins-scope-pop-head span{ font-size:11.5px; color:var(--ink-3); }
+.ins-scope-pop-clear{
+  margin-left:auto; font-size:12px; font-weight:600; color:var(--accent-3);
+  padding:2px 6px; border-radius:var(--r-2);
+}
+.ins-scope-pop-clear:hover{ background:var(--accent-soft); }
+.ins-scope-set{ display:grid; grid-template-columns:76px 1fr; gap:8px; align-items:start; padding:8px 0; border-top:1px solid var(--line); }
+.ins-scope-set-name{ font-size:11.5px; font-weight:600; color:var(--ink-3); padding-top:5px; }
+.ins-scope-chips{ display:flex; flex-wrap:wrap; gap:6px; }
+.ins-scope-chip{
+  display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 9px 0 8px;
+  font-size:12px; font-weight:560; color:var(--ink-2); white-space:nowrap;
+  background:var(--surface); border:1px solid var(--line-2); border-radius:99px;
+  transition:color .12s ease-out, background-color .12s ease-out, border-color .12s ease-out;
+}
+.ins-scope-chip i{ width:8px; height:8px; border-radius:50%; flex:none; opacity:.85; }
+.ins-scope-chip b{ font-weight:600; font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums; }
+.ins-scope-chip:hover{ color:var(--ink); border-color:var(--line-3); background:var(--surface-2); }
+.ins-scope-chip.is-on{ color:var(--accent-3); background:var(--accent-soft); border-color:var(--accent-line); }
+.ins-scope-chip.is-on b{ color:var(--accent-3); }
+.ins-scope-pop-foot{ margin:8px 0 0; font-size:11px; line-height:1.5; color:var(--ink-4); }
+
+/* ---------- the findings rail ----------
+   The nine questions down the left, each with the sentence its data produced.
+   Navigation and summary at once; a facilitator reads the agenda here before
+   opening anything. Weight and tint carry the active state — no stripe. */
+.ins-rail{
+  flex:none; width:224px; min-height:0; display:flex; flex-direction:column;
+}
+.ins-rail.is-collapsed{ width:48px; }
+.ins-rail-list{ flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:2px 10px 2px 0; }
+.ins-rail-group + .ins-rail-group{ margin-top:10px; padding-top:10px; border-top:1px solid var(--line); }
+.ins-rail-group-name{
+  display:block; padding:0 10px 6px; font-size:11px; font-weight:640; color:var(--ink-3); white-space:nowrap;
+}
+.ins-rail-item{
+  display:flex; align-items:center; gap:9px; width:100%; padding:6px 8px 6px 10px; min-height:36px;
+  text-align:left; font:inherit; color:inherit;
+  border:1px solid transparent; border-radius:var(--r-3);
+  transition:background-color .15s ease-out, border-color .15s ease-out;
+}
+.ins-rail-item:hover{ background:var(--surface-2); }
+.ins-rail-item.is-on{ background:var(--accent-soft); border-color:var(--accent-line); }
+.ins-rail-no{
+  flex:none; display:grid; place-items:center; width:22px; height:22px; margin-top:0;
+  font-size:11px; font-weight:680; color:var(--ink-3); border-radius:var(--r-2);
+  background:var(--surface-3); font-variant-numeric:tabular-nums;
+}
+.ins-rail-item.is-on .ins-rail-no{ color:#fff; background:var(--accent); }
+.ins-rail-text{ min-width:0; display:flex; flex-direction:column; gap:1px; }
+.ins-rail-name{ font-size:13px; line-height:1.25; font-weight:600; color:var(--ink-2); white-space:nowrap; }
+.ins-rail-item.is-on .ins-rail-name{ font-weight:680; }
+.ins-rail-item.is-on .ins-rail-name{ color:var(--accent-3); }
+.ins-rail-finding{ display:none; }
+.ins-rail-finding.is-empty{ color:var(--ink-4); font-style:italic; }
+.ins-rail-toggle{
+  flex:none; display:flex; align-items:center; justify-content:center; gap:6px; height:32px; margin-right:10px;
+  font-size:11.5px; font-weight:600; color:var(--ink-3); border-top:1px solid var(--line);
+  border-radius:var(--r-3);
+  transition:color .15s ease-out, background-color .15s ease-out;
+}
+.ins-rail-toggle:hover{ color:var(--ink); background:var(--surface-2); }
+.ins-rail.is-collapsed .ins-rail-list{ padding:8px 6px; }
+.ins-rail.is-collapsed .ins-rail-group-name,
+.ins-rail.is-collapsed .ins-rail-text{ display:none; }
+.ins-rail.is-collapsed .ins-rail-item{ justify-content:center; padding:6px 0; }
+.ins-rail.is-collapsed .ins-rail-no{ width:24px; height:24px; margin:0; font-size:12px; }
+.ins-rail.is-collapsed .ins-rail-group + .ins-rail-group{ margin-top:6px; padding-top:6px; }
+
+.sr-only{
+  position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden;
+  clip:rect(0 0 0 0); white-space:nowrap; border:0;
+}
+
+@media (max-width:1180px){
+  .ins-rail{ width:48px; }
+  .ins-rail .ins-rail-group-name,
+  .ins-rail .ins-rail-text,
+  .ins-rail .ins-rail-toggle span{ display:none; }
+  .ins-rail .ins-rail-item{ justify-content:center; padding:6px 0; }
+  .ins-ws{ grid-template-columns:minmax(0,1fr) 300px; }
+  .ins-grid thead th{ white-space:normal; line-height:1.2; }
+}
+@media (prefers-reduced-motion:reduce){
+  .ins-scope-pop{ animation:none; }
+  .ins-ws{ animation:none; }
+}
+/* ---------- narrow: one column, the page scrolls ----------
+   Below ~980px there is no room for three surfaces side by side. The frame
+   gives up its fixed height, the rail becomes a strip of questions across
+   the top, and the picture, readings and table stack in reading order. */
+@media (max-width:980px){
+  .net-explorer.is-bleed:not(.is-full):has(.nx-stage.is-insights){ height:auto; min-height:0; }
+  .net-explorer:not(.is-full) .nx-stage.is-insights{ height:auto; min-height:0; overflow:visible; }
+  .net-explorer:not(.is-full) .insights{ flex:none; }
+  .ins-body{ flex-direction:column; }
+  .ins-rail,
+  .ins-rail.is-collapsed{ width:auto; border-right:0; border-bottom:1px solid var(--line); }
+  .ins-side{ border-left:0; border-top:1px solid var(--line); }
+  .ins-rail-list{ display:flex; gap:4px; overflow-x:auto; overflow-y:hidden; padding:6px; scrollbar-width:none; }
+  .ins-rail-group{ display:flex; gap:4px; }
+  .ins-rail-group + .ins-rail-group{ margin:0 0 0 4px; padding:0 0 0 8px; border-top:0; border-left:1px solid var(--line); }
+  .ins-rail .ins-rail-group-name{ display:none; }
+  .ins-rail .ins-rail-item{ width:auto; flex:none; align-items:center; padding:5px 10px 5px 6px; }
+  .ins-rail .ins-rail-text{ display:flex; }
+  .ins-rail .ins-rail-finding{ display:none; }
+  .ins-rail .ins-rail-toggle{ display:none; }
+  .ins-ws{ display:flex; flex-direction:column; }
+  .ins-stage{ min-height:0; }
+  .ins-stage-body{ height:min(62vw, 520px); }
+  .ins-side{ max-height:440px; overflow-y:auto; }
+  .ins-band{ max-height:420px; }
+  .ins-band-body{ max-height:360px; }
+}
+
+/* ---------- people ---------- */
+.ins-avatar{
+  display:inline-grid; place-items:center; flex:none; border-radius:50%;
+  color:#fff; font-weight:700; letter-spacing:.02em; line-height:1;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.35), 0 0 0 1px rgba(12,20,33,.06);
+}
+.ins-grid-person{ display:inline-flex; align-items:center; gap:9px; min-width:0; max-width:100%; }
+.ins-grid-person .ins-grid-name{ min-width:0; overflow:hidden; text-overflow:ellipsis; }
+
+/* ---------- data bars in the band ----------
+   A number with a bar behind it: the column reads as a shape at a glance and
+   as a value on a second look. The bar is a wash, never a fill, so the
+   figure on top keeps its contrast. */
+.ins-grid td.has-bar{ position:relative; }
+.ins-cell-bar{
+  position:absolute; top:6px; bottom:6px; left:8px; right:8px; pointer-events:none;
+  display:flex; justify-content:flex-end;
+}
+.ins-cell-bar i{ display:block; height:100%; border-radius:3px; opacity:.16; min-width:2px; }
+.ins-grid td.has-bar:not(.ta-right) .ins-cell-bar{ justify-content:flex-start; }
+.ins-cell-val{ position:relative; }
+.ins-grid tbody tr.is-on td .ins-cell-bar i,
+.ins-grid tbody tr:hover td .ins-cell-bar i{ opacity:.26; }
+
+/* ---------- the rail's numbers ---------- */
+.ins-rail-line{ display:flex; align-items:center; gap:6px; min-width:0; }
+.ins-rail-line .ins-rail-name{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.ins-rail-stat{
+  flex:none; height:18px; padding:0 6px; border-radius:var(--r-2);
+  font-size:11px; font-weight:680; line-height:18px; font-variant-numeric:tabular-nums;
+  color:var(--ink-2); background:var(--surface-3);
+}
+.ins-rail-stat.is-ok{ color:#0F7A63; background:#E6F4EF; }
+.ins-rail-stat.is-warn{ color:#B54708; background:#FDEEE2; }
+.ins-rail-stat.is-accent{ color:var(--accent-3); background:var(--accent-soft); }
+.ins-rail.is-collapsed .ins-rail-stat{ display:none; }
+
+/* ---------- the map's people ---------- */
+.ins-graph-node circle:last-of-type{
+  filter:drop-shadow(0 1px 1.5px rgba(12,20,33,.22));
+}
+.ins-graph-node.is-active circle:last-of-type{
+  filter:drop-shadow(0 2px 4px rgba(12,20,33,.35));
+}
+
+/* ---------- the surfaces the browser draws ----------
+   Focus rings, selection and scrollbars ship with browser defaults that belong
+   to no design; here they are drawn from the palette. */
+.insights :is(button, [tabindex]):focus-visible{
+  outline:2px solid var(--accent); outline-offset:2px; border-radius:var(--r-2);
+}
+.insights .ins-rail-item:focus-visible,
+.insights .ins-scope-chip:focus-visible,
+.insights .insights-bar:focus-visible,
+.insights .insights-row:focus-visible{ outline-offset:-2px; border-radius:var(--r-3); }
+.insights ::selection{ background:var(--accent-soft); color:var(--accent-3); }
+.ins-side,
+.ins-band-body,
+.ins-rail-list{ scrollbar-width:thin; scrollbar-color:var(--line-3) transparent; }
+.ins-side::-webkit-scrollbar,
+.ins-band-body::-webkit-scrollbar,
+.ins-rail-list::-webkit-scrollbar{ width:8px; height:8px; }
+.ins-side::-webkit-scrollbar-thumb,
+.ins-band-body::-webkit-scrollbar-thumb,
+.ins-rail-list::-webkit-scrollbar-thumb{ background:var(--line-3); border-radius:8px; border:2px solid var(--surface); }
+
+/* ---------- the focused person ----------
+   Focus is emphasis across every tab; this is the one place it is also an
+   answer. The card sits at the top of the readings the moment somebody is
+   focused and gives their standing on all nine questions at once, so "what
+   about Priya?" is answered before a tab is changed. */
+.ins-person{
+  flex:none; padding:12px 16px 14px; border-bottom:1px solid var(--line);
+  background:var(--surface);
+  animation:insFocusIn .18s var(--ease) both;
+}
+.ins-person-head{ display:flex; align-items:center; gap:10px; }
+.ins-person-name{ min-width:0; display:flex; flex-direction:column; gap:1px; }
+.ins-person-name b{ font-size:14px; font-weight:680; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ins-person-name span{ font-size:11.5px; color:var(--ink-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ins-person-x{
+  margin-left:auto; display:grid; place-items:center; width:26px; height:26px; border-radius:50%;
+  font-size:16px; line-height:1; color:var(--ink-3);
+  transition:background-color .15s ease-out, color .15s ease-out;
+}
+.ins-person-x:hover{ background:var(--surface-3); color:var(--ink); }
+.ins-person-grid{
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:6px; margin-top:12px;
+}
+.ins-person-cell{
+  display:flex; flex-direction:column; gap:2px; min-width:0; padding:7px 9px 8px;
+  border:1px solid var(--line); border-radius:var(--r-3); background:var(--surface-2);
+  text-align:left; font:inherit; color:inherit;
+  transition:border-color .15s ease-out, background-color .15s ease-out;
+}
+.ins-person-cell:hover{ border-color:var(--accent-line); background:var(--accent-soft); }
+.ins-person-cell.is-on{ border-color:var(--accent-line); background:var(--accent-soft); }
+.ins-person-cell small{ font-size:10.5px; font-weight:600; line-height:1.25; color:var(--ink-3); text-wrap:balance; }
+.ins-person-cell b{ font-size:12.5px; font-weight:680; line-height:1.25; color:var(--ink); font-variant-numeric:tabular-nums; text-wrap:balance; }
+.ins-person-cell b.is-warn{ color:#B54708; }
+.ins-person-cell b.is-ok{ color:#0F7A63; }
+.ins-person-cell i{ display:block; height:3px; border-radius:2px; background:var(--line-2); margin-top:3px; overflow:hidden; }
+.ins-person-cell i > em{ display:block; height:100%; background:var(--accent); }
+
+/* ---------- zoom ----------
+   Every picture pans and zooms the way the explorer does: wheel to zoom about
+   the cursor, drag to pan, double-click to come home. The controls sit in the
+   bottom-right corner; the legend keeps the bottom-left. */
+.ins-zoom{ position:absolute; inset:0; overflow:clip; cursor:grab; touch-action:none; }
+.ins-zoom.is-panning{ cursor:grabbing; }
+.ins-zoom-inner{ position:absolute; inset:0; transform-origin:0 0; will-change:transform; display:flex; }
+.ins-zoom-inner > *{ flex:1 1 auto; min-width:0; min-height:0; }
+.ins-zoom-ctl{
+  display:inline-flex; align-items:center; gap:2px; height:28px; padding:0 3px;
+  background:var(--surface); border:1px solid var(--line-2); border-radius:var(--r-3);
+}
+.ins-zoom-ctl button{
+  display:grid; place-items:center; width:24px; height:22px; border-radius:var(--r-2);
+  color:var(--ink-3); font-size:15px; line-height:1;
+  transition:background-color .12s ease-out, color .12s ease-out;
+}
+.ins-zoom-ctl button:hover{ background:var(--surface-3); color:var(--ink); }
+.ins-zoom-ctl button:disabled{ opacity:.4; cursor:default; }
+.ins-zoom-pct{
+  min-width:40px; text-align:center; font-size:11px; font-weight:640; color:var(--ink-3);
+  font-variant-numeric:tabular-nums;
+}
+
+/* ---------- pages ---------- */
+.ins-grid-foot{
+  display:flex; align-items:center; gap:12px; padding:8px 4px 2px;
+  border-top:1px solid var(--line);
+}
+.ins-grid-range{ font-size:11.5px; color:var(--ink-3); font-variant-numeric:tabular-nums; }
+.ins-grid-pages{ margin-left:auto; display:inline-flex; align-items:center; gap:2px; }
+.ins-grid-pages button{
+  min-width:26px; height:26px; padding:0 6px; border-radius:var(--r-2);
+  font-size:12px; font-weight:600; color:var(--ink-3); font-variant-numeric:tabular-nums;
+  transition:background-color .12s ease-out, color .12s ease-out;
+}
+.ins-grid-pages button:hover:not(:disabled){ background:var(--surface-3); color:var(--ink); }
+.ins-grid-pages button.is-on{ background:var(--accent-soft); color:var(--accent-3); }
+.ins-grid-pages button:disabled{ opacity:.35; cursor:default; }
+.ins-grid-gap{ padding:0 2px; font-size:12px; color:var(--ink-4); }
+
+/* ---------- the People table, folded by default ---------- */
+.emp-card.is-folded .emp-fold-body{ display:none; }
+.emp-fold{
+  display:flex; align-items:center; gap:12px; width:100%; text-align:left;
+  font:inherit; color:inherit; cursor:pointer;
+}
+.emp-fold-text{ min-width:0; flex:1; }
+.emp-fold-count{ font-size:12px; font-weight:600; color:var(--ink-3); white-space:nowrap; }
+.emp-fold-chev{
+  flex:none; display:grid; place-items:center; width:28px; height:28px; border-radius:50%;
+  color:var(--ink-3); border:1px solid var(--line-2); background:var(--surface);
+  transition:transform .18s var(--ease), background-color .12s ease-out;
+}
+.emp-card:not(.is-folded) .emp-fold-chev{ transform:rotate(180deg); }
+.emp-fold:hover .emp-fold-chev{ background:var(--surface-3); color:var(--ink); }
+@media (prefers-reduced-motion:reduce){ .emp-fold-chev{ transition:none; } }
+
+/* ---------- find a person ---------- */
+.ins-search{
+  position:relative; display:flex; align-items:center; gap:7px; height:30px; padding:0 8px 0 10px;
+  width:min(260px, 32vw); color:var(--ink-3);
+  background:var(--surface); border:1px solid var(--line-2); border-radius:var(--r-3);
+  transition:border-color .15s ease-out, box-shadow .15s ease-out;
+}
+.ins-search:focus-within{ border-color:var(--accent-line); box-shadow:0 0 0 3px var(--accent-soft); }
+.ins-search svg{ flex:none; }
+.ins-search input{
+  flex:1; min-width:0; height:100%; border:0; background:transparent; outline:0;
+  font:inherit; font-size:12.5px; color:var(--ink);
+}
+.ins-search input::placeholder{ color:var(--ink-4); }
+.ins-search input::-webkit-search-cancel-button{ -webkit-appearance:none; appearance:none; }
+.ins-search-key{
+  flex:none; display:grid; place-items:center; min-width:18px; height:18px; padding:0 4px;
+  font:600 10.5px/1 inherit; font-family:inherit; color:var(--ink-4);
+  border:1px solid var(--line-2); border-radius:var(--r-1); background:var(--surface-2);
+}
+.ins-search:focus-within .ins-search-key{ display:none; }
+.ins-search-pop{
+  position:fixed; z-index:var(--z-tip); padding:6px; border-radius:var(--r-4);
+  background:var(--surface); border:1px solid var(--line-2); box-shadow:var(--shadow-3);
+  animation:insFocusIn .14s var(--ease) both;
+}
+.ins-search-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:1px; }
+.ins-search-item{
+  display:flex; align-items:center; gap:9px; padding:6px 8px; border-radius:var(--r-2); cursor:pointer;
+}
+.ins-search-item.is-hi{ background:var(--accent-soft); }
+.ins-search-name{ font-size:12.5px; font-weight:600; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ins-search-meta{ margin-left:auto; font-size:11.5px; color:var(--ink-3); white-space:nowrap; }
+.ins-search-empty{ margin:0; padding:8px 10px; font-size:12px; line-height:1.45; color:var(--ink-3); }
+@media (prefers-reduced-motion:reduce){ .ins-search-pop{ animation:none; } }
+
+/* ---------- compare departments ----------
+   Chosen in Filters, read above the tab's own readings: one card per
+   department, the same four readings on every one, so the eye compares bar
+   lengths down a column. */
+.ins-compare{ flex:none; padding:10px 12px 12px; border-bottom:1px solid var(--line); }
+.ins-compare-head{ display:flex; align-items:baseline; gap:8px; margin:0 2px 8px; }
+.ins-compare-head b{ font-size:12.5px; font-weight:660; color:var(--ink); }
+.ins-compare-head span{ margin-left:auto; font-size:11px; color:var(--ink-3); }
+.ins-compare-lead{
+  margin:0 2px 8px; font-size:12.5px; font-weight:560; line-height:1.4; color:var(--ink);
+  text-wrap:pretty;
+}
+.ins-compare-lead.is-warn{ color:#B54708; font-weight:620; }
+.ins-compare-list{ display:flex; flex-direction:column; gap:6px; }
+.ins-compare-row{
+  display:flex; flex-direction:column; gap:6px; width:100%; padding:8px 10px 9px;
+  text-align:left; font:inherit; color:inherit; cursor:pointer;
+  border:1px solid var(--line); border-radius:var(--r-3); background:var(--surface);
+  transition:border-color .15s ease-out, background-color .15s ease-out;
+}
+.ins-compare-row:hover{ border-color:var(--line-3); background:var(--surface-2); }
+.ins-compare-row.is-on{ border-color:var(--accent-line); background:var(--accent-soft); }
+.ins-compare-top{ display:flex; align-items:center; gap:7px; min-width:0; }
+.ins-compare-top i{ width:9px; height:9px; border-radius:50%; flex:none; }
+.ins-compare-top b{ font-size:12.5px; font-weight:660; color:var(--ink); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ins-compare-n{
+  margin-left:auto; flex:none; padding:1px 6px; border-radius:99px;
+  font-size:11px; font-weight:640; color:var(--ink-3); background:var(--surface-3);
+  font-variant-numeric:tabular-nums;
+}
+.ins-compare-bars{ display:flex; flex-direction:column; gap:3px; }
+.ins-compare-bar{ display:grid; grid-template-columns:58px minmax(0,1fr) 30px; align-items:center; gap:7px; }
+.ins-compare-bar em{ font-style:normal; font-size:11px; color:var(--ink-3); }
+.ins-compare-bar > b{ font-size:11.5px; font-weight:660; color:var(--ink); text-align:right; font-variant-numeric:tabular-nums; }
+.ins-compare-track{ height:5px; border-radius:3px; background:var(--surface-3); overflow:hidden; }
+.ins-compare-track i{ display:block; height:100%; border-radius:3px; }
+.ins-compare-foot{ display:flex; align-items:center; gap:8px; font-size:11px; color:var(--ink-3); }
+.ins-compare-foot b{ font-weight:660; color:var(--ink-2); font-variant-numeric:tabular-nums; }
+.ins-compare-foot .insights-tag{ margin-left:auto; }
+.ins-compare-note{ margin:8px 2px 0; font-size:11px; line-height:1.45; color:var(--ink-3); text-wrap:pretty; }
+
+/* Lane panels on the picture, one per compared department. */
+.ins-lane-label{ font-size:19px; font-weight:700; letter-spacing:-.01em; }
+.ins-lane-note{ font-size:15px; font-weight:600; fill:var(--ink-4); }
+
+/* The compare switch inside the Filters popover. */
+.ins-scope-switch{
+  display:flex; align-items:flex-start; gap:10px; margin-top:8px; padding:9px 10px;
+  border:1px solid var(--line); border-radius:var(--r-3); background:var(--surface-2); cursor:pointer;
+}
+.ins-scope-switch.is-off{ cursor:default; opacity:.62; }
+.ins-scope-switch input{ position:absolute; opacity:0; width:0; height:0; }
+.ins-scope-switch-track{
+  position:relative; flex:none; width:32px; height:18px; margin-top:1px; border-radius:99px;
+  background:var(--line-2); transition:background-color .16s ease-out;
+}
+.ins-scope-switch-track::after{
+  content:''; position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%;
+  background:var(--surface); box-shadow:var(--shadow-1); transition:transform .16s var(--ease);
+}
+.ins-scope-switch input:checked + .ins-scope-switch-track{ background:var(--accent); }
+.ins-scope-switch input:checked + .ins-scope-switch-track::after{ transform:translateX(14px); }
+.ins-scope-switch input:focus-visible + .ins-scope-switch-track{ outline:2px solid var(--accent); outline-offset:2px; }
+.ins-scope-switch-text{ min-width:0; display:flex; flex-direction:column; gap:2px; }
+.ins-scope-switch-text b{ font-size:12.5px; font-weight:620; color:var(--ink); }
+.ins-scope-switch-text span{ font-size:11px; line-height:1.45; color:var(--ink-3); text-wrap:pretty; }
+@media (prefers-reduced-motion:reduce){ .ins-scope-switch-track,.ins-scope-switch-track::after{ transition:none; } }
+
+/* ---------- theatre ----------
+   Present mode is the picture, full screen, with the readings as a panel the
+   presenter folds away and brings back. The detail table goes with it: on a
+   projector the room reads the picture, not a sixty-row table. */
+.net-explorer.is-full .insights.is-theatre .ins-ws{
+  grid-template-columns:minmax(0,1fr) clamp(300px, 26vw, 400px);
+  grid-template-rows:minmax(0,1fr) auto;
+}
+.net-explorer.is-full .insights.is-theatre .ins-band{
+  max-height:min(300px, 32vh);
+}
+.net-explorer.is-full .insights.is-theatre .ins-side{
+  transition:opacity .18s ease-out;
+}
+/* Folded: the picture takes the whole frame. */
+.net-explorer.is-full .insights.is-details-closed .ins-ws{ grid-template-columns:minmax(0,1fr); }
+.net-explorer.is-full .insights.is-details-closed .ins-side{ display:none; }
+.net-explorer.is-full .insights.is-details-closed .ins-band{ display:none; }
+.net-explorer.is-full .insights.is-details-closed .ins-stage{ grid-row:1 / -1; }
+.ins-present.is-details.is-on{ color:var(--accent-3); background:var(--accent-soft); border-color:var(--accent-line); }
+@media (prefers-reduced-motion:reduce){ .net-explorer.is-full .insights.is-theatre .ins-side{ transition:none; } }
+
+/* A name seated out from its dot keeps a hairline back to it. */
+.insights-map-lead{ stroke:var(--ink-4); stroke-width:1.4; opacity:.5; }

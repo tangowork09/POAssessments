@@ -22,9 +22,11 @@ export interface AdminClaims {
   role: AdminRole;
 }
 
-/** Anything not explicitly 'superadmin' is a plain admin. */
+/** Anything that is not a role we know is a plain admin — the least of them. */
 export function toRole(value: unknown): AdminRole {
-  return value === 'superadmin' ? 'superadmin' : 'admin';
+  if (value === 'superadmin') return 'superadmin';
+  if (value === 'cohort_admin') return 'cohort_admin';
+  return 'admin';
 }
 
 /** The Hono environment every authenticated admin route runs under. */

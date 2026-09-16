@@ -4,33 +4,58 @@ import { useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { RolePill } from './ui.js';
-import type { AdminUser } from '../../../src/shared/types.js';
+import type { AdminRole, AdminUser } from '../../../src/shared/types.js';
+import { canAccess, type AdminArea } from '../../../src/shared/roles.js';
 
 interface NavItem {
   to: string;
   label: string;
   icon: () => ReactNode;
   end?: boolean;
-  /** Present when the item is restricted to one role. */
-  superadminOnly?: boolean;
+  /**
+   * The console area this item opens. Visibility is derived from it rather than
+   * listed here, so the nav and the worker guards can never disagree about who
+   * may reach a panel.
+   */
+  area: AdminArea;
 }
 
 const NAV: NavItem[] = [
-  { to: '/admin', label: 'Dashboard', icon: IconGrid, end: true },
-  { to: '/admin/assessments', label: 'Assessments', icon: IconDoc },
-  { to: '/admin/cohorts', label: 'Cohorts', icon: IconGroup },
-  { to: '/admin/candidates', label: 'Candidates', icon: IconPeople },
-  { to: '/admin/invites', label: 'Invites', icon: IconSend },
-  { to: '/admin/links', label: 'Assessment Link', icon: IconLink },
+  { to: '/admin', label: 'Dashboard', icon: IconGrid, end: true, area: 'dashboard' },
+  { to: '/admin/assessments', label: 'Assessments', icon: IconDoc, area: 'assessments' },
+  { to: '/admin/cohorts', label: 'Cohorts', icon: IconGroup, area: 'cohorts' },
+  { to: '/admin/candidates', label: 'Candidates', icon: IconPeople, area: 'candidates' },
+  { to: '/admin/invites', label: 'Invites', icon: IconSend, area: 'invites' },
+  { to: '/admin/links', label: 'Assessment Link', icon: IconLink, area: 'links' },
   // Names people and holds previously-issued tokens, so it is absent rather
   // than merely disabled for an ordinary admin.
-  { to: '/admin/activity', label: 'Activity', icon: IconLog, superadminOnly: true },
+  { to: '/admin/activity', label: 'Activity', icon: IconLog, area: 'activity' },
   // Branding is hidden for now at the client's request — the identity is fixed
   // to PO Assessments and the panel only invites accidental changes to what
   // every candidate, report and email carries. The route itself still works,
   // so restoring this one line brings it back with nothing else to change.
-  // { to: '/admin/branding', label: 'Branding', icon: IconBrush, superadminOnly: true },
+  // { to: '/admin/branding', label: 'Branding', icon: IconBrush, area: 'branding' },
 ];
+
+/**
+ * The address split at the @, so the rail wraps it into two halves that still
+ * read as an address instead of breaking mid-domain.
+ */
+function emailParts(email: string): ReactNode {
+  const at = email.indexOf('@');
+  if (at < 0) return <span>{email}</span>;
+  return (
+    <>
+      <span>{email.slice(0, at + 1)}</span>
+      <span>{email.slice(at + 1)}</span>
+    </>
+  );
+}
+
+/** The items this role may open, in declaration order. */
+function visibleNav(role: AdminRole): NavItem[] {
+  return NAV.filter((item) => canAccess(role, item.area));
+}
 
 export function AdminShell({
   user,
@@ -67,7 +92,7 @@ export function AdminShell({
 
   // Branding writes settings that reach every candidate, report and email, so
   // the nav item is not merely disabled for an ordinary admin — it is absent.
-  const items = NAV.filter((item) => !item.superadminOnly || user.role === 'superadmin');
+  const items = visibleNav(user.role);
 
   async function signOut(): Promise<void> {
     await api.post('/api/admin/logout');
@@ -127,7 +152,9 @@ export function AdminShell({
               <span className="side-collapse-label">Collapse</span>
             </button>
 
-            <p className="side-label">Manage</p>
+            {/* A cohort administrator has one item; a heading over a list of
+                one names nothing. */}
+            {items.length > 1 && <p className="side-label">Manage</p>}
             <nav className="side-nav" aria-label="Console sections">
               {items.map(({ to, label, icon: Icon, end }) => (
                 <NavLink
@@ -146,7 +173,7 @@ export function AdminShell({
 
             <div className="side-card">
               <b>Signed in</b>
-              <span className="side-card-email">{user.email}</span>
+              <span className="side-card-email">{emailParts(user.email)}</span>
               <span className="side-card-role">
                 <RolePill role={user.role} />
               </span>

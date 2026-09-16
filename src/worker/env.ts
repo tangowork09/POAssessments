@@ -21,6 +21,15 @@ export interface Env {
   ADMIN_EMAIL: string;
   ADMIN_PASSWORD: string;
 
+  /**
+   * The shared cohort-only facilitator account. Unlike ADMIN_*, these are
+   * reconciled on every boot rather than seeded once, so the configured
+   * password is always the one that works — change the value, deploy, done.
+   * Leave either unset to not have the account at all in an environment.
+   */
+  COHORT_ADMIN_EMAIL?: string;
+  COHORT_ADMIN_PASSWORD?: string;
+
   /** Secrets. The wrangler.jsonc values are development placeholders only. */
   LINK_TOKEN_SECRET: string;
   JWT_SECRET: string;

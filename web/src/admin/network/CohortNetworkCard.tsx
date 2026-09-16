@@ -19,7 +19,7 @@
  * map). Identity never rides on colour alone: every node wears its name.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Background,
   BaseEdge,
@@ -42,6 +42,14 @@ import type { CohortNetwork, CohortNetworkEdge } from '../../../../src/shared/ty
 import type { SocioBlockNetwork, SocioMemberResult } from '../../../../src/shared/socio-scoring.js';
 import { SOCIO_BLOCKS } from '../../../../src/shared/socio.js';
 import {
+  betweenness,
+  communities,
+  subgroupCohesion,
+  unreciprocatedTies,
+  type SubgroupTieStats,
+  type UnreciprocatedTie,
+} from '../../../../src/shared/socio-network.js';
+import {
   circularLayout,
   forceMapLayout,
   groupedLayout,
@@ -51,38 +59,77 @@ import {
   type Positions,
 } from './layout.js';
 import { EmployeesTable } from './EmployeesTable.js';
+import { CompareView, POWER_LENS, TRUST_LENS } from './ComparePane.js';
+import { FacetBar } from './FacetBar.js';
+import { InsightsView } from './InsightsView.js';
 import {
+  anchors as computeAnchors,
+  CATEGORICAL_COLORS,
+  clusterView,
   degrees,
   edgePolarity,
+  lensPairs,
+  MUTED_GREY,
+  lensDensity,
+  orderSilos,
   POLARITY_STYLE,
+  positiveTies,
+  relOpenVerdict,
   ROLE_STYLE,
   roles,
+  SILOS_MODE_COLUMN,
+  SILOS_MODE_LABEL,
+  SILOS_MODE_SUB,
+  silosGroups,
+  silosLabel,
+  silosModes,
+  silosVerdict,
+  tieOpacity,
+  tiePath,
+  tieWidth,
+  topBridges,
+  unionTies,
+  type ClusterLegendEntry,
   type DegreeCounts,
+  type LensDensity,
   type Polarity,
   type Role,
+  type SilosMode,
 } from './model.js';
 
-// The validated eight-hue categorical order. Every node carries its name as a
-// direct label, which is the secondary encoding that lets the fuller palette
-// past the all-pairs colour-distance floor (see the data-viz relief rule).
-const GROUP_COLORS = [
-  '#2a78d6',
-  '#eb6834',
-  '#1baf7a',
-  '#eda100',
-  '#e87ba4',
-  '#4a3aa7',
-  '#008300',
-  '#e34948',
-];
-const GROUP_OTHER = '#8D97A6';
+// The validated eight-hue categorical order, shared with the cluster colouring
+// and defined once in model.ts. Every node carries its name as a direct label,
+// which is the secondary encoding that lets the fuller palette past the
+// all-pairs colour-distance floor (see the data-viz relief rule).
+const GROUP_COLORS = CATEGORICAL_COLORS;
+const GROUP_OTHER = MUTED_GREY;
 
-const LENSES = [
+/**
+ * The lenses the whole card reads through. Beyond the overall mean and the four
+ * blocks sit the two single-item trust facets: a group can be entirely
+ * dependable and still unsafe to be wrong in front of, and the Trust block
+ * averages exactly that difference away.
+ */
+const LENSES: readonly { key: string; name: string; color: string; hint?: string }[] = [
   { key: 'overall', name: 'Overall', color: '#1A4FD6' },
-  ...SOCIO_BLOCKS.map((b) => ({ key: b.key, name: b.short, color: b.color })),
-] as const;
+  ...SOCIO_BLOCKS.map((b) => ({ key: b.key, name: b.short, color: b.color, hint: b.gloss })),
+  { key: 'reliability', name: 'Trust — reliability', color: '#0F7A63', hint: 'Delivers as promised' },
+  { key: 'openness', name: 'Trust — openness', color: '#3FA08A', hint: 'Safe to admit mistakes' },
+];
 
-type ViewKind = 'map' | 'circle' | 'layers' | 'groups';
+/**
+ * The five ways of looking. `insights` is the debrief page — the nine findings
+ * a client asked for, in their order, computed at the cohort's own threshold
+ * and immune to the filter drawer; the other four are the explorer.
+ */
+type ViewKind = 'insights' | 'map' | 'circle' | 'layers' | 'groups' | 'compare';
+/** What a node's area says: ties received, ties given, or how much routes through them. */
+type SizeBy = 'in' | 'out' | 'bridge';
+
+/** How many names the graph prints unprompted. The rest are a hover away. */
+const GRAPH_LABELS = 8;
+/** What a node's fill says: their function, the role the group gave them, or their cluster. */
+type ColorBy = 'function' | 'role' | 'cluster';
 const ALL_POLARITIES: Polarity[] = ['positive', 'negative', 'neutral'];
 
 const POLL_MS = 15_000;
@@ -113,6 +160,8 @@ interface RatingData extends Record<string, unknown> {
   /** Curve away from the sibling edge of a mutual pair. */
   bend: number;
   pending: boolean;
+  /** Singled out from a panel row — drawn heavy and never dimmed. */
+  picked: boolean;
 }
 
 export function CohortNetworkCard({
@@ -128,7 +177,15 @@ export function CohortNetworkCard({
   const [net, setNet] = useState<CohortNetwork | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [round, setRound] = useState<number | null>(null); // null = current
-  const [view, setView] = useState<ViewKind>('map');
+  /**
+   * Null means "this cohort's default view", which is the Insights debrief once
+   * there are ties to debrief and the map before that. Held as a choice rather
+   * than resolved at mount because the payload arrives after the first render;
+   * and pinned to the FIRST payload, so a response landing mid-session cannot
+   * yank a facilitator off the map they are watching.
+   */
+  const [viewChoice, setView] = useState<ViewKind | null>(null);
+  const defaultView = useRef<ViewKind | null>(null);
   const [lens, setLens] = useState<string>('overall');
   const [threshold, setThreshold] = useState<number | null>(null); // null until data arrives
   const [selectedNo, setSelectedNo] = useState<number | null>(null);
@@ -164,13 +221,26 @@ export function CohortNetworkCard({
   const [hideIsolates, setHideIsolates] = useState(false);
   const [respondedOnly, setRespondedOnly] = useState(false);
   const [reciprocalOnly, setReciprocalOnly] = useState(false);
-  const [showLabels, setShowLabels] = useState(true);
+  /**
+   * "Show all labels" — off by default, and deliberately so. Sixty standing
+   * names is label soup exactly where the graph is densest, which is exactly
+   * where it is worth reading. The eight most central by the current size
+   * metric keep a standing name, everyone the reader touches gets one, and
+   * every other name is one hover away.
+   */
+  const [showLabels, setShowLabels] = useState(false);
   /** The floating card at the pointer. Off by default — it is a lot of ink. */
   const [hoverCard, setHoverCard] = useState(false);
   /** Hover-to-focus: pointing at a person dims everyone else. */
   const [hoverFocus, setHoverFocus] = useState(true);
-  const [sizeBy, setSizeBy] = useState<'in' | 'out'>('in');
-  const [colorBy, setColorBy] = useState<'function' | 'role'>('function');
+  const [sizeBy, setSizeBy] = useState<SizeBy>('in');
+  const [colorBy, setColorBy] = useState<ColorBy>('function');
+  /**
+   * A one-way tie picked out of the "Unreturned trust" panel: the pair stays
+   * lit and its arrow drawn heavy, so the row and the map point at the same
+   * relationship. Cleared by any other selection.
+   */
+  const [pairKey, setPairKey] = useState<string | null>(null);
   /** For a selected person: which of their ties to draw. */
   const [egoDir, setEgoDir] = useState<'both' | 'in' | 'out'>('both');
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -253,6 +323,9 @@ export function CohortNetworkCard({
     return () => clearInterval(t);
   }, [load, net]);
 
+  if (defaultView.current === null && net) defaultView.current = net.edges.length > 0 ? 'insights' : 'map';
+  const view: ViewKind = viewChoice ?? defaultView.current ?? 'map';
+
   const cut = threshold ?? net?.tieThreshold ?? 4;
 
   /** Every rated edge tagged with a polarity under the current lens + threshold. */
@@ -284,12 +357,100 @@ export function CohortNetworkCard({
     [cut, lens, litEdges, net],
   );
   const roleMap = useMemo(() => roles(degreeMap), [degreeMap]);
-  /** What sizes a node: positive ties received, or positive ties given. */
+
+  // --- the network analytics: one positive-tie graph, four readings of it ---
+  //
+  // All four run on the SAME positive ties the map draws under the active lens
+  // and threshold, so nothing in the rail can contradict the picture. They are
+  // deliberately taken over the whole cohort rather than the polarity/role
+  // filters: hiding negative ties is a reading aid, not a claim that the
+  // network is smaller than it is.
+  const memberNos = useMemo(() => net?.nodes.map((n) => n.no) ?? [], [net]);
+  const posTies = useMemo(
+    () => positiveTies(net?.edges ?? [], lens, cut),
+    [cut, lens, net],
+  );
+
+  /** Who the group routes through — betweenness on the positive-tie graph. */
+  const bridgeScores = useMemo(() => betweenness(memberNos, posTies), [memberNos, posTies]);
+  const bridges = useMemo(() => topBridges(bridgeScores, 5), [bridgeScores]);
+  const bridgeMax = useMemo(() => Math.max(0, ...bridgeScores.values()), [bridgeScores]);
+
+  /** Where the group actually divides, and the colours that show it. */
+  const clusters = useMemo(
+    () => clusterView(communities(memberNos, posTies)),
+    [memberNos, posTies],
+  );
+
+  /** A trusts B; B does not say the same. */
+  const oneWay = useMemo(
+    () => unreciprocatedTies(lensPairs(net?.edges ?? [], lens), cut),
+    [cut, lens, net],
+  );
+
+  /**
+   * How much of each subgroup's trust stays inside it — where "subgroup" is
+   * whichever line the facilitator picked: function, tenure band or team. The
+   * modes a roster has no data for are never offered, and if the selected one
+   * disappears (a round with no tenure recorded) the panel falls back to
+   * function rather than drawing an empty table.
+   */
+  const silosOptions = useMemo(() => silosModes(net?.nodes ?? []), [net]);
+  const [silosMode, setSilosMode] = useState<SilosMode>('function');
+  const activeSilosMode: SilosMode = silosOptions.includes(silosMode) ? silosMode : 'function';
+  const silos = useMemo(
+    () =>
+      orderSilos(
+        subgroupCohesion(silosGroups(net?.nodes ?? [], activeSilosMode), posTies),
+        activeSilosMode,
+      ),
+    [activeSilosMode, net, posTies],
+  );
+  const silosLabelOf = useMemo(
+    () => silosLabel(net?.nodes ?? [], activeSilosMode),
+    [activeSilosMode, net],
+  );
+
+  /**
+   * The two facets of trust read side by side. Reliability and openness are
+   * single-item lenses on the same block, so the group's densities under them
+   * are directly comparable — and the gap between them is the finding.
+   */
+  const relDensity = useMemo(() => lensDensity(net?.edges ?? [], 'reliability', cut), [cut, net]);
+  const openDensity = useMemo(() => lensDensity(net?.edges ?? [], 'openness', cut), [cut, net]);
+
+  /** Most trusted and most influential — read under their own lenses, always. */
+  const anchorLists = useMemo(
+    () => computeAnchors(memberNos, net?.edges ?? [], cut),
+    [cut, memberNos, net],
+  );
+
+  /** What sizes a node: ties received, ties given, or how much routes through them. */
   const sizeVal = useMemo(() => {
     const m = new Map<number, number>();
+    if (sizeBy === 'bridge') {
+      for (const [no, s] of bridgeScores) m.set(no, s);
+      return m;
+    }
     for (const [no, d] of degreeMap) m.set(no, sizeBy === 'in' ? d.posIn : d.posOut);
     return m;
-  }, [degreeMap, sizeBy]);
+  }, [bridgeScores, degreeMap, sizeBy]);
+
+  /**
+   * The eight nodes that carry a standing name: the top of whatever the size
+   * chips are currently measuring, which is the same rule the compare panes
+   * and the insight maps use. Nobody on zero is ever named — a graph with
+   * three ties should show three names, not eight.
+   */
+  const topLabels = useMemo(() => {
+    return new Set(
+      [...sizeVal.entries()]
+        .filter(([, v]) => v > 0)
+        .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+        .slice(0, GRAPH_LABELS)
+        .map(([no]) => no),
+    );
+  }, [sizeVal]);
 
   const allFuncs = useMemo(
     () => [...new Set((net?.nodes ?? []).map((n) => n.func.trim() || '—'))].sort(),
@@ -407,6 +568,16 @@ export function CohortNetworkCard({
 
   const layout = useMemo(() => {
     if (!net) return { positions: new Map<number, { x: number; y: number }>(), maxSize: 0 };
+    // The compare view solves its own (shared) layout in a pane-sized box, and
+    // the Insights page solves its own mini-map, so the single-canvas layout
+    // stands still while either is up — and everyone is still in their old seat
+    // when you come back to the map.
+    if (view === 'compare' || view === 'insights') {
+      return {
+        positions: positionsRef.current,
+        maxSize: Math.max(0, ...[...layoutDegree.values()].map((d) => d.posIn)),
+      };
+    }
     // A new box stretches the existing seats proportionally first, so the
     // anchored reheat spreads the constellation into the new space instead of
     // pinning it to the old, smaller one.
@@ -439,6 +610,45 @@ export function CohortNetworkCard({
     return { positions, maxSize: Math.max(0, ...layoutNodes.map((n) => n.inTies)) };
   }, [box, layoutDegree, net, view]);
 
+  /**
+   * The compare view's two panes are drawn side by side inside the one canvas,
+   * so each pane solves in half the width — and stacks, at half the height,
+   * once half a width is too narrow to read a constellation in.
+   */
+  const compareStacked = box.w < 900;
+  const paneBox: LayoutBox = useMemo(
+    () =>
+      box.w < 900
+        ? { w: Math.max(360, box.w - 26), h: Math.max(240, Math.round(box.h / 2) - 34) }
+        : { w: Math.max(360, Math.round(box.w / 2) - 26), h: Math.max(260, box.h - 54) },
+    [box],
+  );
+  const comparePosRef = useRef<Positions>(new Map());
+  /**
+   * ONE layout for both panes, solved on the union of the two lenses' positive
+   * ties. Laying each pane out on its own edges would put the same person in
+   * two different places and destroy the only comparison the view exists to
+   * make — you read "trusted here, not listened to there" off a seat.
+   */
+  const comparePositions = useMemo(() => {
+    if (!net || view !== 'compare') return new Map<number, { x: number; y: number }>();
+    const ties = unionTies(net.edges, [TRUST_LENS, POWER_LENS], cut);
+    const inTies = new Map<number, number>();
+    for (const t of ties) inTies.set(t.to, (inTies.get(t.to) ?? 0) + 1);
+    const positions = forceMapLayout(
+      net.nodes.map((n) => ({
+        no: n.no,
+        inTies: inTies.get(n.no) ?? 0,
+        group: n.func.trim() || '—',
+      })),
+      ties.map((t) => ({ from: t.from, to: t.to, weight: 0.6 })),
+      comparePosRef.current,
+      paneBox,
+    );
+    comparePosRef.current = positions;
+    return positions;
+  }, [cut, net, paneBox, view]);
+
   const focusHover = hoverFocus ? hoveredNo : null;
 
   const { nodes, edges } = useMemo((): { nodes: Node<PersonData>[]; edges: Edge<RatingData>[] } => {
@@ -455,20 +665,23 @@ export function CohortNetworkCard({
     const rfNodes: Node<PersonData>[] = shown.map((n) => {
       const ties = sizeVal.get(n.no) ?? 0;
       const role: Role = n.responded ? roleMap.get(n.no) ?? 'member' : 'member';
-      const r = nodeRadius(ties, maxSize);
+      // Betweenness runs 0..1, not 0..n, so it needs its own top of scale.
+      const r = nodeRadius(ties, sizeBy === 'bridge' ? bridgeMax : maxSize);
       const p = positions.get(n.no) ?? { x: 0, y: 0 };
       const dimmed =
         (focus !== null && focus !== n.no && !(ego?.has(n.no) ?? false)) ||
         (matches !== null && !matches.has(n.no));
       const funcColor = groupColor.get(n.func.trim()) ?? GROUP_OTHER;
       const color =
-        colorBy === 'role'
-          ? role === 'member'
-            ? funcColor
-            : ROLE_STYLE[role].fill === 'transparent'
+        colorBy === 'cluster'
+          ? clusters.fillByNo.get(n.no) ?? GROUP_OTHER
+          : colorBy === 'role'
+            ? role === 'member'
               ? funcColor
-              : ROLE_STYLE[role].fill
-          : funcColor;
+              : ROLE_STYLE[role].fill === 'transparent'
+                ? funcColor
+                : ROLE_STYLE[role].fill
+            : funcColor;
       return {
         id: String(n.no),
         type: 'person',
@@ -482,12 +695,16 @@ export function CohortNetworkCard({
           responded: n.responded ?? false,
           dimmed,
           selected: selectedNo === n.no,
+          // Standing names: the eight most central, plus anyone the reader is
+          // pointing at, has clicked, or has just searched for. Everyone else
+          // is a hover away — which is what keeps the dense middle readable.
           showLabel:
-            (showLabels && focus === null) ||
+            showLabels ||
             focus === n.no ||
             (ego?.has(n.no) ?? false) ||
             selectedNo === n.no ||
-            (matches?.has(n.no) ?? false),
+            (matches?.has(n.no) ?? false) ||
+            (focus === null && matches === null && topLabels.has(n.no)),
         },
         draggable: true,
       };
@@ -496,7 +713,8 @@ export function CohortNetworkCard({
     const rfEdges: Edge<RatingData>[] = drawEdges.map(({ e, polarity }) => {
       const key = `${e.from}>${e.to}`;
       const isMutual = mutualKeys.has(key);
-      const dimmed = focus !== null && e.from !== focus && e.to !== focus;
+      const picked = pairKey === key;
+      const dimmed = !picked && focus !== null && e.from !== focus && e.to !== focus;
       const style = POLARITY_STYLE[polarity];
       return {
         id: key,
@@ -514,6 +732,7 @@ export function CohortNetworkCard({
           mutual: isMutual,
           bend: isMutual ? (e.from < e.to ? 0.28 : -0.28) : 0.12,
           pending: false,
+          picked,
         },
       };
     });
@@ -536,12 +755,15 @@ export function CohortNetworkCard({
           mutual: false,
           bend: 0.05,
           pending: true,
+          picked: false,
         },
       });
     }
 
     return { nodes: rfNodes, edges: rfEdges };
   }, [
+    bridgeMax,
+    clusters,
     colorBy,
     drawEdges,
     groupColor,
@@ -552,11 +774,14 @@ export function CohortNetworkCard({
     mutualKeys,
     neighboursOf,
     net,
+    pairKey,
     pendingPairs,
     roleMap,
     selectedNo,
     showLabels,
+    sizeBy,
     sizeVal,
+    topLabels,
     visibleNos,
   ]);
 
@@ -572,7 +797,10 @@ export function CohortNetworkCard({
   // framed after a relayout. A short raf lets the new positions commit first.
   const hasNodes = nodes.length > 0;
   useEffect(() => {
-    if (!hasNodes) return;
+    // The Insights page has no React Flow instance; the ref still holds the
+    // last one, and framing a camera that is no longer on screen is at best
+    // wasted work.
+    if (!hasNodes || view === 'insights') return;
     const id = requestAnimationFrame(() => rfRef.current?.fitView({ padding: 0.05, duration: 300 }));
     return () => cancelAnimationFrame(id);
     // Deliberately NOT keyed on the filtered node count: hiding people must
@@ -613,10 +841,40 @@ export function CohortNetworkCard({
     (showPending ? 1 : 0) +
     (3 - polarities.size);
 
+  /** The three force/circle/group layouts share one switcher tab. */
+  const isGraphView = view === 'map' || view === 'circle' || view === 'groups';
+
   const focusNode = (no: number) => {
+    setPairKey(null);
     setSelectedNo(no);
+    // The compare view has no React Flow instance to drive — its panes are
+    // whole-graph SVGs, and the selection alone is what lights the person.
+    if (view === 'compare') return;
     const p = positionsRef.current.get(no);
     if (p) rfRef.current?.fitView({ padding: 0.6, duration: 400, nodes: [{ id: String(no) }] } as never);
+  };
+
+  /** A one-way tie picked from the rail: both people lit, that arrow drawn heavy. */
+  const focusPair = (from: number, to: number) => {
+    setSelectedNo(from);
+    setPairKey(`${from}>${to}`);
+    if (view !== 'compare' && positionsRef.current.has(from)) {
+      rfRef.current?.fitView({ padding: 0.6, duration: 400, nodes: [{ id: String(from) }, { id: String(to) }] } as never);
+    }
+  };
+
+  const nameOf = (no: number): string => net.nodes.find((n) => n.no === no)?.name ?? `#${no}`;
+  const funcOf = (no: number): string => net.nodes.find((n) => n.no === no)?.func.trim() || '—';
+
+  /** A node's fill, shared by the force map and the compare panes. */
+  const fillOf = (n: { no: number; func: string; responded?: boolean }): string => {
+    if (colorBy === 'cluster') return clusters.fillByNo.get(n.no) ?? GROUP_OTHER;
+    if (colorBy === 'role') {
+      const role: Role = n.responded ? roleMap.get(n.no) ?? 'member' : 'member';
+      const fill = ROLE_STYLE[role].fill;
+      if (role !== 'member' && fill !== 'transparent') return fill;
+    }
+    return groupColor.get(n.func.trim()) ?? GROUP_OTHER;
   };
 
   const soloDept =
@@ -647,8 +905,17 @@ export function CohortNetworkCard({
         <div className="nx-seg" role="tablist" aria-label="Diagram">
           <button
             role="tab"
-            aria-selected={view !== 'layers'}
-            className={`nx-seg-btn${view !== 'layers' ? ' is-on' : ''}`}
+            aria-selected={view === 'insights'}
+            className={`nx-seg-btn${view === 'insights' ? ' is-on' : ''}`}
+            onClick={() => setView('insights')}
+            title="The nine findings, read for a debrief"
+          >
+            Insights
+          </button>
+          <button
+            role="tab"
+            aria-selected={isGraphView}
+            className={`nx-seg-btn${isGraphView ? ' is-on' : ''}`}
             onClick={() => setView('map')}
           >
             Graph
@@ -661,9 +928,18 @@ export function CohortNetworkCard({
           >
             Flow chart
           </button>
+          <button
+            role="tab"
+            aria-selected={view === 'compare'}
+            className={`nx-seg-btn${view === 'compare' ? ' is-on' : ''}`}
+            onClick={() => setView('compare')}
+            title="The same people twice: who the group trusts, and who it lets decide"
+          >
+            Trust vs Influence
+          </button>
         </div>
 
-        {view !== 'layers' ? (
+        {isGraphView ? (
           <div className="nx-seg" role="tablist" aria-label="Layout">
             {(
               [
@@ -685,7 +961,10 @@ export function CohortNetworkCard({
           </div>
         ) : null}
 
-        <div className="nx-search-wrap">
+        {/* Search and filters drive the explorer canvas. The Insights page is a
+            fixed reading of the whole cohort — it must look the same for every
+            viewer — so its controls are not offered while it is up. */}
+        <div className="nx-search-wrap" style={view === 'insights' ? { display: 'none' } : undefined}>
           <div className="nx-search">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
               <circle cx="11" cy="11" r="7" />
@@ -754,6 +1033,7 @@ export function CohortNetworkCard({
             className={`nx-filter-btn${filtersOpen ? ' is-on' : ''}`}
             onClick={() => setFiltersOpen((v) => !v)}
             aria-expanded={filtersOpen}
+            style={view === 'insights' ? { display: 'none' } : undefined}
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
               <path d="M3 5h18M6 12h12M10 19h4" />
@@ -764,7 +1044,14 @@ export function CohortNetworkCard({
         </div>
       </div>
 
-      {/* The stage: canvas + collapsible rail. The filter drawer floats over the canvas. */}
+      {/* The stage: canvas + collapsible rail. The filter drawer floats over the
+          canvas. The Insights page replaces both — its cards ARE the content,
+          so there is no rail beside them and nothing to pan. */}
+      {view === 'insights' ? (
+        <div className="nx-stage is-insights">
+          <InsightsView net={net} groupColor={groupColor} isFull={isFull} onToggleFull={() => setIsFull((v) => !v)} />
+        </div>
+      ) : (
       <div className={`nx-stage${railOpen ? '' : ' rail-closed'}`}>
         <div className="nx-canvas" ref={setCanvasEl}>
           {filtersOpen ? (
@@ -823,6 +1110,35 @@ export function CohortNetworkCard({
             />
           ) : null}
 
+          {view === 'compare' ? (
+            <CompareView
+              nodes={net.nodes.filter((n) => visibleNos.has(n.no))}
+              edges={net.edges}
+              visible={visibleNos}
+              positions={comparePositions}
+              paneBox={paneBox}
+              stacked={compareStacked}
+              cut={cut}
+              fillOf={fillOf}
+              focus={focusHover ?? selectedNo}
+              selectedNo={selectedNo}
+              matches={matches}
+              showLabels={showLabels}
+              onSelect={(no) => {
+                setPairKey(null);
+                setSelectedNo((cur) => (cur === no ? null : no));
+              }}
+              onHover={(no, ev) => {
+                hoverEnter(no);
+                const r = canvasEl?.getBoundingClientRect();
+                if (r) setTipPos({ x: ev.clientX - r.left, y: ev.clientY - r.top });
+              }}
+              onLeave={() => {
+                hoverLeave();
+                setTipPos(null);
+              }}
+            />
+          ) : (
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -846,7 +1162,10 @@ export function CohortNetworkCard({
               hoverLeave();
               setTipPos(null);
             }}
-            onPaneClick={() => setSelectedNo(null)}
+            onPaneClick={() => {
+              setSelectedNo(null);
+              setPairKey(null);
+            }}
             fitView
             minZoom={0.15}
             maxZoom={2.6}
@@ -875,6 +1194,7 @@ export function CohortNetworkCard({
               </ControlButton>
             </Controls>
           </ReactFlow>
+          )}
 
           {/* The whole window back to its resting state: every filter, the
               selection, the search, the view and the camera. One button, no
@@ -884,6 +1204,7 @@ export function CohortNetworkCard({
             className="nx-reset"
             onClick={() => {
               setSelectedNo(null);
+              setPairKey(null);
               setHoveredNo(null);
               setQuery('');
               setView('map');
@@ -1020,6 +1341,7 @@ export function CohortNetworkCard({
 
           <InteractiveLegend
             allFuncs={allFuncs}
+            clusters={colorBy === 'cluster' ? clusters.entries : null}
             groupColor={groupColor}
             hiddenFuncs={hiddenFuncs}
             onToggleFunc={(f) =>
@@ -1085,10 +1407,47 @@ export function CohortNetworkCard({
                   onClose={() => setSelectedNo(null)}
                 />
               ) : (
+                <>
+                {/* The network readings, in the order a client asks for them:
+                    who holds the group, who joins it up, where trust runs one
+                    way, where it stops at a subgroup's edge, and whether the
+                    trust that exists is the delivering kind or the safe kind. */}
+                <div className="net-metrics">
+                  <AnchorsPanel
+                    anchors={anchorLists}
+                    nameOf={nameOf}
+                    funcOf={funcOf}
+                    onPick={focusNode}
+                  />
+                  <BridgesPanel
+                    bridges={bridges}
+                    nameOf={nameOf}
+                    funcOf={funcOf}
+                    onPick={focusNode}
+                  />
+                  <OneWayPanel
+                    ties={oneWay}
+                    nameOf={nameOf}
+                    onPick={focusPair}
+                    pairKey={pairKey}
+                  />
+                  <SilosPanel
+                    silos={silos}
+                    groupColor={groupColor}
+                    mode={activeSilosMode}
+                    modes={silosOptions}
+                    onMode={setSilosMode}
+                    labelOf={silosLabelOf}
+                  />
+                  <RelOpenPanel rel={relDensity} open={openDensity} />
+                </div>
                 <MetricsPanel
                   net={net}
                   lens={lens}
                   lensNet={lensNet ?? null}
+                  lensFallbackDensity={
+                    lens === 'reliability' ? relDensity : lens === 'openness' ? openDensity : null
+                  }
                   roleCounts={roleCounts}
                   groupColor={groupColor}
                   onRole={(r) =>
@@ -1101,11 +1460,13 @@ export function CohortNetworkCard({
                   }
                   onPick={focusNode}
                 />
+                </>
               )}
             </div>
           ) : null}
         </aside>
       </div>
+      )}
     </section>
 
     <EmployeesTable
@@ -1130,15 +1491,17 @@ function Chip({
   children,
   swatch,
   line,
+  title,
 }: {
   on: boolean;
   onClick: () => void;
   children: ReactNode;
   swatch?: string;
   line?: { color: string; dashed: boolean };
+  title?: string;
 }) {
   return (
-    <button className={`nx-chip${on ? ' is-on' : ' is-off'}`} aria-pressed={on} onClick={onClick}>
+    <button className={`nx-chip${on ? ' is-on' : ' is-off'}`} aria-pressed={on} onClick={onClick} title={title}>
       {swatch ? <span className="nx-chip-dot" style={{ background: swatch }} aria-hidden="true" /> : null}
       {line ? (
         <span
@@ -1155,6 +1518,7 @@ function Chip({
 /** The floating legend, every item a live filter toggle. */
 function InteractiveLegend({
   allFuncs,
+  clusters,
   groupColor,
   hiddenFuncs,
   onToggleFunc,
@@ -1164,6 +1528,8 @@ function InteractiveLegend({
   onTogglePolarity,
 }: {
   allFuncs: string[];
+  /** Non-null when nodes are coloured by cluster — the row the colours mean. */
+  clusters: ClusterLegendEntry[] | null;
   groupColor: Map<string, string>;
   hiddenFuncs: Set<string>;
   onToggleFunc: (f: string) => void;
@@ -1174,14 +1540,29 @@ function InteractiveLegend({
 }) {
   return (
     <div className="nx-legend" aria-label="Legend and filters">
-      <div className="nx-legend-row">
-        <span className="nx-legend-head">Groups</span>
-        {allFuncs.slice(0, 8).map((f) => (
-          <Chip key={f} on={!hiddenFuncs.has(f)} onClick={() => onToggleFunc(f)} swatch={groupColor.get(f) ?? GROUP_OTHER}>
-            {f}
-          </Chip>
-        ))}
-      </div>
+      {clusters ? (
+        // Clusters are a reading of the data, not a roster field, so they are
+        // shown rather than filtered on — there is nothing to switch off.
+        <div className="nx-legend-row">
+          <span className="nx-legend-head">Clusters</span>
+          {clusters.map((c) => (
+            <span key={c.label} className="nx-chip is-on" style={{ cursor: 'default' }}>
+              <span className="nx-chip-dot" style={{ background: c.fill }} aria-hidden="true" />
+              {c.label} ({c.size})
+            </span>
+          ))}
+          {clusters.length === 0 ? <span className="nx-chip is-off">No ties yet</span> : null}
+        </div>
+      ) : (
+        <div className="nx-legend-row">
+          <span className="nx-legend-head">Groups</span>
+          {allFuncs.slice(0, 8).map((f) => (
+            <Chip key={f} on={!hiddenFuncs.has(f)} onClick={() => onToggleFunc(f)} swatch={groupColor.get(f) ?? GROUP_OTHER}>
+              {f}
+            </Chip>
+          ))}
+        </div>
+      )}
       <div className="nx-legend-row">
         <span className="nx-legend-head">Roles</span>
         {(['star', 'rejected', 'isolate'] as Role[]).map((r) => (
@@ -1231,10 +1612,10 @@ function FilterDrawer(props: {
   setHoverCard: (b: boolean) => void;
   hoverFocus: boolean;
   setHoverFocus: (b: boolean) => void;
-  sizeBy: 'in' | 'out';
-  setSizeBy: (s: 'in' | 'out') => void;
-  colorBy: 'function' | 'role';
-  setColorBy: (s: 'function' | 'role') => void;
+  sizeBy: SizeBy;
+  setSizeBy: (s: SizeBy) => void;
+  colorBy: ColorBy;
+  setColorBy: (s: ColorBy) => void;
   egoDir: 'both' | 'in' | 'out';
   setEgoDir: (s: 'both' | 'in' | 'out') => void;
   soloDept: string;
@@ -1274,11 +1655,18 @@ function FilterDrawer(props: {
           <span className="nx-flabel">Lens</span>
           <div className="nx-fchips">
             {LENSES.map((l) => (
-              <Chip key={l.key} on={p.lens === l.key} onClick={() => p.setLens(l.key)} swatch={l.color}>
+              <Chip
+                key={l.key}
+                on={p.lens === l.key}
+                onClick={() => p.setLens(l.key)}
+                swatch={l.color}
+                title={l.hint}
+              >
                 {l.name}
               </Chip>
             ))}
           </div>
+          <p className="nx-fhelp">{LENSES.find((l) => l.key === p.lens)?.hint ?? 'Every rating this group gave, averaged.'}</p>
         </div>
 
         <div className="nx-fgroup">
@@ -1411,6 +1799,13 @@ function FilterDrawer(props: {
             <Chip on={p.sizeBy === 'out'} onClick={() => p.setSizeBy('out')}>
               Ties given
             </Chip>
+            <Chip
+              on={p.sizeBy === 'bridge'}
+              onClick={() => p.setSizeBy('bridge')}
+              title="How much of the group's connection runs through this person"
+            >
+              Bridging
+            </Chip>
           </div>
         </div>
 
@@ -1423,6 +1818,13 @@ function FilterDrawer(props: {
             <Chip on={p.colorBy === 'role'} onClick={() => p.setColorBy('role')}>
               Role
             </Chip>
+            <Chip
+              on={p.colorBy === 'cluster'}
+              onClick={() => p.setColorBy('cluster')}
+              title="The pockets the group has actually formed, whatever the org chart says"
+            >
+              Cluster
+            </Chip>
           </div>
         </div>
 
@@ -1431,7 +1833,7 @@ function FilterDrawer(props: {
           <div className="nx-ftoggles">
             <label className="nx-toggle">
               <input type="checkbox" checked={p.showLabels} onChange={(e) => p.setShowLabels(e.target.checked)} />
-              Always show names
+              Show all labels
             </label>
             <label className="nx-toggle">
               <input type="checkbox" checked={p.hoverFocus} onChange={(e) => p.setHoverFocus(e.target.checked)} />
@@ -1524,43 +1926,22 @@ function RatingEdge({ id, source, target, data, markerEnd }: EdgeProps<Edge<Rati
   const tx = tn.internals.positionAbsolute.x + tw / 2;
   const ty = tn.internals.positionAbsolute.y + (tn.measured.height ?? 30) / 2;
 
-  const ddx = tx - sx;
-  const ddy = ty - sy;
-  const dist = Math.hypot(ddx, ddy) || 1;
-  const ux = ddx / dist;
-  const uy = ddy / dist;
-  // Perpendicular shift separates a mutual pair into two parallel arcs from
-  // the rim itself, not just at the midpoint.
-  const px = -uy;
-  const py = ux;
-  const off = d.mutual ? (d.bend > 0 ? 5 : -5) : 0;
+  // The same arc maths the compare panes draw with — see model.tiePath.
+  const path = tiePath({
+    sx,
+    sy,
+    sr: sw / 2,
+    tx,
+    ty,
+    tr: tw / 2,
+    mutual: d.mutual,
+    bend: d.bend,
+  });
 
-  const startX = sx + ux * (sw / 2) + px * off;
-  const startY = sy + uy * (sw / 2) + py * off;
-  const endX = tx - ux * (tw / 2 + 5) + px * off;
-  const endY = ty - uy * (tw / 2 + 5) + py * off;
-
-  const bend = d.mutual ? d.bend : d.bend * 0.35;
-  const mx = (startX + endX) / 2;
-  const my = (startY + endY) / 2;
-  const cx = mx - (endY - startY) * bend;
-  const cy = my + (endX - startX) * bend;
-  const path = `M ${startX} ${startY} Q ${cx} ${cy} ${endX} ${endY}`;
-
-  const strength =
-    d.polarity === 'positive' ? Math.max(0, (d.mean - 1) / 4) : d.polarity === 'negative' ? 0.55 : 0.35;
-  const width = d.pending ? 1 : (d.focused ? 1.6 : 1) + strength * 1.9;
-  const opacity = d.dimmed
-    ? 0.04
-    : d.focused
-      ? 0.9
-      : d.pending
-        ? 0.4
-        : d.polarity === 'neutral'
-          ? 0.16
-          : d.polarity === 'negative'
-            ? 0.32
-            : 0.24;
+  const width = tieWidth(d.polarity, d.mean, d.focused || d.picked, d.pending) + (d.picked ? 1.4 : 0);
+  const opacity = d.picked
+    ? 0.95
+    : tieOpacity(d.polarity, { dimmed: d.dimmed, focused: d.focused, pending: d.pending });
   return (
     <BaseEdge
       id={id}
@@ -1638,6 +2019,7 @@ function MetricsPanel({
   net,
   lens,
   lensNet,
+  lensFallbackDensity,
   roleCounts,
   groupColor,
   onRole,
@@ -1646,6 +2028,14 @@ function MetricsPanel({
   net: CohortNetwork;
   lens: string;
   lensNet: SocioBlockNetwork | null;
+  /**
+   * The pseudo-lenses (reliability, openness) are single items rather than
+   * scored blocks, so `g.networks` has nothing for them. Density is still a
+   * real, comparable number there and is computed on the card's own edges;
+   * Reciprocity and the rest stay blank, because a reciprocity built from one
+   * item invites more reading than one item can carry.
+   */
+  lensFallbackDensity: LensDensity | null;
   roleCounts: { star: number; rejected: number; isolate: number };
   groupColor: Map<string, string>;
   onRole: (r: Role) => void;
@@ -1707,9 +2097,17 @@ function MetricsPanel({
           help="How much of the group actually knows itself: the share of possible pairs that were rated at all."
         />
         <MeterTile
-          label={activeNet ? 'Density' : 'Density (trust)'}
-          value={shown?.density === null || shown?.density === undefined ? '—' : shown.density.toFixed(2)}
-          fill={shown?.density ?? null}
+          label={activeNet || lensFallbackDensity ? 'Density' : 'Density (trust)'}
+          value={
+            lensFallbackDensity
+              ? lensFallbackDensity.density === null
+                ? '—'
+                : lensFallbackDensity.density.toFixed(2)
+              : shown?.density === null || shown?.density === undefined
+                ? '—'
+                : shown.density.toFixed(2)
+          }
+          fill={lensFallbackDensity ? lensFallbackDensity.density : shown?.density ?? null}
           help="Of the pairs that were rated, the share that reached tie strength. Higher = a better-connected group."
         />
         <MeterTile
@@ -1865,6 +2263,465 @@ function SignalsBlock({
   );
 }
 
+
+// -------------------------------------------------------- network readings
+//
+// Four panels, all fed from the same positive-tie graph the map draws, all
+// live to the lens and the threshold. They are written for an HR reader: every
+// heading is the finding in plain words, and every caption says what the
+// finding means for the group rather than what the maths did.
+
+/** One person in a top-N list: name, function, and the bar that ranks them. */
+function RankRow({
+  name,
+  func,
+  share,
+  fill,
+  value,
+  onClick,
+  bold,
+}: {
+  name: string;
+  func: string;
+  /** 0..1 — the bar's fill against the top of this list. */
+  share: number;
+  fill: string;
+  value: string;
+  onClick?: () => void;
+  bold?: boolean;
+}) {
+  return (
+    <div style={{ margin: '7px 0' }}>
+      <button
+        onClick={onClick}
+        disabled={!onClick}
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: 6,
+          width: '100%',
+          padding: 0,
+          border: 0,
+          background: 'none',
+          textAlign: 'left',
+          cursor: onClick ? 'pointer' : 'default',
+          color: 'inherit',
+          font: 'inherit',
+        }}
+        title={`${name} · ${func}`}
+      >
+        <span
+          style={{
+            fontSize: 12,
+            fontWeight: bold ? 750 : 600,
+            color: 'var(--ink)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {name}
+        </span>
+        <span
+          style={{
+            fontSize: 10.5,
+            color: 'var(--ink-4)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            flex: 1,
+          }}
+        >
+          {func}
+        </span>
+        <span style={{ fontSize: 11, color: 'var(--ink-3)', fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+      </button>
+      <span className="net-bar-track" style={{ display: 'block', marginTop: 3 }} aria-hidden="true">
+        <span
+          className="net-bar-fill"
+          style={{ width: `${Math.round(Math.max(0, Math.min(1, share)) * 100)}%`, background: fill }}
+        />
+      </span>
+    </div>
+  );
+}
+
+/**
+ * "Most trusted / Most influential" — the first thing a client looks for, so it
+ * sits at the top of the rail. Two lists, one panel: a name in both is the
+ * person the group both leans on and lets decide, and that overlap (or its
+ * absence) is the reading.
+ */
+function AnchorsPanel({
+  anchors,
+  nameOf,
+  funcOf,
+  onPick,
+}: {
+  anchors: { trusted: { no: number; count: number }[]; influential: { no: number; count: number }[]; both: Set<number> };
+  nameOf: (no: number) => string;
+  funcOf: (no: number) => string;
+  onPick: (no: number) => void;
+}) {
+  const list = (entries: { no: number; count: number }[], fill: string) => {
+    if (entries.length === 0) return <p className="hint">Nobody yet.</p>;
+    const max = entries[0]!.count;
+    return entries.map((e) => (
+      <RankRow
+        key={e.no}
+        name={nameOf(e.no)}
+        func={funcOf(e.no)}
+        share={max > 0 ? e.count / max : 0}
+        fill={fill}
+        value={String(e.count)}
+        bold={anchors.both.has(e.no)}
+        onClick={() => onPick(e.no)}
+      />
+    ));
+  };
+  return (
+    <div className="rail-section">
+      <h4>
+        Most trusted / Most influential <span>who the group leans on</span>
+      </h4>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={{ minWidth: 0 }}>
+          <span className="rail-tile-label">Most trusted</span>
+          {list(anchors.trusted, POLARITY_STYLE.positive.color)}
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <span className="rail-tile-label">Most influential</span>
+          {list(anchors.influential, '#B4530E')}
+        </div>
+      </div>
+      <p className="hint" style={{ marginTop: 6 }}>
+        Names in <b>bold</b> appear on both lists — trusted and listened to.
+      </p>
+    </div>
+  );
+}
+
+/** "Bridges" — the people the group's connection routes through. */
+function BridgesPanel({
+  bridges,
+  nameOf,
+  funcOf,
+  onPick,
+}: {
+  bridges: { no: number; score: number; share: number }[];
+  nameOf: (no: number) => string;
+  funcOf: (no: number) => string;
+  onPick: (no: number) => void;
+}) {
+  return (
+    <div className="rail-section">
+      <h4>
+        Bridges <span>who joins the group up</span>
+      </h4>
+      {bridges.length === 0 ? (
+        <p className="hint">No bridges — the network has no in-between people under this lens.</p>
+      ) : (
+        <>
+          {bridges.map((b) => (
+            <RankRow
+              key={b.no}
+              name={nameOf(b.no)}
+              func={funcOf(b.no)}
+              share={b.share}
+              fill="#4a3aa7"
+              value={b.score.toFixed(2)}
+              onClick={() => onPick(b.no)}
+            />
+          ))}
+          <p className="hint" style={{ marginTop: 6 }}>
+            Connects parts of the group that otherwise don&rsquo;t connect. Losing this person
+            fragments the network more than losing a star.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** "Unreturned trust" — reaching out that is not reached back. */
+function OneWayPanel({
+  ties,
+  nameOf,
+  onPick,
+  pairKey,
+}: {
+  ties: UnreciprocatedTie[];
+  nameOf: (no: number) => string;
+  onPick: (a: number, b: number) => void;
+  pairKey: string | null;
+}) {
+  const shown = ties.slice(0, 8);
+  return (
+    <div className="rail-section">
+      <h4>
+        Unreturned trust <span>ties that run one way</span>
+      </h4>
+      {shown.length === 0 ? (
+        <p className="hint">Every tie under this lens is returned.</p>
+      ) : (
+        <>
+          <div style={{ display: 'grid', gap: 5 }}>
+            {shown.map((t) => {
+              const key = `${t.a}>${t.b}`;
+              const on = pairKey === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => onPick(t.a, t.b)}
+                  title={
+                    t.kind === 'not_returned'
+                      ? 'Rated back, but below the tie line.'
+                      : 'Never rated back — usually distance or seniority, not rejection.'
+                  }
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    width: '100%',
+                    padding: '5px 7px',
+                    borderRadius: 8,
+                    border: `1px solid ${on ? 'var(--accent)' : 'var(--line)'}`,
+                    background: on ? 'var(--surface-2)' : 'var(--surface)',
+                    cursor: 'pointer',
+                    color: 'inherit',
+                    font: 'inherit',
+                    textAlign: 'left',
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 11.5,
+                      color: 'var(--ink)',
+                      flex: 1,
+                      minWidth: 0,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <b>{nameOf(t.a)}</b> → {nameOf(t.b)}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 9,
+                      letterSpacing: '.04em',
+                      textTransform: 'uppercase',
+                      fontWeight: 700,
+                      padding: '2px 5px',
+                      borderRadius: 99,
+                      whiteSpace: 'nowrap',
+                      color: t.kind === 'not_returned' ? POLARITY_STYLE.negative.color : 'var(--ink-3)',
+                      background: t.kind === 'not_returned' ? 'rgba(192,54,44,.10)' : 'var(--surface-3)',
+                    }}
+                  >
+                    {t.kind === 'not_returned' ? 'not returned' : 'no basis'}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      color: 'var(--ink-3)',
+                      fontVariantNumeric: 'tabular-nums',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {t.aToB.toFixed(1)} · {t.bToA === null ? '—' : t.bToA.toFixed(1)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="hint" style={{ marginTop: 6 }}>
+            A trusts B; B does not say the same. One-way ties often predict friction before it
+            surfaces.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * "Silos" — how much of a subgroup's trust never leaves it.
+ *
+ * Which line the group is cut along is the reader's question, not ours: the
+ * same cohesion maths reads function, tenure band or reporting line, and the
+ * segmented control only offers the cuts this roster carries data for. With
+ * only one cut available there is no control at all.
+ */
+function SilosPanel({
+  silos,
+  groupColor,
+  mode,
+  modes,
+  onMode,
+  labelOf,
+}: {
+  silos: SubgroupTieStats[];
+  groupColor: Map<string, string>;
+  mode: SilosMode;
+  modes: SilosMode[];
+  onMode: (m: SilosMode) => void;
+  labelOf: (key: string) => string;
+}) {
+  const head = (
+    <h4>
+      Silos <span>{SILOS_MODE_SUB[mode]}</span>
+    </h4>
+  );
+  const selector =
+    modes.length > 1 ? (
+      <div className="nx-seg nx-seg-sm" role="tablist" aria-label="Group by" style={{ marginBottom: 8 }}>
+        {modes.map((m) => (
+          <button
+            key={m}
+            role="tab"
+            aria-selected={mode === m}
+            className={`nx-seg-btn${mode === m ? ' is-on' : ''}`}
+            onClick={() => onMode(m)}
+          >
+            {SILOS_MODE_LABEL[m]}
+          </button>
+        ))}
+      </div>
+    ) : null;
+
+  if (silos.length === 0) {
+    return (
+      <div className="rail-section">
+        {head}
+        {selector}
+        <p className="hint">
+          {mode === 'tenure'
+            ? 'No tenure band has been recorded for this roster.'
+            : mode === 'team'
+              ? 'No reporting line has been recorded for this roster.'
+              : 'No function has been recorded for this roster.'}
+        </p>
+      </div>
+    );
+  }
+  const maxWithin = Math.max(0, ...silos.map((s) => s.withinRate ?? 0));
+  // Function rows keep the colours the nodes wear; the other cuts have no such
+  // shared palette, so they take the categorical order in row order.
+  const colorAt = (key: string, i: number): string =>
+    mode === 'function'
+      ? groupColor.get(key) ?? GROUP_OTHER
+      : GROUP_COLORS[i % GROUP_COLORS.length] ?? GROUP_OTHER;
+  const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)}%`);
+  const cell: React.CSSProperties = { fontSize: 11, color: 'var(--ink-2)', fontVariantNumeric: 'tabular-nums', textAlign: 'right' };
+  return (
+    <div className="rail-section">
+      {head}
+      {selector}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: '4px 8px', alignItems: 'center' }}>
+        <span className="rail-tile-label">{SILOS_MODE_COLUMN[mode]}</span>
+        <span className="rail-tile-label" style={{ textAlign: 'right' }}>Size</span>
+        <span className="rail-tile-label" style={{ textAlign: 'right' }}>Within</span>
+        <span className="rail-tile-label" style={{ textAlign: 'right' }}>Outward</span>
+        {silos.map((s, i) => (
+          <Fragment key={s.key}>
+            <span
+              style={{
+                fontSize: 11.5,
+                color: 'var(--ink)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+              }}
+              title={labelOf(s.key)}
+            >
+              <i
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: colorAt(s.key, i),
+                  flex: '0 0 auto',
+                }}
+              />
+              {labelOf(s.key)}
+            </span>
+            <span style={cell}>{s.size}</span>
+            <span
+              style={cell}
+              title={s.suppressed ? 'Too small to report without identifying individuals.' : undefined}
+            >
+              {pct(s.withinRate)}
+            </span>
+            <span
+              style={cell}
+              title={s.suppressed ? 'Too small to report without identifying individuals.' : undefined}
+            >
+              {pct(s.outRate)}
+            </span>
+            <span className="net-bar-track" style={{ gridColumn: '1 / -1', marginBottom: 4 }} aria-hidden="true">
+              <span
+                className="net-bar-fill"
+                style={{
+                  width: `${Math.round(((s.withinRate ?? 0) / Math.max(0.0001, maxWithin)) * 100)}%`,
+                  background: colorAt(s.key, i),
+                }}
+              />
+            </span>
+          </Fragment>
+        ))}
+      </div>
+      {silosVerdict(silos) ? (
+        <p className="hint" style={{ marginTop: 6 }}>
+          {mode === 'tenure'
+            ? 'Trust pools inside tenure bands more than it flows between them.'
+            : mode === 'team'
+              ? 'Trust pools inside teams more than it flows between them.'
+              : 'Trust pools inside functions more than it flows between them.'}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * "Reliability vs openness" — the two facets of trust, side by side.
+ *
+ * A group can be entirely dependable and still unsafe to be wrong in front of.
+ * The Trust block averages exactly that difference away, which is why these
+ * two single-item lenses are drawn apart: the gap between the bars is the
+ * finding, and it decides whether the work is psychological safety or
+ * accountability.
+ */
+function RelOpenPanel({ rel, open }: { rel: LensDensity; open: LensDensity }) {
+  const verdict = relOpenVerdict(rel.density, open.density);
+  const empty = rel.density === null && open.density === null;
+  return (
+    <div className="rail-section">
+      <h4>
+        Reliability vs openness <span>two facets of trust</span>
+      </h4>
+      {empty ? (
+        <p className="hint">Not enough rated pairs under these lenses yet.</p>
+      ) : (
+        <>
+          <div style={{ display: 'grid', gap: 9 }}>
+            <FacetBar label="Delivers as promised" stat={rel} color="#0F7A63" />
+            <FacetBar label="Safe to be open" stat={open} color="#3FA08A" />
+          </div>
+          {verdict ? (
+            <p className="hint" style={{ marginTop: 8 }}>
+              {verdict}
+            </p>
+          ) : null}
+        </>
+      )}
+    </div>
+  );
+}
 
 interface MemberTrendPoint {
   roundNo: number;

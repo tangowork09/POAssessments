@@ -82,6 +82,168 @@ function fillBox(positions: Positions, box: LayoutBox, pad = 70): Positions {
   return out;
 }
 
+/**
+ * A subset of solved positions, zoomed to fill the box: one uniform scale and
+ * one shift, never a stretch, so the scoped people keep exactly the shape they
+ * had on the whole map and simply take up the room the others vacated. Below
+ * two points there is nothing to fit; the seat is returned as it was.
+ */
+export function zoomToBox(
+  positions: Positions,
+  keep: ReadonlySet<number>,
+  box: LayoutBox,
+  pad = 70,
+): Positions {
+  const pts = [...positions].filter(([k]) => keep.has(k));
+  if (pts.length < 2) {
+    const out: Positions = new Map();
+    for (const [k] of pts) out.set(k, { x: box.w / 2, y: box.h / 2 });
+    return out;
+  }
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const [, p] of pts) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  const spanX = Math.max(1, maxX - minX);
+  const spanY = Math.max(1, maxY - minY);
+  const outW = Math.max(1, box.w - pad * 2);
+  const outH = Math.max(1, box.h - pad * 2);
+  const scale = Math.min(outW / spanX, outH / spanY);
+  const offX = pad + (outW - spanX * scale) / 2;
+  const offY = pad + (outH - spanY * scale) / 2;
+  const out: Positions = new Map();
+  for (const [k, p] of pts) {
+    out.set(k, { x: offX + (p.x - minX) * scale, y: offY + (p.y - minY) * scale });
+  }
+  return out;
+}
+
+/**
+ * A subset of solved positions stretched to fill a box — the same stretch the
+ * whole map gets from `fillBox`, over the people who are actually drawn, into
+ * whatever box the stage really is. The constellation's shape survives; only
+ * its proportions follow the room, which is how a picture fills a wide stage
+ * instead of sitting letterboxed in the middle of it.
+ */
+export function fitToBox(
+  positions: Positions,
+  keep: ReadonlySet<number>,
+  box: LayoutBox,
+  pad = 56,
+): Positions {
+  const pts = [...positions].filter(([k]) => keep.has(k));
+  if (pts.length < 2) {
+    const out: Positions = new Map();
+    for (const [k] of pts) out.set(k, { x: box.w / 2, y: box.h / 2 });
+    return out;
+  }
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const [, p] of pts) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  const spanX = Math.max(1, maxX - minX);
+  const spanY = Math.max(1, maxY - minY);
+  const outW = Math.max(1, box.w - pad * 2);
+  const outH = Math.max(1, box.h - pad * 2);
+  // Never stretch a tight cluster beyond twice its natural aspect either way:
+  // a line of people is a finding, a smear is not.
+  const sx = outW / spanX;
+  const sy = outH / spanY;
+  const ratio = Math.min(2, Math.max(0.5, sy / sx));
+  const scaleX = Math.min(sx, sy / ratio);
+  const scaleY = scaleX * ratio;
+  const offX = pad + (outW - spanX * scaleX) / 2;
+  const offY = pad + (outH - spanY * scaleY) / 2;
+  const out: Positions = new Map();
+  for (const [k, p] of pts) out.set(k, { x: offX + (p.x - minX) * scaleX, y: offY + (p.y - minY) * scaleY });
+  return out;
+}
+
+/**
+ * Push overlapping seats apart, gently and a few times, inside the box. Run
+ * after a fit: stretching a layout to a wide, short stage compresses it
+ * vertically past the spacing the force pass left, and two dots on top of
+ * each other are one dot to the reader. Positions move as little as they
+ * must — the constellation is kept, its collisions are not.
+ */
+export function separate(
+  positions: Positions,
+  radiusOf: (no: number) => number,
+  box: LayoutBox,
+  pad = 6,
+  iterations = 24,
+): Positions {
+  const ids = [...positions.keys()];
+  const pts = ids.map((no) => ({ no, ...positions.get(no)!, r: radiusOf(no) + pad }));
+  for (let it = 0; it < iterations; it++) {
+    let moved = false;
+    for (let i = 0; i < pts.length; i++) {
+      for (let j = i + 1; j < pts.length; j++) {
+        const a = pts[i]!;
+        const b = pts[j]!;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const d = Math.hypot(dx, dy) || 0.01;
+        const min = a.r + b.r;
+        if (d >= min) continue;
+        const push = ((min - d) / d) * 0.5;
+        const px = dx * push;
+        const py = dy * push;
+        a.x -= px;
+        a.y -= py;
+        b.x += px;
+        b.y += py;
+        moved = true;
+      }
+    }
+    for (const p of pts) {
+      p.x = Math.min(box.w - p.r, Math.max(p.r, p.x));
+      p.y = Math.min(box.h - p.r, Math.max(p.r, p.y));
+    }
+    if (!moved) break;
+  }
+  return new Map(pts.map((p) => [p.no, { x: p.x, y: p.y }]));
+}
+
+/**
+ * The stage split into one lane per group, for a side-by-side reading: a row
+ * of lanes up to three, then two rows. Each lane is a box `fitToBox` can seat
+ * that group's people into, so departments stop interleaving and the ties
+ * that cross between them become the finding.
+ */
+export function laneBoxes(
+  count: number,
+  box: LayoutBox,
+  gap = 18,
+  headroom = 40,
+  /** Room kept clear at the foot of the picture, for the legend that floats there. */
+  bottomInset = 42,
+): { x: number; y: number; w: number; h: number }[] {
+  if (count <= 0) return [];
+  const cols = count <= 3 ? count : Math.ceil(count / 2);
+  const rows = count <= 3 ? 1 : 2;
+  const usable = box.h - bottomInset;
+  const w = (box.w - gap * (cols - 1)) / cols;
+  const h = (usable - gap * (rows - 1)) / rows;
+  const out: { x: number; y: number; w: number; h: number }[] = [];
+  for (let i = 0; i < count; i++) {
+    const r = Math.floor(i / cols);
+    const c = i % cols;
+    // The last row centres a short remainder rather than leaving a hole.
+    const inRow = r === rows - 1 ? count - cols * r : cols;
+    const offset = inRow < cols ? ((cols - inRow) * (w + gap)) / 2 : 0;
+    // A little air under the last row so a panel's floor is not the stage's.
+    out.push({ x: offset + c * (w + gap), y: r * (h + gap) + headroom, w, h: h - headroom - 10 });
+  }
+  return out;
+}
+
 export function nodeRadius(inTies: number, max: number): number {
   if (max <= 0) return 15;
   return 14 + Math.round((inTies / max) * 18);

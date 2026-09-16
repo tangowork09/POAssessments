@@ -23,6 +23,8 @@ import {
   SOCIO_ITEMS,
   SOCIO_MAX_ANSWER,
   SOCIO_MIN_ANSWER,
+  SOCIO_OPENNESS_ITEM,
+  SOCIO_RELIABILITY_ITEM,
   SOCIO_SUPPORT_GAP_ITEM,
   SOCIO_TIE_THRESHOLD,
   decodeCell,
@@ -636,7 +638,13 @@ export interface SocioEdge {
   n: number;
   /** Mean of those ratings, 2dp. */
   mean: number;
-  /** Per-block means and tie flags. A block with no answers is absent. */
+  /**
+   * Per-block means and tie flags. A block with no answers is absent.
+   *
+   * Alongside the instrument's own blocks this carries two pseudo-blocks,
+   * `reliability` (item 8) and `openness` (item 9): single-item lenses onto
+   * the trust block rather than blocks in their own right.
+   */
   blocks: Record<string, { mean: number; n: number; tie: boolean }>;
   /** Item 12, the deficit item, kept apart as everywhere else. */
   gap: { mean: number; n: number } | null;
@@ -696,6 +704,23 @@ export function socioEdges(
         assetSum += sum;
         assetN += n;
       }
+
+      // Two single-item lenses onto the trust block, not blocks of the
+      // instrument: reliability (item 8) and openness (item 9) are the two
+      // facets trust comes apart along, and the console lets a facilitator
+      // filter the map by either. They read the same cells the trust block
+      // already counted, so they are added after the asset totals are closed
+      // — counting them again would inflate the pair's overall mean — and the
+      // real `trust` block above is untouched.
+      for (const [key, itemNo] of [
+        ['reliability', SOCIO_RELIABILITY_ITEM],
+        ['openness', SOCIO_OPENNESS_ITEM],
+      ] as const) {
+        const v = bag.get(itemNo);
+        if (v === undefined) continue;
+        blocks[key] = { mean: v, n: 1, tie: v >= tieThreshold };
+      }
+
       const gapValue = bag.get(SOCIO_SUPPORT_GAP_ITEM);
       if (assetN === 0 && gapValue === undefined) continue;
       edges.push({

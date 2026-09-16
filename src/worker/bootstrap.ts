@@ -2,13 +2,15 @@
  * First-boot seeding.
  *
  * Creates the administrator from ADMIN_EMAIL / ADMIN_PASSWORD if no admin
- * exists — as a superadmin, since that account is the owner — and issues the
- * generic always-active link for every live assessment that lacks one. Both are idempotent, and the whole thing short-circuits after
- * the first successful run in an isolate.
+ * exists — as a superadmin, since that account is the owner — reconciles the
+ * shared cohort-only account from COHORT_ADMIN_EMAIL / COHORT_ADMIN_PASSWORD,
+ * and issues the generic always-active link for every live assessment that
+ * lacks one. All three are idempotent, and the whole thing short-circuits
+ * after the first successful run in an isolate.
  */
 
 import type { Env } from './env.js';
-import { hashPassword } from './lib/auth.js';
+import { hashPassword, verifyPassword } from './lib/auth.js';
 import { newId } from './lib/ids.js';
 import { generateToken, hashToken } from './lib/tokens.js';
 import { ASSESSMENT_ID, isCohortAssessment } from '../shared/assessments.js';
@@ -19,6 +21,7 @@ export async function bootstrap(env: Env): Promise<void> {
   if (done) return;
   try {
     await seedAdmin(env);
+    await seedCohortAdmin(env);
     await seedGenericLinks(env);
     done = true;
   } catch (err) {
@@ -49,6 +52,53 @@ async function seedAdmin(env: Env): Promise<void> {
     .run();
 
   console.log(`[bootstrap] seeded superadmin ${env.ADMIN_EMAIL}`);
+}
+
+/**
+ * The shared facilitator account: one credential pair, the same in every
+ * environment, that reaches Cohorts and nothing else.
+ *
+ * Reconciled rather than seeded. `seedAdmin` runs only into an empty table, so
+ * it could never introduce a second account to a deployment that already has
+ * one — and this account has to appear in deployments that are long past their
+ * first boot. It is also the way the password stays changeable: the configured
+ * value is authoritative, so rotating it is a config edit and a deploy rather
+ * than a hand-written bcrypt hash in the database.
+ *
+ * The role is re-asserted on every boot too. That is deliberate: this account
+ * is handed out widely, and a stray UPDATE raising it to 'admin' would be
+ * silent otherwise.
+ */
+async function seedCohortAdmin(env: Env): Promise<void> {
+  const email = env.COHORT_ADMIN_EMAIL?.trim().toLowerCase();
+  const password = env.COHORT_ADMIN_PASSWORD;
+  if (!email || !password) return;
+
+  const existing = await env.DB
+    .prepare('SELECT id, role, password_hash FROM admin_users WHERE email = ?1')
+    .bind(email)
+    .first<{ id: string; role: string; password_hash: string }>();
+
+  if (!existing) {
+    await env.DB.prepare(
+      `INSERT INTO admin_users (id, email, name, password_hash, role)
+       VALUES (?1, ?2, 'Cohort administrator', ?3, 'cohort_admin')
+       ON CONFLICT(email) DO NOTHING`,
+    )
+      .bind(newId('admin'), email, await hashPassword(password))
+      .run();
+    console.log(`[bootstrap] seeded cohort admin ${email}`);
+    return;
+  }
+
+  // One bcrypt compare per isolate, and only when the account is configured.
+  const current = await verifyPassword(password, existing.password_hash);
+  if (current && existing.role === 'cohort_admin') return;
+
+  await env.DB.prepare('UPDATE admin_users SET password_hash = ?2, role = ?3 WHERE id = ?1')
+    .bind(existing.id, current ? existing.password_hash : await hashPassword(password), 'cohort_admin')
+    .run();
+  console.log(`[bootstrap] reconciled cohort admin ${email}`);
 }
 
 /**

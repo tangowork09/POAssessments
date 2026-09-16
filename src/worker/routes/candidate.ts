@@ -37,6 +37,7 @@ import {
   type RoundRow,
 } from '../lib/cohort.js';
 import { SOCIO_ITEM_COUNT, decodeCell } from '../../shared/socio.js';
+import { LINK_ONLY_REFUSAL } from '../../shared/cohort-identity.js';
 import type { CandidateCohort, CandidateSession, Question, ScaleInfo } from '../../shared/types.js';
 
 export const candidateRoutes = new Hono<{ Bindings: Env }>();
@@ -277,6 +278,12 @@ candidateRoutes.get('/session/:token', async (c) => {
       minRatedTargets: resolved.cohort.min_rated_targets,
       shareReports: resolved.cohort.share_reports === 1,
       otpRequired: resolved.cohort.otp_required === 1,
+      // Told to the client so the shell can draw the dead end instead of an
+      // email form it would only be refused for submitting. The refusal itself
+      // is not the client's to make: the identity, code-request and
+      // code-verify handlers all check the same flag against the same link,
+      // whatever a client chooses to render.
+      linkOnly: resolved.cohort.link_only_identity === 1,
       rosterSize: rosterCount?.n ?? 0,
       roster: [],
       selfMemberId: null,
@@ -512,6 +519,17 @@ async function startCohortResponse(c: Context<{ Bindings: Env }>, link: LinkRow)
   if ('error' in resolved) return c.json({ error: resolved.error }, resolved.code);
   const cohort = resolved.cohort;
   const round = resolved.round;
+
+  // The strongest form of the same argument the OTP flag makes. With personal
+  // links as the only door, a typed email is not a claim this cohort accepts
+  // from anybody: the shared link reaches every inbox in the group and every
+  // colleague's address is common knowledge, so the claim proves nothing. A
+  // personal link is untouched — it was bound to one person before it was
+  // sent, and the person holding it has nothing to type. Refused here rather
+  // than trusted from the client, which is where the hole was.
+  if (cohort.link_only_identity === 1 && link.kind === 'generic') {
+    return c.json({ error: LINK_ONLY_REFUSAL, linkOnly: true }, 403);
+  }
 
   const parsed = cohortIdentitySchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) {
@@ -916,6 +934,13 @@ candidateRoutes.post('/otp/:token', async (c) => {
   const resolved = await cohortForLink(c.env, link);
   if ('error' in resolved) return c.json({ error: resolved.error }, resolved.code);
   const { cohort, round } = resolved;
+  // Defence in depth. The console does not offer codes for a link-only cohort
+  // and the shell does not draw the form, but this door mails something to an
+  // address someone typed, and the identity step it feeds is already shut —
+  // so it shuts on the same terms rather than trusting that nobody knocks.
+  if (cohort.link_only_identity === 1 && link.kind === 'generic') {
+    return c.json({ error: LINK_ONLY_REFUSAL, linkOnly: true }, 403);
+  }
   if (cohort.otp_required !== 1) return c.json({ error: 'This exercise does not use codes.' }, 400);
 
   const email = parsed.data.email.trim().toLowerCase();

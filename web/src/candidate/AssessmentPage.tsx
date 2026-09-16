@@ -458,6 +458,7 @@ export function AssessmentPage() {
         (cohort ? (
           <IdentityForm
             cohort={cohort}
+            linkKind={session.linkKind}
             initialEmail={session.response?.details?.email ?? ''}
             onSubmit={handleIdentity}
             onRequestCode={(email) =>
