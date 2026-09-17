@@ -332,6 +332,15 @@ export function InsightsView({
   // them for the walk through the other eight tabs.
   const [focusNo, setFocusNo] = useState<number | null>(null);
   const [hoverNo, setHoverNo] = useState<number | null>(null);
+  /**
+   * Picking somebody shows their neighbourhood alone, refitted to the frame.
+   * Dimming the rest reads well enough on screen and travels badly: a picture
+   * of one person still carrying sixty faded names is both unreadable and more
+   * than anyone needed handing over.
+   */
+  const [isolate, setIsolate] = useState(true);
+  /** True only while a capture is in flight, so tables render whole. */
+  const [capturing, setCapturing] = useState(false);
   const activeNo = hoverNo ?? focusNo;
   const pick = useCallback((no: number) => {
     setFocusNo((cur) => {
@@ -1074,6 +1083,7 @@ export function InsightsView({
   /** The stage body — picture and legend — as a PNG, named for the question. */
   const exportStage = useCallback(
     (opts: ExportOptions) => {
+      if (opts.scope === 'all') setCapturing(true);
       const root = rootRef.current;
       const target = root?.querySelector<HTMLElement>(
         opts.scope === 'all' ? '.ins-ws' : '.ins-stage-body',
@@ -1083,7 +1093,11 @@ export function InsightsView({
       // re-solving the label layout would reflow the map under the reader
       // while it is being photographed.
       if (!opts.names) root.classList.add('is-capture-unnamed');
-      void toPng(target, { pixelRatio: 2, backgroundColor: '#FFFFFF' })
+      if (opts.scope === 'all') root.classList.add('is-capture-full');
+      // A frame for React to paint the un-paged table before it is photographed.
+      const ready = opts.scope === 'all' ? new Promise((r) => setTimeout(r, 120)) : Promise.resolve();
+      void ready
+        .then(() => toPng(target, { pixelRatio: 2, backgroundColor: '#FFFFFF' }))
         .then((url) => {
           const a = document.createElement('a');
           a.href = url;
@@ -1092,7 +1106,11 @@ export function InsightsView({
           }.png`;
           a.click();
         })
-        .finally(() => root.classList.remove('is-capture-unnamed'));
+        .finally(() => {
+          root.classList.remove('is-capture-unnamed');
+          root.classList.remove('is-capture-full');
+          setCapturing(false);
+        });
     },
     [net.roundNo, tab],
   );
@@ -1358,6 +1376,20 @@ export function InsightsView({
         }
         focus={
           focusNo !== null ? (
+            <>
+            <button
+              type="button"
+              className={`ins-isolate${isolate ? ' is-on' : ''}`}
+              onClick={() => setIsolate((v) => !v)}
+              aria-pressed={isolate}
+              title={
+                isolate
+                  ? 'Show the whole group again'
+                  : 'Show only this person and whoever they are tied to'
+              }
+            >
+              {isolate ? 'Them alone' : 'Whole group'}
+            </button>
             <button
               className="insights-focus-chip"
               onClick={() => setFocusNo(null)}
@@ -1373,6 +1405,7 @@ export function InsightsView({
                 ×
               </span>
             </button>
+            </>
           ) : null
         }
         note={
@@ -1469,6 +1502,7 @@ export function InsightsView({
                 labelFor={namesFor(trustLabels)}
                 denseLabels={allNames}
                 activeNo={activeNo}
+                isolate={isolate}
                 onPick={pick}
                 onHover={onMapHover}
                 onLeave={onMapLeave}
@@ -1541,6 +1575,7 @@ export function InsightsView({
                 personNo={(r) => r.no}
                 activeNo={activeNo}
                 personProps={personProps}
+                showAll={capturing}
                 tip={(r) => ({
                   title: nameOf(r.no),
                   sub: funcOf(r.no),
@@ -1671,6 +1706,7 @@ export function InsightsView({
                 personNo={(r) => r.no}
                 activeNo={activeNo}
                 personProps={personProps}
+                showAll={capturing}
                 tip={(r) => ({
                   title: nameOf(r.no),
                   sub: `${funcOf(r.no)} · ${QUADRANT_NAME[r.quadrant]}`,
@@ -1766,6 +1802,7 @@ export function InsightsView({
                 callouts={bridgeCallouts}
                 margin={CALLOUT_MARGIN}
                 activeNo={activeNo}
+                isolate={isolate}
                 onPick={pick}
                 onHover={onMapHover}
                 onLeave={onMapLeave}
@@ -1822,6 +1859,7 @@ export function InsightsView({
                 personNo={(r) => r.no}
                 activeNo={activeNo}
                 personProps={personProps}
+                showAll={capturing}
                 tip={(r) => ({
                   title: nameOf(r.no),
                   sub: funcOf(r.no),
@@ -1923,6 +1961,7 @@ export function InsightsView({
                 personNo={(r) => r.no}
                 activeNo={activeNo}
                 personProps={personProps}
+                showAll={capturing}
                 empty="Nobody to measure yet."
                 wide
                 columns={[
@@ -2021,6 +2060,7 @@ export function InsightsView({
                       colorOf={fillOfFunc}
                       labelFor={compareSet}
                       activeNo={activeNo}
+                      isolate={isolate}
                       onPick={pick}
                       onHover={onMapHover}
                       onLeave={onMapLeave}
@@ -2085,6 +2125,7 @@ export function InsightsView({
                 labelFor={namesFor(peripheralSet)}
                 denseLabels={allNames}
                 activeNo={activeNo}
+                isolate={isolate}
                 onPick={pick}
                 onHover={onMapHover}
                 onLeave={onMapLeave}
@@ -2165,6 +2206,7 @@ export function InsightsView({
                 personNo={(r) => r.no}
                 activeNo={activeNo}
                 personProps={personProps}
+                showAll={capturing}
                 tip={(r) => ({
                   title: nameOf(r.no),
                   sub: funcOf(r.no),
@@ -2272,6 +2314,7 @@ export function InsightsView({
                 denseLabels={allNames}
                 directed
                 activeNo={activeNo}
+                isolate={isolate}
                 onPick={pick}
                 onHover={onMapHover}
                 onLeave={onMapLeave}
@@ -2394,6 +2437,7 @@ export function InsightsView({
                 labelFor={namesFor(trustLabels)}
                 denseLabels={allNames}
                 activeNo={activeNo}
+                isolate={isolate}
                 onPick={pick}
                 onHover={onMapHover}
                 onLeave={onMapLeave}
@@ -2519,6 +2563,7 @@ export function InsightsView({
                 personNo={(r) => r.no}
                 activeNo={activeNo}
                 personProps={personProps}
+                showAll={capturing}
                 tip={(r) => ({
                   title: nameOf(r.no),
                   sub: silosLabelOf(r.group),
@@ -2623,6 +2668,7 @@ export function InsightsView({
                 labelFor={namesFor(hubs)}
                 denseLabels={allNames}
                 activeNo={activeNo}
+                isolate={isolate}
                 onPick={pick}
                 onHover={onMapHover}
                 onLeave={onMapLeave}
@@ -2689,6 +2735,7 @@ export function InsightsView({
                 personNo={(r) => r.trust.no}
                 activeNo={activeNo}
                 personProps={personProps}
+                showAll={capturing}
                 tip={(r) => ({
                   title: nameOf(r.trust.no),
                   sub: funcOf(r.trust.no),
@@ -2796,6 +2843,7 @@ export function InsightsView({
                 labelFor={namesFor(divergentFolk)}
                 denseLabels={allNames}
                 activeNo={activeNo}
+                isolate={isolate}
                 onPick={pick}
                 onHover={(no, e) => {
                   setHoverNo(no);
@@ -2877,6 +2925,7 @@ export function InsightsView({
                 personNo={(r) => r.no}
                 activeNo={activeNo}
                 personProps={personProps}
+                showAll={capturing}
                 empty="Nobody is on the roster yet."
                 columns={[
                   {
@@ -2974,6 +3023,7 @@ export function InsightsView({
                 labelFor={namesFor(facetLabels)}
                 denseLabels={allNames}
                 activeNo={activeNo}
+                isolate={isolate}
                 onPick={pick}
                 onHover={(no, e) => {
                   setHoverNo(no);
@@ -3088,6 +3138,7 @@ export function InsightsView({
                 personNo={(r) => r.no}
                 activeNo={activeNo}
                 personProps={personProps}
+                showAll={capturing}
                 tip={(r) => ({
                   title: nameOf(r.no),
                   sub: funcOf(r.no),

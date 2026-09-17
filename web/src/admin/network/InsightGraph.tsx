@@ -21,6 +21,7 @@
 
 import { memo, useCallback, useMemo, useState } from 'react';
 import type { CohortNetwork } from '../../../../src/shared/types.js';
+import { zoomToBox } from './layout.js';
 import type { LayoutBox, Positions } from './layout.js';
 import {
   boxesOverlap,
@@ -125,6 +126,16 @@ export interface InsightGraphProps {
   egoOnHover?: boolean;
   /** Draw arrowheads: for a tab whose whole claim is the direction of a tie. */
   directed?: boolean;
+  /**
+   * Show only the focused person and whoever they are tied to, refitted to
+   * fill the frame.
+   *
+   * Dimming the rest is enough to read on screen and not enough to take away:
+   * a picture of one person's neighbourhood still carries sixty faded names
+   * and every other tie, which is both unreadable and more than anybody
+   * needed to be given.
+   */
+  isolate?: boolean;
   /** The primary tie set's colour. Defaults to the shared positive-tie green. */
   edgeColor?: string;
   /** What the primary tie set is called, for a tie's own tooltip. */
@@ -176,6 +187,7 @@ function InsightGraphImpl({
   callouts,
   margin = 0,
   directed = false,
+  isolate = false,
   edgeColor = POLARITY_STYLE.positive.color,
   edgeLabel = 'Tie',
   overlay = null,
@@ -189,35 +201,8 @@ function InsightGraphImpl({
   label,
 }: InsightGraphProps) {
   const sizeOf = useCallback((no: number) => rawSizeOf(no) * sizeScale, [rawSizeOf, sizeScale]);
-  const tieLayers = useMemo(
-    () =>
-      overlay
-        ? [
-            { set: overlay.edges, color: overlay.color, label: overlay.label },
-            { set: edges, color: edgeColor, label: edgeLabel },
-          ]
-        : [{ set: edges, color: edgeColor, label: edgeLabel }],
-    [edgeColor, edgeLabel, edges, overlay],
-  );
 
-  const tieTargets = useMemo(() => {
-    const byPair = new Map<
-      string,
-      { edge: PaneEdge; lenses: { label: string; color: string; mean: number }[] }
-    >();
-    for (const layer of tieLayers) {
-      for (const e of layer.set) {
-        const key = `${e.from}>${e.to}`;
-        const hit = byPair.get(key);
-        const lens = { label: layer.label, color: layer.color, mean: e.mean };
-        // The first layer to claim a pair owns the geometry; a later one only
-        // adds its reading, so the target sits on a line that is really drawn.
-        if (hit) hit.lenses.push(lens);
-        else byPair.set(key, { edge: e, lenses: [lens] });
-      }
-    }
-    return [...byPair.values()];
-  }, [tieLayers]);
+
 
   /** The node plus whatever rings it wears — the edge a name has to clear. */
   const outerOf = useCallback(
@@ -256,6 +241,51 @@ function InsightGraphImpl({
   // highlight the tab itself is holding (a silos row, a facet bar).
   const group = highlight && highlight.size > 0 ? highlight : ego;
 
+  /** Isolation only bites on a held selection, never on a passing hover. */
+  const isolated = isolate && activeNo !== null && ego !== null && ego.size > 0 ? ego : null;
+  const shownNodes = useMemo(
+    () => (isolated ? nodes.filter((n) => isolated.has(n.no)) : nodes),
+    [isolated, nodes],
+  );
+  const shownPositions = useMemo(
+    () => (isolated ? zoomToBox(positions, isolated, box) : positions),
+    [box, isolated, positions],
+  );
+  const keepEdge = useCallback(
+    (e: PaneEdge) => !isolated || (isolated.has(e.from) && isolated.has(e.to)),
+    [isolated],
+  );
+
+  const tieLayers = useMemo(
+    () =>
+      (overlay
+        ? [
+            { set: overlay.edges, color: overlay.color, label: overlay.label },
+            { set: edges, color: edgeColor, label: edgeLabel },
+          ]
+        : [{ set: edges, color: edgeColor, label: edgeLabel }]
+      ).map((l) => ({ ...l, set: l.set.filter(keepEdge) })),
+    [edgeColor, edgeLabel, edges, keepEdge, overlay],
+  );
+  const tieTargets = useMemo(() => {
+    const byPair = new Map<
+      string,
+      { edge: PaneEdge; lenses: { label: string; color: string; mean: number }[] }
+    >();
+    for (const layer of tieLayers) {
+      for (const e of layer.set) {
+        const key = `${e.from}>${e.to}`;
+        const hit = byPair.get(key);
+        const lens = { label: layer.label, color: layer.color, mean: e.mean };
+        // The first layer to claim a pair owns the geometry; a later one only
+        // adds its reading, so the target sits on a line that is really drawn.
+        if (hit) hit.lenses.push(lens);
+        else byPair.set(key, { edge: e, lenses: [lens] });
+      }
+    }
+    return [...byPair.values()];
+  }, [tieLayers]);
+
   /**
    * Names, placed greedily: the focused person first, then whoever the tab
    * nominated, biggest node first. Four seats each — under the node, over it,
@@ -271,7 +301,9 @@ function InsightGraphImpl({
   const labelSize = denseLabels ? LABEL_SIZE * 0.76 : LABEL_SIZE;
 
   const placed = useMemo(() => {
-    const wanted = [...new Set([...(labelFor ?? new Set<number>()), ...(ego ?? [])])];
+    const wanted = isolated
+      ? [...isolated]
+      : [...new Set([...(labelFor ?? new Set<number>()), ...(ego ?? [])])];
     /** Every person's mark, as a box a name has to miss. */
     const marks = new Map<number, LabelBox>();
     // A lane's own header is furniture: no name may print across it either.
@@ -279,7 +311,7 @@ function InsightGraphImpl({
       marks.set(-1000 - i, { x: l.x, y: l.y - 34, w: l.w, h: 34 }),
     );
     for (const n of nodes) {
-      const p = positions.get(n.no);
+      const p = shownPositions.get(n.no);
       if (!p) continue;
       const r = outerOf(n.no);
       marks.set(n.no, { x: p.x - r, y: p.y - r, w: r * 2, h: r * 2 });
@@ -292,7 +324,7 @@ function InsightGraphImpl({
     );
     return cullLabels(
       ordered.map((no) => {
-        const p = positions.get(no);
+        const p = shownPositions.get(no);
         const r = outerOf(no);
         if (!p) return { id: no, boxes: [] };
         const name = nameOf.get(no) ?? '';
@@ -328,7 +360,7 @@ function InsightGraphImpl({
       [],
       labelSize * 0.3,
     );
-  }, [activeNo, box.h, box.w, ego, labelFor, labelSize, lanes, margin, nodes, outerOf, positions]);
+  }, [activeNo, box.h, box.w, ego, isolated, labelFor, labelSize, lanes, margin, nodes, outerOf, shownPositions]);
 
   return (
     <svg
@@ -358,7 +390,7 @@ function InsightGraphImpl({
         </defs>
       ) : null}
 
-      {(lanes ?? []).map((l) => (
+      {(isolated ? [] : lanes ?? []).map((l) => (
         <g key={l.label} className="ins-lane">
           <rect x={l.x} y={l.y - 34} width={l.w} height={l.h + 34} rx={18} fill={l.color} fillOpacity={0.05} stroke={l.color} strokeOpacity={0.3} strokeWidth={2} />
           <circle cx={l.x + 20} cy={l.y - 14} r={7} fill={l.color} />
@@ -373,7 +405,7 @@ function InsightGraphImpl({
         </g>
       ))}
 
-      {dock && dock.members.length > 0 ? (
+      {!isolated && dock && dock.members.length > 0 ? (
         <g className="ins-dock" aria-hidden="true">
           <line x1={box.w - DOCK_W} y1={16} x2={box.w - DOCK_W} y2={box.h - 16} />
           <text x={box.w - DOCK_W / 2} y={24} textAnchor="middle" className="ins-dock-label">
@@ -403,8 +435,8 @@ function InsightGraphImpl({
       {/* The overlay lens first, so the primary set reads on top of it. */}
       {tieLayers.map((layer) =>
         layer.set.map((e) => {
-          const s = positions.get(e.from);
-          const t = positions.get(e.to);
+          const s = shownPositions.get(e.from);
+          const t = shownPositions.get(e.to);
           if (!s || !t) return null;
           const onActive = e.from === activeNo || e.to === activeNo;
           const onEgo = hoverNo !== null && (e.from === hoverNo || e.to === hoverNo);
@@ -468,8 +500,8 @@ function InsightGraphImpl({
           })
         : null}
 
-      {nodes.map((n) => {
-        const p = positions.get(n.no);
+      {shownNodes.map((n) => {
+        const p = shownPositions.get(n.no);
         if (!p) return null;
         const r = sizeOf(n.no);
         const active = n.no === activeNo;
@@ -538,10 +570,10 @@ function InsightGraphImpl({
 
       {/* Names in their own pass. Drawn inside the node loop, the very next
           circle paints over the name just written. */}
-      {nodes.map((n) => {
+      {shownNodes.map((n) => {
         const seat = placed.get(n.no);
         if (seat === undefined) return null;
-        const p = positions.get(n.no);
+        const p = shownPositions.get(n.no);
         if (!p) return null;
         const active = n.no === activeNo;
         const opacity = active ? 1 : group ? (group.has(n.no) ? 1 : 0.2) : fadeOf?.(n.no) ?? 1;

@@ -785,9 +785,35 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
 
 /* The compared people, lit on the group's own map: a standing means more when
    you can see where the person stands. */
+/* A full capture takes the whole record: the band scrolls nothing, the frame
+   grows to whatever the un-paged table needs, and the empty space a fixed
+   picture-height leaves behind goes with it. */
+/* The picture keeps a stated height: `auto` gives an SVG in a grid row no
+   intrinsic height at all and it collapses to a sliver. The band takes
+   whatever the un-paged table needs under it. */
+.insights.is-capture-full .ins-ws{ grid-template-rows:620px auto; }
+.insights.is-capture-full .ins-stage{ min-height:620px; }
+.insights.is-capture-full .ins-band-body,
+.insights.is-capture-full .ins-grid-wrap{ overflow:visible; max-height:none; }
+.insights.is-capture-full .ins-side{ overflow:visible; }
+.insights.is-capture-full .ins-band-tools{ display:none; }
+
+/* Controls are not part of the record. */
+.insights.is-capture-full .ins-stage-aside,
+.insights.is-capture-unnamed .ins-stage-aside{ display:none; }
+
 /* Names are dropped for the capture only. */
 .insights.is-capture-unnamed .insights-map-name,
 .insights.is-capture-unnamed .insights-map-lead{ display:none; }
+
+/* Shown only while somebody is focused: what the map is currently of. */
+.ins-isolate{
+  border:1px solid var(--line-2); background:var(--surface); color:var(--ink-2);
+  font:inherit; font-size:11.5px; font-weight:600; padding:4px 9px;
+  border-radius:999px; cursor:pointer; white-space:nowrap;
+}
+.ins-isolate:hover{ border-color:var(--line-3); }
+.ins-isolate.is-on{ color:var(--accent-3); background:var(--accent-soft); border-color:var(--accent-line); }
 
 .ins-export{ position:relative; }
 .ins-export-pop{

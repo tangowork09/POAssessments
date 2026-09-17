@@ -374,6 +374,7 @@ export function DetailTable<T>({
   empty,
   pageSize = 10,
   wide = false,
+  showAll = false,
 }: {
   rows: readonly T[];
   columns: readonly Column<T>[];
@@ -385,6 +386,11 @@ export function DetailTable<T>({
    * until half of them are truncated to three letters.
    */
   wide?: boolean;
+  /**
+   * Render every row, ignoring the pager. For a capture: a picture of page one
+   * of seven is not the record anybody meant to keep.
+   */
+  showAll?: boolean;
   rowKey: (row: T) => string | number;
   /** Which person a row is about, when it is about one. */
   personNo?: (row: T) => number | null;
@@ -435,7 +441,10 @@ export function DetailTable<T>({
   useEffect(() => {
     setPage(0);
   }, [rows, sort]);
-  const shown = useMemo(() => ordered.slice(cur * pageSize, (cur + 1) * pageSize), [cur, ordered, pageSize]);
+  const shown = useMemo(
+    () => (showAll ? ordered : ordered.slice(cur * pageSize, (cur + 1) * pageSize)),
+    [cur, ordered, pageSize, showAll],
+  );
 
   if (rows.length === 0) return <p className="hint">{empty}</p>;
 
@@ -512,7 +521,7 @@ export function DetailTable<T>({
         })}
       </tbody>
     </table>
-    {pages > 1 ? (
+    {pages > 1 && !showAll ? (
       <div className="ins-grid-foot">
         <span className="ins-grid-range">
           {cur * pageSize + 1}–{Math.min(ordered.length, (cur + 1) * pageSize)} of {ordered.length}
