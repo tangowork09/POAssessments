@@ -822,6 +822,15 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
   background:var(--surface); border:1px solid var(--line); border-radius:var(--r-3);
   box-shadow:var(--shadow-2);
 }
+.ins-export-formats{ display:flex; gap:5px; margin-bottom:10px; }
+.ins-export-fmt{
+  flex:1; padding:6px 4px; border:1px solid var(--line-2); border-radius:var(--r-2);
+  background:var(--surface); font:inherit; font-size:11.5px; font-weight:600;
+  color:var(--ink-2); cursor:pointer;
+}
+.ins-export-fmt:hover{ border-color:var(--line-3); }
+.ins-export-fmt.is-on{ color:var(--accent-3); background:var(--accent-soft); border-color:var(--accent-line); }
+
 .ins-export-head{
   margin:0 0 6px; font-size:10.5px; font-weight:650; letter-spacing:.06em;
   text-transform:uppercase; color:var(--ink-3);

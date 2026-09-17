@@ -17,6 +17,8 @@ import { requireAdmin, type AdminHono } from '../lib/auth.js';
 import { auditAll, recordBefore } from '../lib/audit.js';
 import { newId } from '../lib/ids.js';
 import { generateToken, hashToken } from '../lib/tokens.js';
+import { decodeImageDataUrl } from '../pdf/image.js';
+import { renderInsightExportPdf } from '../pdf/insight-export.js';
 import { dispatch } from '../pipeline.js';
 import { sendMail } from '../lib/mailer.js';
 import { brandingForClient } from '../lib/brand-asset.js';
@@ -27,6 +29,7 @@ import {
   cohortCreateSchema,
   cohortUpdateSchema,
   fieldErrors,
+  insightExportSchema,
   reportsToError,
   rosterMemberSchema,
   rosterPasteSchema,
@@ -1048,6 +1051,59 @@ cohortRoutes.post('/import', async (c) => {
   await c.env.DB.batch(statements);
 
   return c.json({ id, name, organisation, size: book.rows.length, skipped: book.skipped }, 201);
+});
+
+/**
+ * A network question as a PDF: the picture on one page, the standings as real
+ * text on the next.
+ *
+ * The console sends what it is showing rather than the server re-deriving it —
+ * the picture is an SVG laid out in the browser, and a second layout engine
+ * producing a subtly different map would be worse than no map. The payload is
+ * therefore display strings, and nothing here is scored.
+ */
+cohortRoutes.post('/:id/insight-pdf', async (c) => {
+  const cohort = await loadCohort(c.env, c.req.param('id'));
+  if (!cohort) return c.json({ error: 'Cohort not found' }, 404);
+
+  const parsed = insightExportSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: 'Nothing to put in the document.' }, 400);
+  const d = parsed.data;
+
+  const branding = await getBranding(c.env);
+  const [picture, logo] = await Promise.all([
+    d.imageDataUrl ? decodeImageDataUrl(d.imageDataUrl) : Promise.resolve(null),
+    decodeImageDataUrl(branding.logoDataUrl),
+  ]);
+
+  const bytes = renderInsightExportPdf(
+    {
+      cohortName: cohort.name,
+      organisation: cohort.organisation ?? '',
+      round: d.round,
+      tabTitle: d.tabTitle,
+      question: d.question,
+      finding: d.finding,
+      imageDataUrl: d.imageDataUrl ?? null,
+      columns: d.columns,
+      rows: d.rows,
+      panels: d.panels,
+      generatedAt: new Date().toISOString(),
+    },
+    picture,
+    logo,
+  );
+
+  const stem = `${cohort.name}-${d.tabTitle}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return new Response(bytes as BodyInit, {
+    headers: {
+      'content-type': 'application/pdf',
+      'content-disposition': `attachment; filename="${stem}.pdf"`,
+    },
+  });
 });
 
 // -------------------------------------------------------------------- network

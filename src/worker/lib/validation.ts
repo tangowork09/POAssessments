@@ -339,6 +339,33 @@ export const cohortImportSchema = z.object({
   organisation: z.union([trimmed(160), z.literal('')]).default(''),
 });
 
+/**
+ * What the console hands over for an insight PDF. Display strings only: the
+ * server draws them, it does not re-derive them.
+ */
+export const insightExportSchema = z.object({
+  round: trimmed(80).default(''),
+  tabTitle: trimmed(120).default(''),
+  question: trimmed(200).default(''),
+  finding: trimmed(600).default(''),
+  /** A PNG data URL of the picture. Capped: a map at 2x is well under this. */
+  imageDataUrl: z.string().max(12_000_000).optional(),
+  columns: z
+    .array(z.object({ head: trimmed(60), right: z.boolean().optional(), weight: z.number().min(0.2).max(8).optional() }))
+    .max(16)
+    .default([]),
+  rows: z.array(z.array(trimmed(200)).max(16)).max(2000).default([]),
+  panels: z
+    .array(
+      z.object({
+        title: trimmed(80),
+        rows: z.array(z.tuple([trimmed(120), trimmed(80)])).max(40),
+      }),
+    )
+    .max(8)
+    .default([]),
+});
+
 /** Roster paste: one member per line, `Name, Function, email`. */
 export const rosterPasteSchema = z.object({
   text: z.string().max(200_000),

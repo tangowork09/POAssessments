@@ -54,10 +54,12 @@ export interface TabGroupDef {
  * leaves the room: how much of the page to take, and whether the people on it
  * are named. Defaults are the safe ones — the picture alone, names off.
  */
-function ExportButton({ onExport }: { onExport: (o: ExportOptions) => void }) {
+function ExportButton({ onExport }: { onExport: (o: ExportOptions) => void | Promise<void> }) {
   const [open, setOpen] = useState(false);
+  const [format, setFormat] = useState<ExportOptions['format']>('png');
   const [scope, setScope] = useState<ExportOptions['scope']>('graph');
   const [names, setNames] = useState(false);
+  const [busy, setBusy] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -85,6 +87,27 @@ function ExportButton({ onExport }: { onExport: (o: ExportOptions) => void }) {
       </button>
       {open ? (
         <div className="ins-export-pop" role="dialog" aria-label="Save picture">
+          <p className="ins-export-head">Format</p>
+          <div className="ins-export-formats" role="group" aria-label="Format">
+            {(
+              [
+                ['png', 'Image', 'A picture.'],
+                ['pdf', 'PDF', 'Pages, with the table as real text.'],
+                ['html', 'Interactive', 'Keeps its hover. Opens in any browser.'],
+              ] as const
+            ).map(([k, label, note]) => (
+              <button
+                key={k}
+                type="button"
+                className={`ins-export-fmt${format === k ? ' is-on' : ''}`}
+                onClick={() => setFormat(k)}
+                aria-pressed={format === k}
+                title={note}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <p className="ins-export-head">What to include</p>
           <label className="ins-export-opt">
             <input type="radio" name="ins-export-scope" checked={scope === 'graph'} onChange={() => setScope('graph')} />
@@ -114,12 +137,16 @@ function ExportButton({ onExport }: { onExport: (o: ExportOptions) => void }) {
           <button
             type="button"
             className="btn btn-primary btn-sm ins-export-go"
+            disabled={busy}
             onClick={() => {
-              setOpen(false);
-              onExport({ scope, names });
+              setBusy(true);
+              void Promise.resolve(onExport({ format, scope, names })).finally(() => {
+                setBusy(false);
+                setOpen(false);
+              });
             }}
           >
-            Save PNG
+            {busy ? 'Preparing…' : format === 'pdf' ? 'Save PDF' : format === 'html' ? 'Save web page' : 'Save PNG'}
           </button>
         </div>
       ) : null}
@@ -128,6 +155,13 @@ function ExportButton({ onExport }: { onExport: (o: ExportOptions) => void }) {
 }
 
 export interface ExportOptions {
+  /**
+   * PNG is a picture. PDF is a document — the map on one page, the standings
+   * as real text on the next, which can be searched and read on a phone. HTML
+   * is the only one of the three that stays interactive: the map keeps its
+   * hover, in one file that opens in any browser with no login.
+   */
+  format: 'png' | 'pdf' | 'html';
   /** The picture alone, or the picture with the readings and the table. */
   scope: 'graph' | 'all';
   /** Names on the map. Off makes a picture that can be shown to the group. */
@@ -180,7 +214,7 @@ export function Workspace({
    * a picture that leaves the room is a different object from one read on
    * screen: a group map with every name on it is not always shareable.
    */
-  onExport?: (opts: ExportOptions) => void;
+  onExport?: (opts: ExportOptions) => void | Promise<void>;
   /**
    * The centre is not a picture — a form, a table — so it is rendered straight
    * into the stage instead of into the pan/zoom surface. That surface carries a

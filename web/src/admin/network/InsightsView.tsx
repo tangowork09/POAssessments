@@ -154,6 +154,13 @@ import {
   type InsightScope,
 } from './model.js';
 import type { DivergenceShare, PaneEdge } from './model.js';
+import {
+  downloadInsightHtml,
+  downloadInsightPdf,
+  type DocColumn,
+  type DocPanel,
+  type DocPayload,
+} from './exportDoc.js';
 import { HeadToHead } from './HeadToHead.js';
 
 /** A stable empty list: a fresh [] each render would re-memo the map. */
@@ -1081,39 +1088,6 @@ export function InsightsView({
   }, []);
 
   /** The stage body — picture and legend — as a PNG, named for the question. */
-  const exportStage = useCallback(
-    (opts: ExportOptions) => {
-      if (opts.scope === 'all') setCapturing(true);
-      const root = rootRef.current;
-      const target = root?.querySelector<HTMLElement>(
-        opts.scope === 'all' ? '.ins-ws' : '.ins-stage-body',
-      );
-      if (!root || !target) return;
-      // Names are hidden for the capture only, by class rather than by state:
-      // re-solving the label layout would reflow the map under the reader
-      // while it is being photographed.
-      if (!opts.names) root.classList.add('is-capture-unnamed');
-      if (opts.scope === 'all') root.classList.add('is-capture-full');
-      // A frame for React to paint the un-paged table before it is photographed.
-      const ready = opts.scope === 'all' ? new Promise((r) => setTimeout(r, 120)) : Promise.resolve();
-      void ready
-        .then(() => toPng(target, { pixelRatio: 2, backgroundColor: '#FFFFFF' }))
-        .then((url) => {
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `insights-${tab}-round${net.roundNo}${opts.scope === 'all' ? '-full' : ''}${
-            opts.names ? '-named' : ''
-          }.png`;
-          a.click();
-        })
-        .finally(() => {
-          root.classList.remove('is-capture-unnamed');
-          root.classList.remove('is-capture-full');
-          setCapturing(false);
-        });
-    },
-    [net.roundNo, tab],
-  );
 
   // ---- head to head
   // Seeded with the two most trusted, so the tab opens on a real comparison
@@ -1284,6 +1258,126 @@ export function InsightsView({
     pair: pairSentence,
     facets: relOpen,
   };
+
+  /** What the current tab would put in a document, as display strings. */
+  const docPayload = useCallback((): DocPayload => {
+    const root = rootRef.current;
+    const table = root?.querySelector('.ins-band table');
+    const columns: DocColumn[] = [...(table?.querySelectorAll('thead th') ?? [])].map((th) => ({
+      head: (th.textContent ?? '').replace(/[↕↑↓]/g, '').trim(),
+      right: th.classList.contains('is-right'),
+    }));
+    // An avatar disc is two initials of markup inside the cell; reading
+    // textContent straight off it yields "PRPriya Rao".
+    const cellText = (el: Element): string => {
+      const copy = el.cloneNode(true) as HTMLElement;
+      copy.querySelectorAll('.ins-avatar, [class*="avatar"], .nx-rank, .ins-rank').forEach((n) => n.remove());
+      return (copy.textContent ?? '').replace(/\s+/g, ' ').trim();
+    };
+    const rows = [...(table?.querySelectorAll('tbody tr') ?? [])].map((tr) =>
+      [...tr.querySelectorAll('td')].map(cellText),
+    );
+    const panels: DocPanel[] = [...(root?.querySelectorAll('.ins-side .ins-panel') ?? [])]
+      .map((panel) => ({
+        title: (panel.querySelector('h4, .ins-panel-title')?.textContent ?? '').trim(),
+        rows: [...panel.querySelectorAll('.insights-bar, .insights-row')].map((r) => {
+          const named = r.querySelector('.insights-bar-name, .insights-row-name');
+          const meta = r.querySelector('.insights-bar-meta, .insights-row-meta');
+          const valued = r.querySelector('.insights-bar-val, .insights-row-val');
+          const label = [named && cellText(named), meta && cellText(meta)].filter(Boolean).join(' · ');
+          return [
+            (label || cellText(r)).slice(0, 120),
+            (valued ? cellText(valued) : '').slice(0, 80),
+          ] as [string, string];
+        }),
+      }))
+      .filter((p) => p.title && p.rows.length > 0);
+    return {
+      round: net.roundName,
+      tabTitle: TAB_TITLE[tab] ?? tab,
+      question: tabDef.question,
+      finding: findings[tab] ?? '',
+      columns,
+      rows,
+      panels,
+    };
+  }, [findings, net.roundNo, tab, tabDef.question]);
+
+  const exportStage = useCallback(
+    (opts: ExportOptions) => {
+      if (opts.scope === 'all') setCapturing(true);
+      const root = rootRef.current;
+      const target = root?.querySelector<HTMLElement>(
+        opts.scope === 'all' ? '.ins-ws' : '.ins-stage-body',
+      );
+      if (!root || !target) return;
+      const stem = `insights-${tab}-round${net.roundNo}`;
+
+      // The interactive one takes the live SVG rather than a picture of it:
+      // that is the whole point of the format.
+      if (opts.format === 'html') {
+        if (!opts.names) root.classList.add('is-capture-unnamed');
+        // The payload is read out of the live DOM, so the un-paged table has to
+        // exist before it is read — the same frame the PNG path waits for.
+        const wait = opts.scope === 'all' ? new Promise((r) => setTimeout(r, 120)) : Promise.resolve();
+        void wait
+          .then(() => {
+            const svg = root.querySelector<SVGSVGElement>('.ins-graph');
+            const payload = docPayload();
+            downloadInsightHtml(
+              svg,
+              opts.scope === 'all' ? payload : { ...payload, rows: [], panels: [] },
+              stem,
+              net.roundName,
+            );
+          })
+          .finally(() => {
+            root.classList.remove('is-capture-unnamed');
+            setCapturing(false);
+          });
+        return;
+      }
+      // Names are hidden for the capture only, by class rather than by state:
+      // re-solving the label layout would reflow the map under the reader
+      // while it is being photographed.
+      if (!opts.names) root.classList.add('is-capture-unnamed');
+      if (opts.scope === 'all') root.classList.add('is-capture-full');
+      // A frame for React to paint the un-paged table before it is photographed.
+      const ready = opts.scope === 'all' ? new Promise((r) => setTimeout(r, 120)) : Promise.resolve();
+      void ready
+        .then(() =>
+          toPng(opts.format === 'pdf' ? root.querySelector<HTMLElement>('.ins-stage-body') ?? target : target, {
+            pixelRatio: 2,
+            backgroundColor: '#FFFFFF',
+          }),
+        )
+        .then(async (url) => {
+          if (opts.format === 'pdf') {
+            const payload = docPayload();
+            await downloadInsightPdf(
+              net.cohortId,
+              {
+                ...payload,
+                imageDataUrl: url,
+                ...(opts.scope === 'all' ? {} : { rows: [], panels: [] }),
+              },
+              stem,
+            );
+            return;
+          }
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${stem}${opts.scope === 'all' ? '-full' : ''}${opts.names ? '-named' : ''}.png`;
+          a.click();
+        })
+        .finally(() => {
+          root.classList.remove('is-capture-unnamed');
+          root.classList.remove('is-capture-full');
+          setCapturing(false);
+        });
+    },
+    [docPayload, net.cohortId, net.roundName, net.roundNo, tab],
+  );
 
   /** Everyone on the picture, for the search box. */
   const searchPeople = useMemo(
