@@ -174,7 +174,9 @@ svg{ display:block; }
   display:flex; align-items:flex-start; justify-content:space-between; gap:16px;
   padding:16px 20px; border-bottom:1px solid var(--line);
 }
-.card-title{ font-size:14px; font-weight:640; letter-spacing:-.008em; color:var(--ink); }
+/* Level 2. It must outrank the body text it heads — at 14px under a 15px
+   body it lost the squint test on every panel. */
+.card-title{ font-size:16px; font-weight:650; letter-spacing:-.01em; color:var(--ink); }
 .card-sub{ font-size:12.5px; color:var(--ink-3); margin-top:2px; }
 .card-body{ padding:20px; }
 

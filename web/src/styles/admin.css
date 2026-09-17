@@ -708,11 +708,204 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
   font-size:12.5px;
 }
 .share-toggle > div{ min-width:0; }
+/* Level 3: a sub-panel's question. It sat at exactly the weight and size of
+   the options answering it. */
+.share-toggle > div > b{
+  display:block; margin-bottom:2px;
+  font-size:13.5px; font-weight:640; letter-spacing:-.006em;
+}
 .share-toggle .btn{ flex:none; }
+
+/* Name typeahead and the "who they rate" picker. Both hang off a cell, so the
+   wrapper is the positioning context and the menu is absolute inside it —
+   never `fixed`, which the tab panel's transform would reparent. */
+.picker{ position:relative; }
+.picker-menu{
+  /* Placed by useAnchoredMenu in viewport coordinates; it escapes the
+     table's own scroller, which would otherwise clip it. */
+  z-index:60; overflow:auto; padding:4px;
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--r-3);
+  box-shadow:var(--shadow-2, 0 10px 30px rgba(15,23,42,.14));
+}
+.picker-opt{
+  display:flex; align-items:baseline; justify-content:space-between; gap:10px;
+  width:100%; padding:6px 8px; border:0; border-radius:var(--r-2);
+  background:none; font:inherit; font-size:12.5px; text-align:left; color:var(--ink); cursor:pointer;
+}
+.picker-opt.is-active{ background:var(--surface-2); }
+.picker-opt.is-on{ color:var(--accent); font-weight:600; }
+.picker-func{ color:var(--ink-2); font-size:11px; flex:none; }
+.picker-empty{ margin:0; padding:8px; color:var(--ink-2); font-size:12px; }
+
+.rates-trigger.is-set{ color:var(--accent); font-weight:600; }
+.rates-menu{
+  z-index:60; overflow:auto; padding:10px;
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--r-3);
+  box-shadow:var(--shadow-2, 0 10px 30px rgba(15,23,42,.14));
+}
+.rates-head{ display:flex; gap:6px; align-items:center; margin-bottom:8px; }
+.rates-head .control{ flex:1; }
+.rates-grid{
+  display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr));
+  gap:2px 10px; max-height:280px; overflow:auto;
+}
+.rates-item{
+  display:flex; align-items:center; gap:6px;
+  padding:3px 4px; border-radius:var(--r-2);
+  font-size:12.5px; cursor:pointer;
+}
+.rates-item:hover{ background:var(--surface-2); }
+.rates-item span{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rates-foot{ margin:8px 0 0; color:var(--ink-2); font-size:11.5px; }
+
+/* A panel that supports the one above it rather than standing beside it: an
+   optional mapping tool under a 61-row roster, the personal links under the
+   shared link. One step down the same ladder — recessed ground, no lift, a
+   quieter title — never a second style. */
+.card-secondary{ background:var(--surface-2); box-shadow:none; }
+.card-secondary > .card-head{ border-bottom-color:var(--line); }
+.card-secondary .card-title{ font-size:14px; font-weight:640; color:var(--ink-2); }
+
+/* ---------- head to head ---------- */
+/* A plain stage scrolls its own content instead of clipping it like a picture
+   surface, and drops the dotted canvas the map ground draws. */
+.ins-stage-body.is-plain{ overflow:auto; background:none; padding:14px 16px; }
+.ins-stage-body.is-plain::before,
+.ins-stage-body.is-plain::after{ content:none; }
+.h2h-stage{ display:flex; flex-direction:column; gap:14px; min-height:0; }
+.h2h-pickers{ display:grid; grid-template-columns:1fr auto 1fr; gap:10px; align-items:center; }
+/* While the band's ticks drive the comparison the two pickers would be lying
+   about what is on screen, so they go rather than sit there contradicting it. */
+.h2h-pickers.is-hidden{ display:none; }
+.h2h-picked{
+  margin:0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  font-size:12.5px; color:var(--ink-2);
+}
+.h2h-swap{ flex:none; }
+
+/* The compared people, lit on the group's own map: a standing means more when
+   you can see where the person stands. */
+/* Names are dropped for the capture only. */
+.insights.is-capture-unnamed .insights-map-name,
+.insights.is-capture-unnamed .insights-map-lead{ display:none; }
+
+.ins-export{ position:relative; }
+.ins-export-pop{
+  position:absolute; z-index:60; top:calc(100% + 6px); right:0; width:min(330px, 80vw);
+  padding:12px; text-align:left;
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--r-3);
+  box-shadow:var(--shadow-2);
+}
+.ins-export-head{
+  margin:0 0 6px; font-size:10.5px; font-weight:650; letter-spacing:.06em;
+  text-transform:uppercase; color:var(--ink-3);
+}
+.ins-export-head + .ins-export-opt{ margin-top:0; }
+.ins-export-opt{ display:flex; gap:8px; align-items:flex-start; padding:6px 0; cursor:pointer; }
+.ins-export-opt > span{ display:flex; flex-direction:column; gap:1px; min-width:0; }
+.ins-export-opt b{ font-size:12.5px; color:var(--ink); }
+.ins-export-opt span span{ font-size:11px; line-height:1.4; color:var(--ink-3); }
+.ins-export-opt input{ margin-top:2px; flex:none; }
+.ins-export-pop .ins-export-head:nth-of-type(2){ margin-top:10px; }
+.ins-export-go{ width:100%; margin-top:10px; }
+
+.h2h-map{ height:clamp(240px, 32vh, 380px); display:flex; min-height:0; }
+.h2h-map .ins-graph{ flex:1 1 auto; min-height:0; }
+
+/* What to do about it, per person — the readings say where they stand, these
+   say what that standing is a symptom of. */
+.h2h-notes{ margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:7px; }
+.h2h-note{
+  font-size:12px; line-height:1.45; color:var(--ink-2);
+  padding-left:11px; border-left:1px solid var(--line-2);
+}
+.h2h-note.is-warn{ border-left-color:var(--warn, #B54708); color:var(--ink); }
+.h2h-note.is-ok{ border-left-color:var(--ok, #0E7C5A); }
+
+.h2h{ display:flex; flex-direction:column; gap:12px; min-width:0; }
+/* Heads and rows live in one scroller and take one column template, declared
+   once on `.h2h`. Two grids with "matching" templates drift the moment a head
+   is wider than its track, and the numbers stop sitting under their person. */
+.h2h-scroll{ display:flex; flex-direction:column; gap:12px; min-width:0; }
+.h2h-scroll.is-wide{ overflow-x:auto; padding-bottom:6px; }
+.h2h-scroll.is-wide .h2h-heads,
+.h2h-scroll.is-wide .h2h-rows{ min-width:max-content; }
+
+.h2h-heads{ display:grid; gap:10px; align-items:stretch; }
+.h2h-head{
+  display:flex; align-items:center; gap:9px; min-width:0;
+  padding:10px 12px; border:1px solid var(--line-2); border-radius:var(--r-3);
+  background:var(--surface); font:inherit; text-align:left; cursor:pointer;
+}
+.h2h-head:hover{ border-color:var(--line-3); background:var(--surface-2); }
+.h2h-head-text{ min-width:0; display:flex; flex-direction:column; }
+.h2h-head-text b{ font-size:13.5px; line-height:1.25; color:var(--ink); }
+.h2h-head-text span{ font-size:11px; color:var(--ink-3); }
+
+.h2h-verdict{ margin:0; font-size:13.5px; line-height:1.45; color:var(--ink); }
+
+.h2h-rows{
+  margin:0; display:flex; flex-direction:column; gap:1px;
+  background:var(--line); border:1px solid var(--line); border-radius:var(--r-3); overflow:hidden;
+}
+.h2h-row{ display:grid; gap:10px; align-items:center; padding:9px 12px; background:var(--surface); }
+/* The measure stays readable while the people scroll past it. */
+.h2h-row dt{
+  min-width:0; z-index:1; position:sticky; left:0;
+  padding:2px 12px 2px 0; background:var(--surface);
+  font-size:12.5px; font-weight:600; color:var(--ink);
+}
+.h2h-row dt span{ display:block; font-weight:400; font-size:11px; color:var(--ink-3); }
+.h2h-val{
+  margin:0; text-align:right; font-size:14px; font-weight:600; color:var(--ink-2);
+  font-variant-numeric:tabular-nums;
+}
+/* The lead is stated by weight and a mark, never by colour alone. */
+.h2h-val.is-lead{ color:var(--ink); font-weight:750; }
+.h2h-val.is-lead i{ font-style:normal; margin-left:5px; font-size:9px; color:var(--ok, #0E7C5A); }
+.h2h-val.is-trail{ color:var(--ink-3); }
+
+@media (max-width:720px){
+  .h2h-pickers{ grid-template-columns:1fr; }
+}
+
+/* The group report is the facilitator's own document and the one reached for
+   first, so it is a band above the member table rather than a row inside it.
+   Distinguished by tint, a full hairline and type weight — not by a coloured
+   edge, which reads as decoration and is the accent doing a job the primary
+   button already does. */
+.report-group{
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+  margin:0 0 18px; padding:16px 18px;
+  border:1px solid var(--line-2); border-radius:var(--r-3);
+  background:var(--surface-2);
+}
+.report-group-text{ min-width:0; }
+.report-group-text b{ display:block; font-size:15px; font-weight:650; line-height:1.3; color:var(--ink); }
+.report-group-text .hint{ margin:3px 0 0; }
+.report-group-actions{ display:flex; gap:8px; flex:none; }
+
+/* Names the table under it, so the band above is plainly a different thing
+   rather than a row that escaped. */
+.report-table-label{
+  margin:0 0 6px;
+  font-size:11px; font-weight:600; letter-spacing:.05em; text-transform:uppercase;
+  color:var(--ink-3);
+}
+
+@media (max-width:720px){
+  .report-group{ flex-direction:column; align-items:flex-start; gap:10px; }
+  .report-group-actions{ width:100%; }
+}
 
 /* The identity choice is one question with three answers, so it fills the row
    rather than sitting beside a switch that is not there. */
-.identity-modes{ display:block; }
+/* Unboxed. It was a tinted, bordered container holding three already-bordered
+   rows — a card inside a card. A full-width rule does the separating instead. */
+.identity-modes{
+  display:block; background:none; border:0; border-radius:0; padding:0;
+}
+.cohort-detail .identity-modes{ margin:20px 0 0; padding-top:20px; border-top:1px solid var(--line); }
 .identity-choices{ display:flex; flex-direction:column; gap:4px; }
 .identity-choice{
   display:flex; align-items:flex-start; gap:8px;
@@ -720,6 +913,9 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
   background:var(--surface); cursor:pointer; line-height:1.4;
   transition:border-color .15s ease-out, background-color .15s ease-out;
 }
+/* Level 4: an answer, one step under the question. Selection stays the
+   accent's job. */
+.identity-choice b{ font-weight:600; color:var(--ink-2); }
 .identity-choice:hover{ border-color:var(--line-3); }
 .identity-choice input{ margin:2px 0 0; accent-color:var(--accent); flex:none; }
 .identity-choice.is-on{ border-color:var(--accent); background:var(--accent-soft); }
@@ -803,8 +999,14 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
   display:grid; gap:10px; margin:16px 0 4px;
   grid-template-columns:minmax(220px,1.6fr) repeat(3,minmax(120px,1fr));
 }
+/* The rater floor and the tie threshold are configuration, read once per
+   engagement; the response count is the live reading. Demoted by size so the
+   hero's loudest numerals are the ones that change. */
+.co-hero-stats .co-stat:nth-child(n+3) .co-stat-value{ font-size:15px; font-weight:650; }
 @media (max-width:900px){
-  .co-hero-stats{ grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
+  /* Fixed three, not auto-fit: at this width auto-fit resolved to five tracks
+     and left two of them empty beside the last tile. */
+  .co-hero-stats{ grid-template-columns:repeat(3,minmax(0,1fr)); }
   .co-progress{ grid-column:1 / -1; }
 }
 .co-progress{
@@ -812,7 +1014,7 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
   padding:10px 14px 12px; display:flex; flex-direction:column; justify-content:center; gap:8px;
 }
 .co-progress-head{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
-.co-progress-val{ font-size:14px; font-weight:650; color:var(--ink); }
+.co-progress-val{ font-size:20px; font-weight:700; letter-spacing:-.03em; color:var(--ink); font-variant-numeric:tabular-nums; }
 .co-progress-val em{ font-style:normal; font-weight:550; color:var(--ink-3); }
 
 /* ---------- tabs ---------- */
@@ -854,7 +1056,9 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
    panel underneath changed, which a bare swap of two full-width tables does
    not. */
 .co-tabpanel{
-  display:flex; flex-direction:column; gap:16px;
+  /* Wider than any card's own padding: two panels cannot read as two while
+     the space between them equals the space inside them. */
+  display:flex; flex-direction:column; gap:24px;
   padding:16px 0 0;
   /* `backwards`, never `both`: a fill-forwards transform stays on the panel
      for good, and a transformed ancestor is the containing block for every
@@ -873,18 +1077,27 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
 /* ---------- the compact scale ---------- */
 /* Everything below keeps a shared component's identity and takes one step down
    the same ladder, rather than inventing a smaller one. */
-.cohort-detail .card-body{ padding:16px 18px; }
+/* 20px matches `.card-head`'s 20px inline padding, so a title and the content
+   it heads share a left edge. */
+.cohort-detail .card-body{ padding:20px; }
+.cohort-detail .card{ border-color:var(--line-2); }
 .cohort-detail .card-body > .hint:first-child{ margin-top:0; }
 .cohort-detail .btn-row{ margin:12px 0; gap:8px; }
 .cohort-detail tbody td{ padding:7px 10px; font-size:13px; }
+/* A member's name is the data; it was inheriting the row's muted ink while a
+   radio label sat at full strength. */
+.cohort-detail tbody td b{ color:var(--ink); }
 .cohort-detail thead th{ padding:7px 10px; }
 .cohort-detail .dt-filters th{ top:27px; padding:3px 8px 5px; }
 .cohort-detail .control{ height:36px; }
 .cohort-detail .control-sm{ height:34px; }
 .cohort-detail textarea.control{ height:auto; }
 .cohort-detail .linkbox{ margin:0; }
+/* These separate unrelated subjects — a token URL, a vanity alias, the
+   identity question — so they take the between-subject step, not the
+   intra-group one. */
 .cohort-detail .slugbox,
-.cohort-detail .share-toggle{ margin:12px 0 0; }
+.cohort-detail .share-toggle{ margin:20px 0 0; }
 
 /* ---------- an aside that is not an error ---------- */
 /* The rater-floor warning used to be a bold .hint, which put a sentence that
@@ -1510,8 +1723,12 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
    underneath both, because a six-column table needs the width more than the
    sidebar needs the height. */
 .ins-body{ flex:1; min-height:0; min-width:0; display:flex; gap:14px; }
-/* A question arrives: a short rise-and-fade on the whole frame, once. */
-.ins-ws{ animation:insWsIn .2s var(--ease) both; }
+/* A question arrives: a short rise-and-fade on the whole frame, once.
+   `backwards`, never `both`: a fill-forwards transform leaves an identity
+   matrix on the frame, which then becomes the containing block for every
+   `position: fixed` inside it — search popovers land hundreds of pixels from
+   their input. The same mistake bit `.co-tabpanel`. */
+.ins-ws{ animation:insWsIn .2s var(--ease) backwards; }
 @keyframes insWsIn{ from{ opacity:0; transform:translateY(4px); } }
 .ins-panels{ flex:1; min-height:0; min-width:0; display:flex; }
 .ins-ws{
@@ -1523,6 +1740,11 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
   grid-template-rows:clamp(440px, 56vh, 680px) auto;
 }
 .ins-ws.is-band-tall{ grid-template-rows:clamp(440px, 56vh, 680px) auto; }
+/* A stage holding a comparison rather than a picture sizes to its content:
+   a fixed picture height makes a short table float in space and a long one
+   scroll inside a box while the page below has room to spare. */
+.ins-ws.is-plain-stage{ grid-template-rows:auto auto; }
+.ins-ws.is-plain-stage .ins-stage{ min-height:clamp(320px, 40vh, 520px); }
 
 .ins-stage,
 .ins-side,
@@ -1606,8 +1828,13 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
   padding:6px 10px; border-radius:var(--r-3);
   background:var(--nx-glass); border:1px solid var(--line);
   backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+  /* The plate stays transparent to the pointer so a drag across it still pans
+     the map; only the keys that actually do something take the pointer back.
+     Without this the whole bar wore the pan surface's grab cursor and looked
+     clickable while swallowing nothing. */
   pointer-events:none;
 }
+.ins-legend-float .ins-key.is-toggle{ pointer-events:auto; }
 .ins-legend-float .ins-legend-row{ row-gap:4px; }
 /* The picture is a flex item, not a percentage-height block: a percentage
    against a flex parent with no stated height is the one way an SVG in this
@@ -1622,7 +1849,11 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
 .ins-graph-node{ transition:opacity .2s ease-out; }
 .ins-graph-node circle{ transition:stroke .15s ease-out, stroke-width .15s ease-out; }
 .ins-graph-node:hover circle:last-of-type{ stroke:var(--ink-3); stroke-width:3.5; }
-.ins-graph-tie{ transition:opacity .2s ease-out; }
+.ins-graph-tie{ transition:opacity .2s ease-out; pointer-events:none; }
+/* The tie's target: invisible, wide, and the only part of a tie the pointer
+   ever meets. `stroke` rather than `all` so the area the path encloses on a
+   bent tie is not a target too. */
+.ins-graph-tie-hit{ pointer-events:stroke; cursor:pointer; }
 .nxc-node circle{ transition:stroke .15s ease-out, stroke-width .15s ease-out; }
 .nxc-node:hover circle{ stroke:var(--ink-3); stroke-width:3; }
 .insights-map-name{
@@ -1686,6 +1917,10 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
 .net-explorer.is-full .ins-ws{ grid-template-rows:minmax(300px,1fr) minmax(0, 46%); }
 .net-explorer.is-full .ins-band-body{ overflow:auto; overscroll-behavior:contain; }
 .ins-band-body > .hint{ padding:16px; }
+/* A search over the band's own rows, so a shortlist can be built without
+   paging through sixty people looking for the next one. */
+.ins-band-tools{ display:flex; gap:8px; align-items:center; padding:0 0 8px; }
+.ins-band-tools .control{ flex:1; max-width:340px; }
 
 /* Dense but calm: hairlines rather than borders, tabular figures so a column
    of numbers is a column, and a sticky head because the band scrolls inside
@@ -1697,6 +1932,10 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
   width:100%; min-width:0; table-layout:fixed; border-collapse:collapse;
   font-variant-numeric:tabular-nums;
 }
+/* Many columns: keep their widths and let the band scroll sideways. A head
+   squeezed to "RELIAB…" names nothing. */
+.ins-grid-wrap.is-wide{ overflow-x:auto; }
+.ins-grid.is-wide{ width:max-content; min-width:100%; }
 .ins-grid thead th{
   position:sticky; top:0; z-index:var(--z-sticky);
   padding:7px 8px; text-align:left; vertical-align:bottom;
@@ -1747,8 +1986,20 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
   display:inline-flex; align-items:center; gap:6px;
   font-size:11.5px; color:var(--ink-3); white-space:nowrap;
 }
+/* A key that switches its own layer. Off is stated twice — the mark drains and
+   the label strikes through — so it reads as "hidden" rather than "faint". */
+.ins-key.is-toggle{
+  border:0; background:none; font:inherit; font-size:11.5px; color:var(--ink-3);
+  padding:2px 4px; margin:-2px 0; border-radius:var(--r-1); cursor:pointer;
+}
+.ins-key.is-toggle:hover{ background:var(--surface-2); color:var(--ink-2); }
+.ins-key.is-toggle:focus-visible{ outline:2px solid var(--accent); outline-offset:1px; }
+.ins-key.is-toggle.is-off{ color:var(--ink-4); text-decoration:line-through; }
+.ins-key.is-toggle.is-off i{ opacity:.3; }
 .ins-key i{ width:9px; height:9px; border-radius:50%; flex:none; }
 .ins-key i.is-ring{ width:11px; height:11px; background:transparent; border:2px solid; }
+/* A tie, not a node: the legend reads the same shape it points at. */
+.ins-key i.is-line{ width:16px; height:3px; border-radius:2px; }
 .ins-key b{ color:var(--ink-2); font-variant-numeric:tabular-nums; }
 .ins-legend-row{
   display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:5px 14px;
@@ -2488,8 +2739,15 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
   grid-template-columns:minmax(0,1fr) clamp(300px, 26vw, 400px);
   grid-template-rows:minmax(0,1fr) auto;
 }
-.net-explorer.is-full .insights.is-theatre .ins-band{
-  max-height:min(300px, 32vh);
+/* Full screen is for the picture: the band of rows is a reading surface, not
+   one, so it goes entirely and the stage takes both rows. */
+.net-explorer.is-full .insights.is-theatre .ins-band{ display:none; }
+.net-explorer.is-full .insights.is-theatre .ins-ws{ grid-template-rows:minmax(0,1fr); }
+.net-explorer.is-full .insights.is-theatre .ins-stage{ grid-row:1 / -1; }
+/* The readings slide in from the right when somebody is picked, rather than
+   permanently holding 400px the picture could use. */
+.net-explorer.is-full .insights.is-theatre .ins-side{
+  overflow:auto; overscroll-behavior:contain;
 }
 .net-explorer.is-full .insights.is-theatre .ins-side{
   transition:opacity .18s ease-out;

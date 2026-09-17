@@ -49,6 +49,91 @@ export interface TabGroupDef {
  * rather than by child order so a tab body reads as what it is showing rather
  * than as a stack of divs in a particular sequence.
  */
+/**
+ * Save picture, with the two decisions that actually matter before a picture
+ * leaves the room: how much of the page to take, and whether the people on it
+ * are named. Defaults are the safe ones — the picture alone, names off.
+ */
+function ExportButton({ onExport }: { onExport: (o: ExportOptions) => void }) {
+  const [open, setOpen] = useState(false);
+  const [scope, setScope] = useState<ExportOptions['scope']>('graph');
+  const [names, setNames] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!boxRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  return (
+    <div className="ins-export" ref={boxRef}>
+      <button
+        type="button"
+        className="ins-stage-btn"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        title="Save this as a PNG"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M12 3v12M7 10l5 5 5-5M4 21h16" />
+        </svg>
+        Save picture
+      </button>
+      {open ? (
+        <div className="ins-export-pop" role="dialog" aria-label="Save picture">
+          <p className="ins-export-head">What to include</p>
+          <label className="ins-export-opt">
+            <input type="radio" name="ins-export-scope" checked={scope === 'graph'} onChange={() => setScope('graph')} />
+            <span>
+              <b>The picture only</b>
+              <span>The map and its legend.</span>
+            </span>
+          </label>
+          <label className="ins-export-opt">
+            <input type="radio" name="ins-export-scope" checked={scope === 'all'} onChange={() => setScope('all')} />
+            <span>
+              <b>Picture and readings</b>
+              <span>The map, the findings beside it and the table below — the whole record.</span>
+            </span>
+          </label>
+          <p className="ins-export-head">Names on the map</p>
+          <label className="ins-export-opt">
+            <input type="checkbox" checked={names} onChange={(e) => setNames(e.target.checked)} />
+            <span>
+              <b>Show every name</b>
+              <span>
+                Off by default: a named map identifies who was rated how, and that is rarely a
+                picture to share with the group itself.
+              </span>
+            </span>
+          </label>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm ins-export-go"
+            onClick={() => {
+              setOpen(false);
+              onExport({ scope, names });
+            }}
+          >
+            Save PNG
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export interface ExportOptions {
+  /** The picture alone, or the picture with the readings and the table. */
+  scope: 'graph' | 'all';
+  /** Names on the map. Off makes a picture that can be shown to the group. */
+  names: boolean;
+}
+
 export function Workspace({
   id,
   title,
@@ -62,6 +147,9 @@ export function Workspace({
   centreAside,
   legend,
   onExport,
+  plain = false,
+  isFull = false,
+  onToggleFull,
   lead,
   finding,
 }: {
@@ -87,8 +175,24 @@ export function Workspace({
    * looking at the picture, so it lives on the picture.
    */
   legend?: React.ReactNode;
-  /** Saves the picture as a PNG — the stage body, legend included. */
-  onExport?: () => void;
+  /**
+   * Saves a PNG. The caller is handed what the reader chose to include, since
+   * a picture that leaves the room is a different object from one read on
+   * screen: a group map with every name on it is not always shareable.
+   */
+  onExport?: (opts: ExportOptions) => void;
+  /**
+   * The centre is not a picture — a form, a table — so it is rendered straight
+   * into the stage instead of into the pan/zoom surface. That surface carries a
+   * CSS transform and clips its overflow: a transform makes itself the
+   * containing block for `position: fixed`, which puts any popover inside it in
+   * the wrong place, the clip cuts a long list off, and zoom controls over a
+   * table mean nothing.
+   */
+  plain?: boolean;
+  /** Full-screen state and its toggle, for the control beside Save picture. */
+  isFull?: boolean;
+  onToggleFull?: () => void;
   /** Sits above the readings on every tab — the focused person's card. */
   lead?: React.ReactNode;
   /**
@@ -100,7 +204,7 @@ export function Workspace({
   const zoom = useZoomPane();
   return (
     <div
-      className={`ins-ws${bandTall ? ' is-band-tall' : ''}`}
+      className={`ins-ws${bandTall ? ' is-band-tall' : ''}${plain ? ' is-plain-stage' : ''}`}
       role="tabpanel"
       id={`ins-panel-${id}`}
       aria-labelledby={`ins-tab-${id}`}
@@ -117,23 +221,40 @@ export function Workspace({
             <h3>{finding ?? title}</h3>
           </div>
           <div className="ins-stage-aside">
-            {zoom.controls}
-            {onExport ? (
-              <button type="button" className="ins-stage-btn" onClick={onExport} title="Save this picture as a PNG">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M12 3v12M7 10l5 5 5-5M4 21h16" />
-                </svg>
-                Save picture
+            {plain ? null : zoom.controls}
+            {onExport ? <ExportButton onExport={onExport} /> : null}
+            {onToggleFull ? (
+              <button
+                type="button"
+                className={`ins-stage-btn${isFull ? ' is-on' : ''}`}
+                onClick={onToggleFull}
+                title={isFull ? 'Leave full screen (Esc)' : 'Fill the screen with this picture'}
+                aria-pressed={isFull}
+              >
+                {isFull ? (
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M6 6l12 12M18 6L6 18" />
+                  </svg>
+                ) : (
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M4 9V4h5M20 15v5h-5M20 9V4h-5M4 15v5h5" />
+                  </svg>
+                )}
+                {isFull ? 'Close' : 'Full screen'}
               </button>
             ) : null}
           </div>
         </header>
-        <div className="ins-stage-body">
-          <div {...zoom.paneProps}>
-            <div className="ins-zoom-inner" style={zoom.innerStyle}>
-              {centre}
+        <div className={`ins-stage-body${plain ? ' is-plain' : ''}`}>
+          {plain ? (
+            centre
+          ) : (
+            <div {...zoom.paneProps}>
+              <div className="ins-zoom-inner" style={zoom.innerStyle}>
+                {centre}
+              </div>
             </div>
-          </div>
+          )}
           {legend ? <div className="ins-legend-float">{legend}</div> : null}
           {centreAside ? <div className="ins-stage-float">{centreAside}</div> : null}
         </div>
@@ -252,11 +373,18 @@ export function DetailTable<T>({
   tip,
   empty,
   pageSize = 10,
+  wide = false,
 }: {
   rows: readonly T[];
   columns: readonly Column<T>[];
   /** Rows per page. Ten fits the band at the heights the frame gives it. */
   pageSize?: number;
+  /**
+   * More columns than the band can honestly fit. The table keeps its column
+   * widths and the band scrolls sideways, rather than squeezing every head
+   * until half of them are truncated to three letters.
+   */
+  wide?: boolean;
   rowKey: (row: T) => string | number;
   /** Which person a row is about, when it is about one. */
   personNo?: (row: T) => number | null;
@@ -317,8 +445,8 @@ export function DetailTable<T>({
     );
 
   return (
-    <div className="ins-grid-wrap" ref={wrapRef}>
-    <table className="ins-grid">
+    <div className={`ins-grid-wrap${wide ? ' is-wide' : ''}`} ref={wrapRef}>
+    <table className={`ins-grid${wide ? ' is-wide' : ''}`}>
       <colgroup>
         {columns.map((c, i) => (
           <col key={c.key} style={colWidths[i] ? { width: colWidths[i] } : undefined} />
@@ -554,13 +682,82 @@ export function Key({ color, children }: { color: string; children: React.ReactN
   );
 }
 
-/** The same, as a ring rather than a disc — for a decoration, not a category. */
-export function RingKey({ color, children }: { color: string; children: React.ReactNode }) {
+/**
+ * A legend key.
+ *
+ * With `onToggle` it is a button that turns its own layer off — the legend is
+ * where a reader already looks to ask "what is the orange one?", so it is the
+ * obvious place to answer "show me only that". Without one it stays a plain
+ * key, which is what the single-lens tabs need.
+ */
+function LegendKey({
+  mark,
+  on,
+  onToggle,
+  children,
+}: {
+  mark: React.ReactElement;
+  on: boolean;
+  onToggle?: () => void;
+  children: React.ReactNode;
+}) {
+  if (!onToggle) {
+    return (
+      <span className="ins-key">
+        {mark}
+        {children}
+      </span>
+    );
+  }
   return (
-    <span className="ins-key">
-      <i className="is-ring" style={{ borderColor: color }} aria-hidden="true" />
+    <button
+      type="button"
+      className={`ins-key is-toggle${on ? '' : ' is-off'}`}
+      onClick={onToggle}
+      aria-pressed={on}
+      title={on ? 'Hide these' : 'Show these'}
+    >
+      {mark}
       {children}
-    </span>
+    </button>
+  );
+}
+
+/** A tie colour, for a map drawing more than one lens at once. */
+export function LineKey({
+  color,
+  on = true,
+  onToggle,
+  children,
+}: {
+  color: string;
+  on?: boolean;
+  onToggle?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <LegendKey mark={<i className="is-line" style={{ background: color }} aria-hidden="true" />} on={on} onToggle={onToggle}>
+      {children}
+    </LegendKey>
+  );
+}
+
+/** The same, as a ring rather than a disc — a decoration, not a category. */
+export function RingKey({
+  color,
+  on = true,
+  onToggle,
+  children,
+}: {
+  color: string;
+  on?: boolean;
+  onToggle?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <LegendKey mark={<i className="is-ring" style={{ borderColor: color }} aria-hidden="true" />} on={on} onToggle={onToggle}>
+      {children}
+    </LegendKey>
   );
 }
 
@@ -779,6 +976,8 @@ export function ScopePicker({
   total,
   compare,
   onToggleCompare,
+  allNames,
+  onToggleAllNames,
 }: {
   funcs: readonly ScopeChip[];
   tenures: readonly ScopeChip[];
@@ -793,6 +992,9 @@ export function ScopePicker({
   /** Side-by-side reading of the chosen departments. */
   compare: boolean;
   onToggleCompare: (on: boolean) => void;
+  /** Name every person on the map, not only the notable few. */
+  allNames: boolean;
+  onToggleAllNames: (on: boolean) => void;
 }) {
   const whole = activeFuncs.size === 0 && activeTenures.size === 0;
   const canCompare = activeFuncs.size >= 2;
@@ -953,6 +1155,24 @@ export function ScopePicker({
               </span>
             </label>
           ) : null}
+          {/* Not a filter, but it belongs to the same question — what the map
+              is showing — and this is where the reader already is. */}
+          <label className="ins-scope-switch">
+            <input
+              type="checkbox"
+              checked={allNames}
+              onChange={(e) => onToggleAllNames(e.target.checked)}
+            />
+            <span className="ins-scope-switch-track" aria-hidden="true" />
+            <span className="ins-scope-switch-text">
+              <b>Show every name</b>
+              <span>
+                {allNames
+                  ? 'Every name that can be placed without covering somebody else. Where the map is tightest a few still give way — hover or search for those.'
+                  : 'Only the notable few are named; the rest appear on hover, focus or search.'}
+              </span>
+            </span>
+          </label>
           <p className="ins-scope-pop-foot">Departments and tenure combine: Sales + 3–7y is the Sales people with three to seven years.</p>
         </div>
       ) : null}
@@ -1206,11 +1426,14 @@ export function PersonSearch({
   people,
   onPick,
   scopedOut,
+  placeholder = 'Find a person…',
 }: {
   people: readonly SearchPerson[];
   onPick: (no: number) => void;
   /** True when a scope is on, so "no match" can say why. */
   scopedOut?: boolean;
+  /** What the box is for, when it is not the page-wide search. */
+  placeholder?: string;
 }) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
@@ -1289,7 +1512,7 @@ export function PersonSearch({
         ref={inputRef}
         type="search"
         value={q}
-        placeholder="Find a person…"
+        placeholder={placeholder}
         aria-label="Find a person on the picture"
         aria-autocomplete="list"
         aria-controls="ins-search-list"
@@ -1419,7 +1642,7 @@ export function DeptCompare({
                 <b>{r.trustIn.toFixed(1)}</b>
               </span>
               <span className="ins-compare-bar">
-                <em>Influence</em>
+                <em>Power</em>
                 <span className="ins-compare-track" aria-hidden="true">
                   <i style={{ width: `${Math.round((r.powerIn / max.powerIn) * 100)}%`, background: '#B54708' }} />
                 </span>

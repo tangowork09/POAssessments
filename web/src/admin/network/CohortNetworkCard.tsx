@@ -935,7 +935,7 @@ export function CohortNetworkCard({
             onClick={() => setView('compare')}
             title="The same people twice: who the group trusts, and who it lets decide"
           >
-            Trust vs Influence
+            Trust vs Power
           </button>
         </div>
 

@@ -18,6 +18,7 @@
  */
 
 import { BRAND_ACCENT, BRAND_COMPANY_NAME } from '../../shared/brand.js';
+import type { SocioInsights } from '../../shared/socio-insights.js';
 import type {
   CohortReportPayload,
   SocioGroupReportPayload,
@@ -47,6 +48,9 @@ const T = {
   warnLine: '#F0C77A',
   warnInk: '#6E3708',
   good: '#0E7C5A',
+  /* The instrument's own blue, borrowed from the power-to block, for findings
+     that are structural rather than good or bad. */
+  accent: '#0B6FB4',
   track: '#EDF1F6',
 } as const;
 
@@ -368,7 +372,312 @@ function drawGroupChapters(ctx: Ctx, report: SocioGroupReportPayload): void {
   drawAuthorityTrust(ctx, report);
   drawSupportGaps(ctx, report);
   drawFunctionSeams(ctx, report);
+  // The structural chapters. Absent from reports generated before the findings
+  // were stored with the scores, so the whole section is skipped rather than
+  // printed empty — a heading over "no data" reads as a fault in the group.
+  drawInsightChapters(ctx, report);
   drawCoverage(ctx, report);
+}
+
+/**
+ * Who the group leans on, how it clusters, and where it does not reach across
+ * itself. Everything here is read straight off `group.insights`, computed when
+ * the report was generated; nothing is recalculated at render time.
+ */
+function drawInsightChapters(ctx: Ctx, report: SocioGroupReportPayload): void {
+  const ins = report.group.insights;
+  if (!ins) return;
+  drawAnchors(ctx, ins);
+  drawBridges(ctx, ins);
+  drawClusters(ctx, ins);
+  drawUnreturned(ctx, ins, report.group.tieThreshold);
+  drawSilos(ctx, ins);
+  drawSpread(ctx, ins);
+  drawReliabilityOpenness(ctx, ins);
+}
+
+/** One ranked list in a panel, the shape both anchor lists and bridges take. */
+function rankedPanel(
+  ctx: Ctx,
+  x: number,
+  w: number,
+  title: string,
+  color: string,
+  rows: { name: string; func: string; value: number }[],
+  fmt: (v: number) => string,
+  empty: string,
+): number {
+  const { doc } = ctx;
+  const h = 40 + Math.max(rows.length, 1) * 18;
+  doc.roundRect(x, ctx.y, w, h, 7, T.surface);
+  doc.rect(x, ctx.y, 3, h, color);
+  doc.text(title, x + 14, ctx.y + 17, { font: 'Helvetica-Bold', size: 8.8, color: T.ink });
+
+  let y = ctx.y + 36;
+  if (rows.length === 0) doc.text(empty, x + 14, y, { size: 8.4, color: T.ink4 });
+  for (const r of rows) {
+    doc.text(truncate(r.name, 'Helvetica', 8.6, w - 86), x + 14, y, { size: 8.6, color: T.ink2 });
+    doc.textRight(fmt(r.value), x + w - 14, y, { font: 'Helvetica-Bold', size: 8.6, color });
+    y += 18;
+  }
+  return h;
+}
+
+function drawAnchors(ctx: Ctx, ins: SocioInsights): void {
+  const { doc } = ctx;
+  ensure(ctx, 170);
+  sectionHead(ctx, 'Anchors', 'Whom the group relies on, and whom it answers to');
+
+  ctx.y = doc.paragraph(
+    'Counted by how many colleagues put each person over the tie line — on trust on the left, on power-over on the right. A name in both columns is where reliance and authority sit in the same person, which is the group\u2019s real centre of gravity rather than its chart.',
+    M.left,
+    ctx.y,
+    CONTENT_W,
+    { size: BODY.size, color: T.ink2, leading: BODY.leading },
+  ) + 14;
+
+  const colW = (CONTENT_W - 16) / 2;
+  const rows = Math.max(ins.anchors.trusted.length, ins.anchors.influential.length, 1);
+  ensure(ctx, 40 + rows * 18 + 30);
+
+  const asInt = (v: number): string => String(Math.round(v));
+  const h1 = rankedPanel(ctx, M.left, colW, 'Most trusted', T.good, ins.anchors.trusted, asInt, 'Nobody is over the line.');
+  const h2 = rankedPanel(ctx, M.left + colW + 16, colW, 'Most deferred to', T.warn, ins.anchors.influential, asInt, 'Nobody is over the line.');
+  ctx.y += Math.max(h1, h2) + 14;
+
+  if (ins.anchors.both.length > 0) {
+    ensure(ctx, 40);
+    ctx.y = doc.paragraph(
+      `Both at once: ${ins.anchors.both.join(', ')}.`,
+      M.left,
+      ctx.y,
+      CONTENT_W,
+      { size: 8.8, color: T.ink, leading: 13 },
+    ) + 16;
+  } else {
+    ensure(ctx, 34);
+    ctx.y = doc.paragraph(
+      'Nobody holds both at once — the people relied on and the people deferred to are different people here.',
+      M.left,
+      ctx.y,
+      CONTENT_W,
+      { size: 8.8, color: T.ink2, leading: 13 },
+    ) + 16;
+  }
+}
+
+function drawBridges(ctx: Ctx, ins: SocioInsights): void {
+  const { doc } = ctx;
+  ensure(ctx, 150);
+  sectionHead(ctx, 'Bridges', 'Who the group would lose touch through');
+
+  ctx.y = doc.paragraph(
+    'The share of shortest trust paths that run through each person. A high figure with few ties of their own is the strongest form of this: somebody the group depends on to reach itself, whether or not anyone has noticed. It is a structural fact about the group, not a compliment, and it names a risk if that person leaves.',
+    M.left,
+    ctx.y,
+    CONTENT_W,
+    { size: BODY.size, color: T.ink2, leading: BODY.leading },
+  ) + 14;
+
+  ensure(ctx, 40 + Math.max(ins.bridges.length, 1) * 18 + 20);
+  const h = rankedPanel(
+    ctx,
+    M.left,
+    CONTENT_W,
+    'Most between',
+    T.accent,
+    ins.bridges,
+    (v) => v.toFixed(2),
+    'No path runs through anyone: the network is too small or too evenly joined.',
+  );
+  ctx.y += h + 20;
+}
+
+function drawClusters(ctx: Ctx, ins: SocioInsights): void {
+  const { doc } = ctx;
+  if (ins.clusters.length === 0) return;
+  ensure(ctx, 140);
+  sectionHead(ctx, 'Clusters', 'Which parts of the group hold together');
+
+  ctx.y = doc.paragraph(
+    'Found from the trust ties alone, with nobody told which group they belong to. One cluster means a group that holds together as one. Several mean the trust network has seams in it, and the names below say where.',
+    M.left,
+    ctx.y,
+    CONTENT_W,
+    { size: BODY.size, color: T.ink2, leading: BODY.leading },
+  ) + 14;
+
+  ins.clusters.forEach((cl, i) => {
+    const names = cl.members.join(', ');
+    const textH = doc.paragraphHeight(names, CONTENT_W - 28, { size: 8.6, leading: 12.5 });
+    const h = 34 + textH;
+    ensure(ctx, h + 10);
+    doc.roundRect(M.left, ctx.y, CONTENT_W, h, 7, i === 0 ? T.surface2 : T.surface);
+    doc.text(`Cluster ${i + 1} · ${cl.size} ${cl.size === 1 ? 'person' : 'people'}`, M.left + 14, ctx.y + 17, {
+      font: 'Helvetica-Bold',
+      size: 8.8,
+      color: T.ink,
+    });
+    doc.paragraph(names, M.left + 14, ctx.y + 30, CONTENT_W - 28, { size: 8.6, color: T.ink2, leading: 12.5 });
+    ctx.y += h + 8;
+  });
+  ctx.y += 12;
+}
+
+function drawUnreturned(ctx: Ctx, ins: SocioInsights, threshold: number): void {
+  const { doc } = ctx;
+  ensure(ctx, 150);
+  sectionHead(ctx, 'One-way trust', 'Where reaching out is not returned');
+
+  ctx.y = doc.paragraph(
+    `One person rates another at ${threshold} or above on trust and does not get it back. The two kinds are different findings and are kept apart: "not returned" means the second person had an opinion and put it below the line, which is an asymmetry the group is living with; "no basis" means they never rated the first at all, which is usually distance or seniority rather than rejection.`,
+    M.left,
+    ctx.y,
+    CONTENT_W,
+    { size: BODY.size, color: T.ink2, leading: BODY.leading },
+  ) + 14;
+
+  const h = 40 + Math.max(ins.unreturned.length, 1) * 18;
+  ensure(ctx, h + 20);
+  doc.roundRect(M.left, ctx.y, CONTENT_W, h, 7, T.surface);
+  doc.text('Reaches out', M.left + 14, ctx.y + 17, { font: 'Helvetica-Bold', size: 8.8, color: T.ink });
+  doc.text('Does not return', M.left + 210, ctx.y + 17, { font: 'Helvetica-Bold', size: 8.8, color: T.ink });
+  doc.textRight('Gap', M.left + CONTENT_W - 14, ctx.y + 17, { font: 'Helvetica-Bold', size: 8.8, color: T.ink });
+
+  let y = ctx.y + 36;
+  if (ins.unreturned.length === 0) {
+    doc.text('Every tie at this threshold is returned.', M.left + 14, y, { size: 8.4, color: T.ink4 });
+  }
+  for (const t of ins.unreturned) {
+    doc.text(truncate(t.from, 'Helvetica', 8.6, 180), M.left + 14, y, { size: 8.6, color: T.ink2 });
+    doc.text(truncate(t.to, 'Helvetica', 8.6, 180), M.left + 210, y, { size: 8.6, color: T.ink2 });
+    doc.textRight(
+      t.kind === 'no_basis' ? 'no basis' : (t.gap === null ? '—' : t.gap.toFixed(2)),
+      M.left + CONTENT_W - 14,
+      y,
+      { font: 'Helvetica-Bold', size: 8.6, color: t.kind === 'no_basis' ? T.ink4 : T.warn },
+    );
+    y += 18;
+  }
+  ctx.y += h + 20;
+}
+
+function drawSilos(ctx: Ctx, ins: SocioInsights): void {
+  const { doc } = ctx;
+  const rows = ins.silos.filter((s) => s.size > 0);
+  if (rows.length < 2) return;
+  ensure(ctx, 150);
+  sectionHead(ctx, 'Silos', 'How much of each function stays inside itself');
+
+  ctx.y = doc.paragraph(
+    'Both rates are over the pairs that were possible, not over the ties given, so a small function is not flattered by having fewer people to ignore. A within-rate far above the out-rate is a silo; the two close together is a function that works across its own boundary. Functions of fewer than three people keep their counts but not their rates — in a group this named, a two-person average is two people with a decimal point on it.',
+    M.left,
+    ctx.y,
+    CONTENT_W,
+    { size: BODY.size, color: T.ink2, leading: BODY.leading },
+  ) + 14;
+
+  const h = 40 + rows.length * 18;
+  ensure(ctx, h + 20);
+  doc.roundRect(M.left, ctx.y, CONTENT_W, h, 7, T.surface);
+  doc.text('Function', M.left + 14, ctx.y + 17, { font: 'Helvetica-Bold', size: 8.8, color: T.ink });
+  doc.textRight('People', M.left + CONTENT_W - 200, ctx.y + 17, { font: 'Helvetica-Bold', size: 8.8, color: T.ink });
+  doc.textRight('Within', M.left + CONTENT_W - 110, ctx.y + 17, { font: 'Helvetica-Bold', size: 8.8, color: T.ink });
+  doc.textRight('Outward', M.left + CONTENT_W - 14, ctx.y + 17, { font: 'Helvetica-Bold', size: 8.8, color: T.ink });
+
+  let y = ctx.y + 36;
+  for (const r of rows) {
+    const siloed = r.withinRate !== null && r.outRate !== null && r.withinRate - r.outRate >= 0.2;
+    doc.text(truncate(r.key, 'Helvetica', 8.6, 200), M.left + 14, y, { size: 8.6, color: T.ink2 });
+    doc.textRight(String(r.size), M.left + CONTENT_W - 200, y, { size: 8.6, color: T.ink3 });
+    doc.textRight(
+      r.withinRate === null ? 'withheld' : r.withinRate.toFixed(2),
+      M.left + CONTENT_W - 110,
+      y,
+      { font: 'Helvetica-Bold', size: 8.6, color: siloed ? T.warn : T.ink2 },
+    );
+    doc.textRight(r.outRate === null ? 'withheld' : r.outRate.toFixed(2), M.left + CONTENT_W - 14, y, {
+      size: 8.6,
+      color: T.ink2,
+    });
+    y += 18;
+  }
+  ctx.y += h + 20;
+}
+
+function drawSpread(ctx: Ctx, ins: SocioInsights): void {
+  const { doc } = ctx;
+  const rows = ins.spread.filter((r) => r.concentration !== null);
+  if (rows.length === 0) return;
+  ensure(ctx, 140);
+  sectionHead(ctx, 'Spread', 'Whether each network is held by everyone or by a few');
+
+  ctx.y = doc.paragraph(
+    'Zero would be every person receiving the same number of ties; one would be a single person holding all of them. High concentration is not a fault — a group can reasonably route its authority through few people — but concentration on trust is a different matter from concentration on power, and the two are worth reading against each other.',
+    M.left,
+    ctx.y,
+    CONTENT_W,
+    { size: BODY.size, color: T.ink2, leading: BODY.leading },
+  ) + 14;
+
+  const h = 40 + rows.length * 20;
+  ensure(ctx, h + 20);
+  doc.roundRect(M.left, ctx.y, CONTENT_W, h, 7, T.surface);
+  doc.text('Network', M.left + 14, ctx.y + 17, { font: 'Helvetica-Bold', size: 8.8, color: T.ink });
+  doc.textRight('Concentration', M.left + CONTENT_W - 14, ctx.y + 17, { font: 'Helvetica-Bold', size: 8.8, color: T.ink });
+
+  let y = ctx.y + 36;
+  const barX = M.left + 190;
+  const barW = CONTENT_W - 190 - 70;
+  for (const r of rows) {
+    const v = r.concentration ?? 0;
+    doc.text(truncate(r.name, 'Helvetica', 8.6, 170), M.left + 14, y - 2, { size: 8.6, color: T.ink2 });
+    doc.roundRect(barX, y - 9, barW, 7, 3.5, T.track);
+    doc.roundRect(barX, y - 9, Math.max(2, barW * Math.min(1, v)), 7, 3.5, v >= 0.5 ? T.warn : T.good);
+    doc.textRight(v.toFixed(2), M.left + CONTENT_W - 14, y - 2, { font: 'Helvetica-Bold', size: 8.6, color: T.ink });
+    y += 20;
+  }
+  ctx.y += h + 20;
+}
+
+function drawReliabilityOpenness(ctx: Ctx, ins: SocioInsights): void {
+  const { doc } = ctx;
+  const r = ins.reliabilityVsOpenness;
+  ensure(ctx, 140);
+  sectionHead(ctx, 'Reliability and openness', 'Two halves of trust, read apart');
+
+  ctx.y = doc.paragraph(
+    'Trust is asked as three statements, and two of them pull in different directions: whether somebody delivers what they said they would, and whether people say what they actually think to them. Read together they average into one number that hides which is missing. Read apart they name it.',
+    M.left,
+    ctx.y,
+    CONTENT_W,
+    { size: BODY.size, color: T.ink2, leading: BODY.leading },
+  ) + 14;
+
+  const colW = (CONTENT_W - 16) / 2;
+  // Tall enough for an 18pt figure and a two-line label under it without the
+  // two meeting.
+  const h = 84;
+  ensure(ctx, h + 60);
+  const cells: { label: string; value: number | null; color: string }[] = [
+    { label: 'Reliability — delivers what they said', value: r.reliability, color: T.good },
+    { label: 'Openness — hears what people think', value: r.openness, color: T.accent },
+  ];
+  cells.forEach((cell, i) => {
+    const x = M.left + i * (colW + 16);
+    doc.roundRect(x, ctx.y, colW, h, 7, T.surface);
+    doc.rect(x, ctx.y, 3, h, cell.color);
+    doc.text(cell.value === null ? '—' : cell.value.toFixed(2), x + 14, ctx.y + 32, {
+      font: 'Helvetica-Bold',
+      size: 18,
+      color: T.ink,
+    });
+    doc.paragraph(cell.label, x + 14, ctx.y + 50, colW - 28, { size: 8.2, color: T.ink3, leading: 11 });
+  });
+  ctx.y += h + 14;
+
+  ensure(ctx, 40);
+  ctx.y = doc.paragraph(r.verdict, M.left, ctx.y, CONTENT_W, { size: 8.8, color: T.ink, leading: 13 }) + 20;
 }
 
 function drawHowToRead(ctx: Ctx, report: SocioGroupReportPayload): void {

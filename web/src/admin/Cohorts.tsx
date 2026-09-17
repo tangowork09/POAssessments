@@ -11,7 +11,7 @@
  * permanently spoken for, and the panel says so where it matters.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ApiError, api } from '../lib/api.js';
 import { CardHead, DataTable, EmptyState, Head, TableSkeleton, Toast, useToast } from './ui.js';
@@ -781,6 +781,14 @@ function ReportsPanel({
   const cohortId = cohort.id;
   const short = responded < cohort.minRaters;
 
+  // The group report is the facilitator's own document and the one they reach
+  // for first, so it is lifted out of the table entirely. Inside it, the
+  // server's `scope DESC` ordering put it last — on the last page of a
+  // sixty-person roster, which is the worst place for the thing most often
+  // wanted. One band per round, newest first; a cohort run once has one.
+  const groupReports = reports.filter((r) => r.scope === 'group');
+  const memberReports = reports.filter((r) => r.scope === 'member');
+
   return (
     <section className="card">
       <CardHead
@@ -837,7 +845,7 @@ function ReportsPanel({
             </p>
           </div>
           <button
-            className={`btn btn-sm ${cohort.shareReports ? 'btn-secondary' : 'btn-primary'}`}
+            className="btn btn-sm btn-secondary"
             disabled={busy}
             onClick={() =>
               void onRun(
@@ -866,22 +874,59 @@ function ReportsPanel({
           />
         ) : (
           <div className="mt-4">
+            {groupReports.map((r) => (
+              <div className="report-group" key={r.id}>
+                <div className="report-group-text">
+                  <b>Group report</b>
+                  <p className="hint">
+                    {r.roundName} · generated {formatDate(r.createdAt)}
+                    {r.url ? ' · shareable link' : ''}
+                  </p>
+                </div>
+                <div className="report-group-actions">
+                  <a
+                    className="btn btn-primary btn-sm"
+                    href={`/api/admin/cohorts/${cohortId}/reports/${r.id}/pdf`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open PDF
+                  </a>
+                  {r.url ? (
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(r.url!);
+                        showToast('The group report link is on your clipboard.');
+                      }}
+                    >
+                      Copy link
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+
+            {memberReports.length > 0 ? (
+              <p className="report-table-label">
+                One report per member · {memberReports.length}
+              </p>
+            ) : null}
+
             <DataTable
-              rows={reports}
+              rows={memberReports}
               rowKey={(r) => r.id}
               pageSize={10}
               minWidth={820}
               columns={[
                 {
                   key: 'report',
-                  header: 'Report',
-                  value: (r) => (r.scope === 'group' ? 'Group report' : (r.memberName ?? '')),
+                  header: 'Member',
+                  value: (r) => r.memberName ?? '',
                   cell: (r) => (
                     <>
-                      <b>{r.scope === 'group' ? 'Group report' : r.memberName}</b>
-                      {r.scope === 'member' && !r.memberEmail ? (
-                        <div className="cell-sub">no email on the roster</div>
-                      ) : null}
+                      <b>{r.memberName}</b>
+                      {!r.memberEmail ? <div className="cell-sub">no email on the roster</div> : null}
                     </>
                   ),
                 },
@@ -926,15 +971,7 @@ function ReportsPanel({
                       >
                         PDF
                       </a>
-                      {r.scope === 'group' && r.url ? (
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => void navigator.clipboard?.writeText(r.url!)}
-                        >
-                          Copy link
-                        </button>
-                      ) : null}
-                      {r.scope === 'member' && !r.suppressed ? (
+                      {!r.suppressed ? (
                         <>
                           <button
                             className="btn btn-ghost btn-sm"
@@ -1589,6 +1626,151 @@ function memberBody(d: MemberDraft): Record<string, unknown> {
   };
 }
 
+/**
+ * Positions a menu against its trigger in viewport coordinates.
+ *
+ * Both pickers below hang off cells inside `.table-scroll`, which is
+ * `overflow:auto` — an absolutely positioned menu is clipped by it at the
+ * table's edge, and the add row is the last one, so the clip lands exactly
+ * where the menu opens. Measuring the trigger and placing the menu `fixed`
+ * takes it out of that box. It flips above the trigger when there is more room
+ * there, and is clamped to the viewport so a right-hand cell cannot push it
+ * off-screen.
+ */
+function useAnchoredMenu(open: boolean, width: number) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [style, setStyle] = useState<CSSProperties>({});
+
+  useEffect(() => {
+    if (!open) return;
+    function place(): void {
+      const el = ref.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const below = window.innerHeight - r.bottom;
+      const flip = below < 240 && r.top > below;
+      const w = Math.min(width, window.innerWidth - 24);
+      const left = Math.max(12, Math.min(r.left, window.innerWidth - w - 12));
+      setStyle({
+        position: 'fixed',
+        width: w,
+        left,
+        ...(flip
+          ? { bottom: window.innerHeight - r.top + 4, maxHeight: Math.max(160, r.top - 16) }
+          : { top: r.bottom + 4, maxHeight: Math.max(160, below - 16) }),
+      });
+    }
+    place();
+    // `true` catches the table's own scroller, not just the page.
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [open, width]);
+
+  return { ref, style };
+}
+
+/**
+ * A name picker that filters as you type.
+ *
+ * A `<select>` is fine for the four tenure bands and wrong for a sixty-person
+ * roster: finding "Nikhil Chawla" means scrolling a list of sixty in roster
+ * order, which is nobody's mental order. This keeps the same value contract as
+ * the select it replaces — the roster position as a string, '' for nobody — so
+ * `memberBody` is untouched.
+ */
+function PersonPicker({
+  value,
+  options,
+  onChange,
+  placeholder = '—',
+  label,
+}: {
+  value: string;
+  options: { no: number; name: string; func: string }[];
+  onChange: (next: string) => void;
+  placeholder?: string;
+  label: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState(0);
+  const { ref: boxRef, style: menuStyle } = useAnchoredMenu(open, 260);
+
+  const chosen = value === '' ? null : (options.find((o) => String(o.no) === value) ?? null);
+  const q = query.trim().toLowerCase();
+  const matches = q
+    ? options.filter((o) => o.name.toLowerCase().includes(q) || o.func.toLowerCase().includes(q))
+    : options;
+
+  // A click anywhere else is a dismissal, which is what people expect of a
+  // thing that opened under their cursor.
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent): void {
+      if (!boxRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  function choose(next: string): void {
+    onChange(next);
+    setQuery('');
+    setOpen(false);
+  }
+
+  return (
+    <div className="picker" ref={boxRef}>
+      <input
+        className="control control-sm"
+        aria-label={label}
+        role="combobox"
+        aria-expanded={open}
+        placeholder={placeholder}
+        value={open ? query : (chosen?.name ?? '')}
+        onFocus={() => { setOpen(true); setQuery(''); setActive(0); }}
+        onChange={(e) => { setQuery(e.target.value); setActive(0); setOpen(true); }}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setActive((i) => Math.min(i + 1, matches.length - 1)); }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((i) => Math.max(i - 1, 0)); }
+          else if (e.key === 'Enter' && open) { e.preventDefault(); const m = matches[active]; if (m) choose(String(m.no)); }
+          else if (e.key === 'Escape') { setOpen(false); setQuery(''); }
+          else if (e.key === 'Backspace' && !query && chosen) choose('');
+        }}
+      />
+      {open ? (
+        <div className="picker-menu" role="listbox" style={menuStyle}>
+          <button type="button" className={`picker-opt${value === '' ? ' is-on' : ''}`} onMouseDown={(e) => { e.preventDefault(); choose(''); }}>
+            — nobody
+          </button>
+          {matches.length === 0 ? (
+            <p className="picker-empty">No name matches “{query}”.</p>
+          ) : (
+            matches.map((o, i) => (
+              <button
+                type="button"
+                key={o.no}
+                role="option"
+                aria-selected={String(o.no) === value}
+                className={`picker-opt${i === active ? ' is-active' : ''}${String(o.no) === value ? ' is-on' : ''}`}
+                onMouseEnter={() => setActive(i)}
+                onMouseDown={(e) => { e.preventDefault(); choose(String(o.no)); }}
+              >
+                <span>{o.name}</span>
+                {o.func ? <span className="picker-func">{o.func}</span> : null}
+              </button>
+            ))
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function RosterPanel({
   cohort,
   busy,
@@ -1603,6 +1785,13 @@ function RosterPanel({
   setRosterText: (v: string) => void;
 }) {
   const [adding, setAdding] = useState<MemberDraft>(EMPTY_MEMBER);
+  // Whom the person being added will rate. Empty means the map is left alone,
+  // which for an unmapped cohort is everyone — the behaviour before this
+  // existed, and the right default for the common case of a full matrix.
+  const [addTargets, setAddTargets] = useState<Set<string>>(new Set());
+  const [ratesOpen, setRatesOpen] = useState(false);
+  const [ratesQuery, setRatesQuery] = useState('');
+  const { ref: ratesAnchor, style: ratesStyle } = useAnchoredMenu(ratesOpen, 560);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<MemberDraft>(EMPTY_MEMBER);
   const [showPaste, setShowPaste] = useState(false);
@@ -1773,29 +1962,113 @@ function RosterPanel({
                   </select>
                 </td>
                 <td>
-                  <select
-                    className="control control-sm"
+                  <PersonPicker
+                    label="Reports to"
                     value={adding.reportsTo}
-                    onChange={(e) => setAdding({ ...adding, reportsTo: e.target.value })}
-                    aria-label="Reports to"
-                  >
-                    <option value="">—</option>
-                    {active.map((o) => (
-                      <option key={o.memberId} value={String(o.no)}>
-                        {o.name}
-                      </option>
-                    ))}
-                  </select>
+                    options={active}
+                    onChange={(v) => setAdding({ ...adding, reportsTo: v })}
+                  />
                 </td>
-                <td>—</td>
+                <td>
+                  {/* Who this person will rate, chosen before they exist rather
+                      than found later in the map. Nothing is ticked: picking
+                      nobody leaves them unmapped, which in an unmapped cohort
+                      is everyone. */}
+                  <div className="picker" ref={ratesAnchor}>
+                    <button
+                      type="button"
+                      className={`btn btn-ghost btn-sm rates-trigger${addTargets.size > 0 ? ' is-set' : ''}`}
+                      onClick={() => setRatesOpen((v) => !v)}
+                      aria-expanded={ratesOpen}
+                    >
+                      {addTargets.size === 0 ? 'Rates everyone' : `Rates ${addTargets.size}`}
+                    </button>
+                    {ratesOpen ? (
+                      <div className="rates-menu" style={ratesStyle}>
+                        <div className="rates-head">
+                          <input
+                            className="control control-sm"
+                            placeholder="Filter names"
+                            value={ratesQuery}
+                            onChange={(e) => setRatesQuery(e.target.value)}
+                            aria-label="Filter names"
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => setAddTargets(new Set(active.map((o) => o.memberId)))}
+                          >
+                            All
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => setAddTargets(new Set())}
+                          >
+                            None
+                          </button>
+                        </div>
+                        <div className="rates-grid">
+                          {active
+                            .filter((o) =>
+                              !ratesQuery.trim() ||
+                              o.name.toLowerCase().includes(ratesQuery.trim().toLowerCase()) ||
+                              o.func.toLowerCase().includes(ratesQuery.trim().toLowerCase()),
+                            )
+                            .map((o) => (
+                              <label key={o.memberId} className="rates-item">
+                                <input
+                                  type="checkbox"
+                                  checked={addTargets.has(o.memberId)}
+                                  onChange={(e) =>
+                                    setAddTargets((prev) => {
+                                      const next = new Set(prev);
+                                      if (e.target.checked) next.add(o.memberId);
+                                      else next.delete(o.memberId);
+                                      return next;
+                                    })
+                                  }
+                                />
+                                <span>{o.name}</span>
+                              </label>
+                            ))}
+                        </div>
+                        <p className="rates-foot">
+                          {addTargets.size === 0
+                            ? 'Nothing ticked — they are left unmapped and see everyone.'
+                            : `${addTargets.size} of ${active.length} ticked. Everyone else is unaffected.`}
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+                </td>
                 <td className="row-actions">
                   <button
                     className="btn btn-secondary btn-sm"
                     disabled={busy || !adding.name.trim()}
                     onClick={() =>
                       void onRun(async () => {
-                        await api.post(`/api/admin/cohorts/${cohort.id}/members`, memberBody(adding));
+                        const created = await api.post<{ id: string; no: number }>(
+                          `/api/admin/cohorts/${cohort.id}/members`,
+                          memberBody(adding),
+                        );
+                        // The map is replaced whole, so the existing one is
+                        // read back and the new rater added to it rather than
+                        // sent on its own — which would wipe everyone else's.
+                        if (addTargets.size > 0) {
+                          const cur = await api.get<{ assignments: AssignmentRow[] }>(
+                            `/api/admin/cohorts/${cohort.id}/assignments`,
+                          );
+                          await api.put(`/api/admin/cohorts/${cohort.id}/assignments`, {
+                            assignments: [
+                              ...cur.assignments.filter((a) => a.raterMemberId !== created.id),
+                              { raterMemberId: created.id, targetMemberIds: [...addTargets] },
+                            ],
+                          });
+                        }
                         setAdding(EMPTY_MEMBER);
+                        setAddTargets(new Set());
+                        setRatesOpen(false);
                       }, `${adding.name.trim()} added.`)
                     }
                   >
@@ -1893,23 +2166,14 @@ function RosterPanel({
                 value: (m) => (m.reportsTo == null ? '' : (nameOfNo.get(m.reportsTo) ?? '')),
                 cell: (m) =>
                   editingId === m.memberId ? (
-                    <select
-                      className="control control-sm"
+                    <PersonPicker
+                      label="Reports to"
                       value={draft.reportsTo}
-                      onChange={(e) => setDraft({ ...draft, reportsTo: e.target.value })}
-                      aria-label="Reports to"
-                    >
-                      <option value="">—</option>
-                      {/* Never themselves: the server refuses it, so the list
-                          does not offer it. */}
-                      {active
-                        .filter((o) => o.memberId !== m.memberId)
-                        .map((o) => (
-                          <option key={o.memberId} value={String(o.no)}>
-                            {o.name}
-                          </option>
-                        ))}
-                    </select>
+                      /* Never themselves: the server refuses it, so the list
+                         does not offer it. */
+                      options={active.filter((o) => o.memberId !== m.memberId)}
+                      onChange={(v) => setDraft({ ...draft, reportsTo: v })}
+                    />
                   ) : m.reportsTo == null ? (
                     '—'
                   ) : (
@@ -2138,7 +2402,9 @@ function MemberLinksPanel({
   }
 
   return (
-    <section className="card">
+    // Only the primary way in when identity is link-only; otherwise it is the
+    // shared link's supporting panel and reads as one.
+    <section className={`card${cohortIdentityMode(cohort) === 'link_only' ? '' : ' card-secondary'}`}>
       <CardHead
         title="Personal links"
         sub="Each person gets their own unguessable link, already signed in as them — nothing to type, nobody to impersonate. A person who already holds a link keeps it."
@@ -2354,7 +2620,8 @@ function AssignmentsPanel({
   const mapped = mapOf ? [...mapOf.values()].filter((s) => s.size > 0).length : 0;
 
   return (
-    <section className="card">
+    // Secondary to the roster it sits under: most cohorts never open it.
+    <section className="card card-secondary">
       <CardHead
         title="Who rates whom"
         sub={

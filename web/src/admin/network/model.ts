@@ -19,6 +19,7 @@
 
 import { TENURE_BANDS } from '../../../../src/shared/types.js';
 import type { CohortNetworkEdge, CohortRosterMember } from '../../../../src/shared/types.js';
+import { betweenness } from '../../../../src/shared/socio-network.js';
 import type {
   DirectedTie,
   SubgroupTieStats,
@@ -2186,4 +2187,248 @@ export function scopedConcentration(
   const shortfall = rates.reduce((t, v) => t + (max - v), 0);
   const maxShortfall = max * (rates.length - 1);
   return maxShortfall > 0 ? Math.round((shortfall / maxShortfall) * 100) / 100 : 0;
+}
+
+// ------------------------------------------------------------ head-to-head
+//
+// Comparing two people, and later a shortlist of them, against the same
+// measures the rest of the page already reports. One module so a number can
+// never read one way in a dossier and another in a comparison.
+
+export interface PairMetric {
+  key: string;
+  label: string;
+  /** For a column head, where the full label does not fit. */
+  short: string;
+  /**
+   * Which way is the stronger standing. `none` is not a hedge: betweenness and
+   * coverage are facts about the group's structure and about who answered, not
+   * merits, and marking a winner on them would invent a judgement the
+   * instrument does not make.
+   */
+  better: 'high' | 'low' | 'none';
+  /** One line on what the measure means, in the room's language. */
+  note: string;
+  values: (number | null)[];
+  texts: string[];
+}
+
+/** Who leads a metric: the index, or null for a tie or an unjudgeable one. */
+export function metricLeader(m: PairMetric): number | null {
+  if (m.better === 'none') return null;
+  let best: number | null = null;
+  let bestVal: number | null = null;
+  let tied = false;
+  m.values.forEach((v, i) => {
+    if (v === null) return;
+    if (bestVal === null || (m.better === 'high' ? v > bestVal : v < bestVal)) {
+      bestVal = v;
+      best = i;
+      tied = false;
+    } else if (v === bestVal) {
+      tied = true;
+    }
+  });
+  return tied ? null : best;
+}
+
+const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)}%`);
+const int = (v: number | null) => (v === null ? '—' : String(Math.round(v)));
+const two = (v: number | null) => (v === null ? '—' : v.toFixed(2));
+
+/**
+ * Every comparable standing for a set of people, in reading order.
+ *
+ * Takes the same inputs as the tables the rest of the page is built from, so
+ * the comparison cannot drift from the dossier beside it.
+ */
+export function comparePeople(
+  nos: readonly number[],
+  memberNos: readonly number[],
+  edges: readonly CohortNetworkEdge[],
+  tieThreshold: number,
+  coverage?: ReadonlyMap<number, number>,
+): PairMetric[] {
+  const all = [...new Set(memberNos)].sort((a, b) => a - b);
+  const list = [...edges];
+  const trust = degrees([...all], list, 'trust', tieThreshold);
+  const power = degrees([...all], list, 'power_over', tieThreshold);
+  const rel = degrees([...all], list, 'reliability', tieThreshold);
+  const open = degrees([...all], list, 'openness', tieThreshold);
+  const bridge = betweenness(
+    all,
+    list.filter((e) => edgePolarity(e, 'trust', tieThreshold) === 'positive').map((e) => ({ from: e.from, to: e.to })),
+  );
+
+  // Returned trust: of the ties this person gives, the share that come back.
+  const returned = new Map<number, number | null>();
+  for (const no of all) {
+    const out = list.filter(
+      (e) => e.from === no && edgePolarity(e, 'trust', tieThreshold) === 'positive',
+    );
+    if (out.length === 0) {
+      returned.set(no, null);
+      continue;
+    }
+    const back = out.filter((e) =>
+      list.some((r) => r.from === e.to && r.to === no && edgePolarity(r, 'trust', tieThreshold) === 'positive'),
+    );
+    returned.set(no, back.length / out.length);
+  }
+
+  const pick = <T,>(f: (no: number) => T): T[] => nos.map(f);
+  const metric = (
+    key: string,
+    label: string,
+    short: string,
+    better: PairMetric['better'],
+    note: string,
+    of: (no: number) => number | null,
+    fmt: (v: number | null) => string,
+  ): PairMetric => {
+    const values = pick(of);
+    return { key, label, short, better, note, values, texts: values.map(fmt) };
+  };
+
+  return [
+    metric('trustIn', 'Trust received', 'Trust in', 'high', 'Colleagues who put them over the line on trust.', (no) => trust.get(no)?.posIn ?? 0, int),
+    metric('powerIn', 'Power over received', 'Power in', 'high', 'Colleagues who say they adjust to this person.', (no) => power.get(no)?.posIn ?? 0, int),
+    metric('trustOut', 'Trust given', 'Given', 'none', 'How widely they extend trust themselves — a disposition, not a standing.', (no) => trust.get(no)?.posOut ?? 0, int),
+    metric('returned', 'Trust returned', 'Returned', 'high', 'Of the trust they extend, the share that comes back.', (no) => returned.get(no) ?? null, pct),
+    metric('bridge', 'Bridge score', 'Bridge', 'none', 'Shortest trust paths running through them. A structural fact, not a merit.', (no) => bridge.get(no) ?? 0, two),
+    metric('reliability', 'Reliability', 'Reliable', 'high', 'Colleagues who say they deliver what they said they would.', (no) => rel.get(no)?.posIn ?? 0, int),
+    metric('openness', 'Openness', 'Open', 'high', 'Colleagues who say they can tell this person what they actually think.', (no) => open.get(no)?.posIn ?? 0, int),
+    metric('coverage', 'Rated by', 'Rated by', 'none', 'How many colleagues had a basis to judge. Context for every row above.', (no) => coverage?.get(no) ?? null, int),
+  ];
+}
+
+/**
+ * Where the group of them leads, said as a sentence.
+ *
+ * For more than two, naming every winner of every row is a list nobody reads,
+ * so it names who leads the most measures and how many are genuinely level.
+ */
+export function shortlistVerdict(names: readonly string[], metrics: readonly PairMetric[]): string {
+  if (names.length < 2) return '';
+  if (names.length === 2) return pairVerdict(names, metrics);
+
+  const judged = metrics.filter((m) => m.better !== 'none');
+  const wins = new Map<number, number>();
+  let level = 0;
+  for (const m of judged) {
+    const lead = metricLeader(m);
+    if (lead === null) level += 1;
+    else wins.set(lead, (wins.get(lead) ?? 0) + 1);
+  }
+  if (wins.size === 0) {
+    return `These ${names.length} stand level on all ${judged.length} measures that can be led.`;
+  }
+  const ranked = [...wins.entries()].sort((a, b) => b[1] - a[1]);
+  const top = ranked[0]!;
+  const tiedAtTop = ranked.filter(([, n]) => n === top[1]).map(([i]) => names[i]!);
+  const who =
+    tiedAtTop.length === 1
+      ? `${tiedAtTop[0]} leads on ${top[1]} of ${judged.length} measures`
+      : `${tiedAtTop.slice(0, -1).join(', ')} and ${tiedAtTop.at(-1)} each lead on ${top[1]} of ${judged.length} measures`;
+  return level > 0 ? `${who}; ${level} ${level === 1 ? 'is' : 'are'} level.` : `${who}.`;
+}
+
+/** Where each person leads, said as a sentence rather than left as a table. */
+export function pairVerdict(names: readonly string[], metrics: readonly PairMetric[]): string {
+  if (names.length !== 2) return '';
+  const wins: string[][] = [[], []];
+  for (const m of metrics) {
+    const lead = metricLeader(m);
+    if (lead !== null) wins[lead]!.push(m.label.toLowerCase());
+  }
+  const [a, b] = [wins[0]!, wins[1]!];
+  if (a.length === 0 && b.length === 0) {
+    return `${names[0]} and ${names[1]} stand level on every measure here.`;
+  }
+  const side = (who: string, list: string[]) =>
+    list.length === 0 ? `${who} leads on none of them` : `${who} leads on ${list.join(', ')}`;
+  return `${side(names[0]!, a)}; ${side(names[1]!, b)}.`;
+}
+
+// --------------------------------------------------- trust against power
+//
+// Standing as a share of the colleagues who could rate a person, never as a
+// rank. Ranks here came from raw tie counts, and with most of a roster holding
+// nought, one or two ties, sixty people collapsed onto three or four distinct
+// ranks — so gaining a single tie moved somebody "36 places" and the table
+// reported an artefact as a finding.
+
+export interface DivergenceShare {
+  no: number;
+  /** Trust ties received ÷ colleagues who rated them. Null with no raters. */
+  trust: number | null;
+  power: number | null;
+  /** power − trust, 2dp. Positive = deferred to more than relied on. */
+  gap: number | null;
+}
+
+export function divergenceShares(
+  memberNos: readonly number[],
+  edges: readonly CohortNetworkEdge[],
+  tieThreshold: number,
+  coverage?: ReadonlyMap<number, number>,
+): DivergenceShare[] {
+  const nos = [...new Set(memberNos)].sort((a, b) => a - b);
+  const list = [...edges];
+  const t = degrees([...nos], list, 'trust', tieThreshold);
+  const p = degrees([...nos], list, 'power_over', tieThreshold);
+  const round2 = (v: number) => Math.round(v * 100) / 100;
+  return nos.map((no) => {
+    const raters = coverage?.get(no) ?? 0;
+    if (raters <= 0) return { no, trust: null, power: null, gap: null };
+    const trust = round2((t.get(no)?.posIn ?? 0) / raters);
+    const power = round2((p.get(no)?.posIn ?? 0) / raters);
+    return { no, trust, power, gap: round2(power - trust) };
+  });
+}
+
+/** Gaps below this are noise in a group this size, and are drawn as level. */
+export const DIVERGENCE_FLOOR = 0.08;
+
+/**
+ * A person's colour on the divergence map: warm where they are deferred to
+ * more than relied on, cool where the reverse, neutral where the two agree.
+ * Lightness carries the size of the gap, so the map reads at a glance and the
+ * exact figure stays in the table.
+ */
+export function divergenceColor(gap: number | null): string {
+  if (gap === null || Math.abs(gap) < DIVERGENCE_FLOOR) return '#B6BECA';
+  const strength = Math.min(1, (Math.abs(gap) - DIVERGENCE_FLOOR) / (0.5 - DIVERGENCE_FLOOR));
+  const ramp = gap > 0
+    ? ['#E8B48A', '#D9832F', '#B4530E'] // toward power
+    : ['#8FC9B4', '#33A177', '#0E7C5A']; // toward trust
+  return ramp[strength > 0.66 ? 2 : strength > 0.33 ? 1 : 0]!;
+}
+
+/** How a gap reads in one phrase, for a tooltip or a row. */
+export function divergenceWordFor(gap: number | null): string {
+  if (gap === null) return 'Not rated';
+  if (Math.abs(gap) < DIVERGENCE_FLOOR) return 'Trust and power agree';
+  return gap > 0 ? 'Deferred to, less relied on' : 'Relied on, less say';
+}
+
+/** The sentence the map produced, from the same numbers the table shows. */
+export function divergenceShareFinding(
+  rows: readonly DivergenceShare[],
+  nameOf: (no: number) => string,
+): string {
+  const rated = rows.filter((r) => r.gap !== null);
+  if (rated.length === 0) return 'Nobody has been rated enough to compare the two standings.';
+  const apart = rated.filter((r) => Math.abs(r.gap!) >= DIVERGENCE_FLOOR);
+  if (apart.length === 0) {
+    return 'Trust and power sit together across the group — the people relied on are the people deferred to.';
+  }
+  const worst = [...apart].sort((a, b) => Math.abs(b.gap!) - Math.abs(a.gap!))[0]!;
+  const toPower = apart.filter((r) => r.gap! > 0).length;
+  const toTrust = apart.length - toPower;
+  const lead =
+    worst.gap! > 0
+      ? `${nameOf(worst.no)} is deferred to well beyond what the group relies on them for`
+      : `${nameOf(worst.no)} is relied on well beyond the say they are given`;
+  return `${lead} — ${apart.length} of ${rated.length} stand apart on the two, ${toPower} toward power and ${toTrust} toward trust.`;
 }

@@ -29,6 +29,7 @@ import {
   type SocioMemberResult,
   type SocioResponseInput,
 } from '../../shared/socio-scoring.js';
+import { socioInsights } from '../../shared/socio-insights.js';
 import type {
   Branding,
   CohortRosterMember,
@@ -322,10 +323,20 @@ export async function scoreCohort(
     func: m.function,
   }));
 
-  return scoreSocioCohort(members, await loadCohortResponses(env, cohort.id, roundNo), {
+  const responses = await loadCohortResponses(env, cohort.id, roundNo);
+  const group = scoreSocioCohort(members, responses, {
     minRaters: cohort.min_raters,
     tieThreshold: cohort.tie_threshold,
   });
+
+  // Attached here rather than inside `scoreSocioCohort`, which the live
+  // network route calls on a 15-second poll and which the trend replays per
+  // round — neither wants this work, and the dashboard computes its own
+  // findings from the payload it already has.
+  return {
+    ...group,
+    insights: socioInsights(members, responses, { tieThreshold: cohort.tie_threshold }),
+  };
 }
 
 // ------------------------------------------------------------------ payloads

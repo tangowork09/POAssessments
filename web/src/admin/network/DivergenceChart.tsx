@@ -1,5 +1,5 @@
 /**
- * The quadrant plot: everyone placed by trust received against influence
+ * The quadrant plot: everyone placed by trust received against power
  * received, split on the two medians.
  *
  * The one insight whose graph is not the network map, and rightly so — the
@@ -38,9 +38,9 @@ export const QUADRANT_COLOR: Record<Quadrant, string> = {
 };
 
 export const QUADRANT_NAME: Record<Quadrant, string> = {
-  watch: 'Influence without trust',
-  underused: 'Trusted, little influence',
-  anchor: 'Trusted and influential',
+  watch: 'Power without trust',
+  underused: 'Trusted, little power',
+  anchor: 'Trusted and powerful',
   peripheral: 'Peripheral',
 };
 
@@ -182,7 +182,7 @@ export function DivergenceChart({
       viewBox={`0 0 ${W} ${H}`}
       preserveAspectRatio="xMidYMid meet"
       role="img"
-      aria-label="Trust received against influence received, split on the group's medians"
+      aria-label="Trust received against power received, split on the group's medians"
     >
       {(Object.keys(quadRect) as Quadrant[]).map((q) => (
         <rect
@@ -213,7 +213,7 @@ export function DivergenceChart({
         transform="rotate(-90)"
         className="insights-quad-axis-label"
       >
-        Influence received{normalised ? ' — per rater' : ' — ties'}
+        Power received{normalised ? ' — per rater' : ' — ties'}
       </text>
 
       {/* Dots below the furniture: a name must never be printed over. */}
@@ -232,7 +232,7 @@ export function DivergenceChart({
               sub: `${funcOf(p.no)} · ${QUADRANT_NAME[q]}`,
               rows: [
                 ['Trust received', normalised ? `${p.trust.toFixed(2)} per rater` : String(p.trustCount)],
-                ['Influence received', normalised ? `${p.power.toFixed(2)} per rater` : String(p.powerCount)],
+                ['Power received', normalised ? `${p.power.toFixed(2)} per rater` : String(p.powerCount)],
               ],
             }))}
           >

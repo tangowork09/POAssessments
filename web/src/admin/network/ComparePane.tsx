@@ -1,5 +1,5 @@
 /**
- * "Trust vs Influence": the same people, in the same seats, drawn twice — once
+ * "Trust vs Power": the same people, in the same seats, drawn twice — once
  * with the ties of trust and once with the ties of formal pull. Everything else
  * about the view exists to protect that one comparison, above all the single
  * shared layout: a person who is a hub on the left and a leaf on the right is
@@ -55,6 +55,19 @@ export const TRUST_LENS = 'trust';
 /** The accent each side wears, matching the block colours used elsewhere. */
 export const TRUST_ACCENT = POLARITY_STYLE.positive.color;
 export const POWER_ACCENT = '#B4530E';
+
+/**
+ * The same two hues, brightened, for ties drawn as lines.
+ *
+ * A ring sits on white at full strength and reads at the accent's own depth. A
+ * tie is a two-pixel line at partial opacity crossing a map of coloured dots,
+ * and the accents go grey there. These are lifted in value and saturation so
+ * the line keeps its hue at the opacity a map full of ties has to be drawn at —
+ * still plainly the green and the orange the rings use, which is what the
+ * legend depends on.
+ */
+export const TRUST_TIE = '#10A372';
+export const POWER_TIE = '#E5760C';
 
 export function CompareView({
   nodes,

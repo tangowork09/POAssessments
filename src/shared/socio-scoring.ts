@@ -29,6 +29,8 @@ import {
   SOCIO_TIE_THRESHOLD,
   decodeCell,
 } from './socio.js';
+// Type-only, so the cycle with socio-insights.ts is erased at compile time.
+import type { SocioInsights } from './socio-insights.js';
 
 export class SocioScoringError extends Error {}
 
@@ -186,6 +188,14 @@ export interface SocioGroupResult {
   functionMatrix: SocioFunctionCell[];
   /** Distinct functions present on the roster, in roster order. */
   functions: string[];
+  /**
+   * The Insights findings, attached when the result is stored for a report.
+   *
+   * Optional on purpose: it is absent from every report generated before this
+   * existed, and from the live dashboard payload, which computes its own. The
+   * renderer prints these chapters only when they are here.
+   */
+  insights?: SocioInsights;
 }
 
 // ------------------------------------------------------------------ scoring

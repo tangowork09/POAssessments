@@ -51,7 +51,14 @@ import {
   unreciprocatedTies,
 } from '../../../../src/shared/socio-network.js';
 import { fitToBox, forceMapLayout, laneBoxes, nodeRadius, separate, type LayoutBox, type Positions } from './layout.js';
-import { CompareView, POWER_ACCENT, POWER_LENS, TRUST_ACCENT, TRUST_LENS } from './ComparePane.js';
+import {
+  POWER_ACCENT,
+  POWER_LENS,
+  POWER_TIE,
+  TRUST_ACCENT,
+  TRUST_LENS,
+  TRUST_TIE,
+} from './ComparePane.js';
 import { FacetBar } from './FacetBar.js';
 import { DOCK_W, InsightGraph, type NodeDecor } from './InsightGraph.js';
 import { DivergenceChart, QUADRANT_COLOR, QUADRANT_NAME } from './DivergenceChart.js';
@@ -70,7 +77,9 @@ import {
   Key,
   MeterLine,
   Panel,
+  LineKey,
   RingKey,
+  type ExportOptions,
   ScopePicker,
   Suppressed,
   Workspace,
@@ -87,6 +96,12 @@ import {
   anchors as computeAnchors,
   blockConcentration,
   buildPaneEdges,
+  comparePeople,
+  DIVERGENCE_FLOOR,
+  divergenceColor,
+  divergenceShareFinding,
+  divergenceShares,
+  divergenceWordFor,
   clusterHulls,
   clusterView,
   concentrationReading,
@@ -105,13 +120,11 @@ import {
   orderSilos,
   orderTiesByFocus,
   paneInDegree,
+  shortlistVerdict,
   peripheralMembers,
   placeCallouts,
   positiveTies,
   RANK_RING_COLOR,
-  rankDivergence,
-  rankDivergenceLabel,
-  rankTable,
   relOpenVerdict,
   SILOS_MODE_COLUMN,
   SILOS_MODE_LABEL,
@@ -125,14 +138,11 @@ import {
   topDecile,
   topPaneLabels,
   topBridges,
-  trustPowerOverlapSentence,
-  unionTies,
   watchLists,
   type AnchorRow,
   type ConcentrationTable,
   type FacetRow,
   type QuadrantRow,
-  type RankRow,
   type ShareRow,
   type SilosMemberRow,
   type SilosMode,
@@ -143,6 +153,11 @@ import {
   scopedConcentration,
   type InsightScope,
 } from './model.js';
+import type { DivergenceShare, PaneEdge } from './model.js';
+import { HeadToHead } from './HeadToHead.js';
+
+/** A stable empty list: a fresh [] each render would re-memo the map. */
+const EMPTY_EDGES: PaneEdge[] = [];
 
 /**
  * The virtual box every map tab solves and draws in. Node radii come from
@@ -192,9 +207,12 @@ const GROUPS: readonly TabGroupDef[] = [
 
 const TABS: readonly TabDef[] = [
   { id: 'anchors', name: 'Anchors', group: 1, question: 'Who the group leans on' },
-  { id: 'divergence', name: 'Divergence', group: 1, question: 'Influence and trust are not the same people' },
+  { id: 'divergence', name: 'Divergence', group: 1, question: 'Power and trust are not the same people' },
   { id: 'bridges', name: 'Bridges', group: 1, question: 'Who holds the network together' },
-  { id: 'isolates', name: 'Isolates', group: 1, question: 'Low trust and low influence received' },
+  { id: 'isolates', name: 'Isolates', group: 1, question: 'Low trust and low power received' },
+  // Individual, because the unit is the person: everything else in this group
+  // ranks the roster, this answers "these two, side by side".
+  { id: 'pair', name: 'Head to head', group: 1, question: 'Two people, measure by measure' },
   { id: 'oneway', name: 'One-way trust', group: 2, question: 'Ties that run one way' },
   { id: 'silos', name: 'Silos', group: 2, question: 'Where trust pools instead of flowing' },
   { id: 'spread', name: 'Spread', group: 3, question: 'Is trust held by many hands or a few?' },
@@ -206,7 +224,7 @@ const TABS: readonly TabDef[] = [
 
 /** The heading over each tab's graph — the client's own wording. */
 const TAB_TITLE: Record<string, string> = {
-  anchors: 'Most trusted, most influential',
+  anchors: 'Most trusted, most powerful',
   divergence: 'Trust–power divergence',
   bridges: 'Structural bridges',
   isolates: 'Isolates and peripheral members',
@@ -214,6 +232,7 @@ const TAB_TITLE: Record<string, string> = {
   silos: 'Cliques and silos',
   spread: 'Spread or concentrated',
   compare: 'Who we trust vs who drives decisions',
+  pair: 'Head to head',
   facets: 'Reliability vs openness',
 };
 
@@ -314,7 +333,17 @@ export function InsightsView({
   const [focusNo, setFocusNo] = useState<number | null>(null);
   const [hoverNo, setHoverNo] = useState<number | null>(null);
   const activeNo = hoverNo ?? focusNo;
-  const pick = useCallback((no: number) => setFocusNo((cur) => (cur === no ? null : no)), []);
+  const pick = useCallback((no: number) => {
+    setFocusNo((cur) => {
+      const next = cur === no ? null : no;
+      // Picking somebody in full screen is a request to read about them, and
+      // the panel that holds their card is folded away there by default.
+      // Unfolding it is the answer to the click; folding it back on a second
+      // click on the same person would fight the reader.
+      if (next !== null) setDetailsOpen(true);
+      return next;
+    });
+  }, []);
   useEffect(() => {
     if (focusNo === null) return;
     const onKey = (e: KeyboardEvent) => {
@@ -340,6 +369,55 @@ export function InsightsView({
       return true;
     }
   });
+  // Naming everyone is a reading choice the facilitator makes once and keeps,
+  // so it is remembered per browser like the rail and the details panel.
+  const [allNames, setAllNames] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('admin.insights.names') === 'all';
+    } catch {
+      return false;
+    }
+  });
+  // Which layers the anchors map is drawing. Not persisted: hiding a lens is a
+  // thing you do for a moment while reading, not a standing preference.
+  const [shownLayers, setShownLayers] = useState({
+    trust: true,
+    power: true,
+    trustedRings: true,
+    powerRings: true,
+  });
+  const toggleLayer = useCallback(
+    (k: keyof typeof shownLayers) => setShownLayers((cur) => ({ ...cur, [k]: !cur[k] })),
+    [],
+  );
+
+  const toggleAllNames = useCallback((on: boolean) => {
+    setAllNames(on);
+    try {
+      localStorage.setItem('admin.insights.names', on ? 'all' : 'few');
+    } catch {
+      /* private mode */
+    }
+  }, []);
+
+  // Entering full screen is a request for the picture, so the readings fold
+  // away and the graph takes the frame; clicking anybody brings them back.
+  // Leaving restores whatever the reader had before.
+  const wasDetails = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (isFull) {
+      if (wasDetails.current === null) wasDetails.current = detailsOpen;
+      setDetailsOpen(false);
+    } else if (wasDetails.current !== null) {
+      setDetailsOpen(wasDetails.current);
+      wasDetails.current = null;
+    }
+    // `detailsOpen` is deliberately not a dependency: this runs on entering and
+    // leaving, and reading it inside would re-fold the panel the moment a node
+    // click opened it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFull]);
+
   const toggleDetails = useCallback(() => {
     setDetailsOpen((v) => {
       try {
@@ -387,6 +465,36 @@ export function InsightsView({
     }),
     [pick, tip],
   );
+  /**
+   * A tie's hover and click. Clicking focuses the person the arrow points at,
+   * which is the one the tie is a statement about; hovering names the network
+   * the line belongs to, since two are drawn at once.
+   */
+  const tieProps = useCallback(
+    (e: PaneEdge, lenses: { label: string; color: string; mean: number }[]) => ({
+      onClick: () => pick(e.to),
+      onMouseEnter: (ev: React.MouseEvent) => {
+        setHoverNo(e.to);
+        tip.show(
+          {
+            title: `${nameOf(e.from)} → ${nameOf(e.to)}`,
+            // A pair that scores on both lenses is the interesting case, so
+            // the sub names them together rather than picking one.
+            sub: `${lenses.map((l) => l.label).join(' + ')}${e.mutual ? ' · returned' : ' · one way'}`,
+            rows: lenses.map((l) => [l.label, l.mean.toFixed(2)] as [string, string]),
+          },
+          ev,
+        );
+      },
+      onMouseMove: (ev: React.MouseEvent) => tip.move(ev),
+      onMouseLeave: () => {
+        setHoverNo(null);
+        tip.hide();
+      },
+    }),
+    [nameOf, pick, tip],
+  );
+
   /** For marks that carry data but are not a person (silos rows, facet bars). */
   const tipProps = useCallback(
     (content: () => TipContent) => ({
@@ -399,9 +507,25 @@ export function InsightsView({
 
   // ------------------------------------------------------- the shared map
   const allVisible = useMemo(() => new Set(memberNos), [memberNos]);
+  /**
+   * Who may carry a standing name. Each tab picks the few worth naming; the
+   * Filters switch overrides that with everyone, which is the right default
+   * off (sixty names over sixty dots is unreadable) and the right thing to
+   * have when a facilitator is looking for one person in the room.
+   */
+  const namesFor = useCallback(
+    (few: ReadonlySet<number>) => (allNames ? allVisible : few),
+    [allNames, allVisible],
+  );
   const trustTies = useMemo(() => positiveTies(edges, TRUST_LENS, cut), [cut, edges]);
   const trustEdges = useMemo(
     () => buildPaneEdges(edges, TRUST_LENS, cut, allVisible),
+    [allVisible, cut, edges],
+  );
+  // The power-over ties, for the tabs that claim trust and power are not the
+  // same network. Built here beside the trust set so both share the layout.
+  const powerEdges = useMemo(
+    () => buildPaneEdges(edges, POWER_LENS, cut, allVisible),
     [allVisible, cut, edges],
   );
   const trustIn = useMemo(() => paneInDegree(trustEdges), [trustEdges]);
@@ -567,18 +691,18 @@ export function InsightsView({
   }, [tip]);
 
   // ---- 1 anchors
-  const anchorLists = useMemo(() => computeAnchors(memberNos, edges, cut, 5), [cut, edges, memberNos]);
+  const anchorLists = useMemo(() => computeAnchors(memberNos, edges, cut, 10), [cut, edges, memberNos]);
   const trustedTop = useMemo(() => new Set(anchorLists.trusted.map((a) => a.no)), [anchorLists]);
   const powerTop = useMemo(() => new Set(anchorLists.influential.map((a) => a.no)), [anchorLists]);
   const anchorRows = useMemo(() => anchorTable(memberNos, edges, cut, 5), [cut, edges, memberNos]);
   const anchorDecor = useCallback(
     (no: number): NodeDecor | null => {
       const rings: string[] = [];
-      if (trustedTop.has(no)) rings.push(TRUST_ACCENT);
-      if (powerTop.has(no)) rings.push(POWER_ACCENT);
+      if (shownLayers.trustedRings && trustedTop.has(no)) rings.push(TRUST_ACCENT);
+      if (shownLayers.powerRings && powerTop.has(no)) rings.push(POWER_ACCENT);
       return rings.length > 0 ? { rings } : null;
     },
-    [powerTop, trustedTop],
+    [powerTop, shownLayers.powerRings, shownLayers.trustedRings, trustedTop],
   );
 
   // ---- 2 divergence
@@ -828,15 +952,25 @@ export function InsightsView({
     return trustShares.rows.map((r) => ({ trust: r, power: power.get(r.no) ?? null }));
   }, [powerShares, trustShares]);
 
-  // ---- 8 the two panes
-  const rankGaps = useMemo(() => rankDivergence(memberNos, edges, cut, 3), [cut, edges, memberNos]);
-  const ringed = useMemo(() => new Set(rankGaps.map((d) => d.no)), [rankGaps]);
-  const rankOf = useMemo(() => new Map(rankGaps.map((d) => [d.no, d])), [rankGaps]);
-  const rankRows = useMemo(() => rankTable(memberNos, edges, cut), [cut, edges, memberNos]);
-  const overlapSentence = trustPowerOverlapSentence(
-    anchorLists.trusted.map((a) => a.no),
-    anchorLists.influential.map((a) => a.no),
-    nameOf,
+
+  // ---- 8 trust against power, as shares rather than ranks
+  const shareRows = useMemo(
+    () => divergenceShares(memberNos, edges, cut, coverageOf),
+    [coverageOf, cut, edges, memberNos],
+  );
+  const shareOf = useMemo(() => new Map(shareRows.map((r) => [r.no, r])), [shareRows]);
+  const gapOf = useMemo(() => new Map(shareRows.map((r) => [r.no, r.gap])), [shareRows]);
+  const divergentRows = useMemo(
+    () =>
+      shareRows
+        .filter((r) => r.gap !== null && Math.abs(r.gap) >= DIVERGENCE_FLOOR)
+        .sort((a, b) => Math.abs(b.gap!) - Math.abs(a.gap!)),
+    [shareRows],
+  );
+  /** The ones worth naming on the map: the ones the tab is about. */
+  const divergentFolk = useMemo(
+    () => new Set(divergentRows.slice(0, 12).map((r) => r.no)),
+    [divergentRows],
   );
 
   // ---- 9 the two facets of trust
@@ -938,16 +1072,172 @@ export function InsightsView({
   }, []);
 
   /** The stage body — picture and legend — as a PNG, named for the question. */
-  const exportStage = useCallback(() => {
-    const body = rootRef.current?.querySelector<HTMLElement>('.ins-stage-body');
-    if (!body) return;
-    void toPng(body, { pixelRatio: 2, backgroundColor: '#FFFFFF' }).then((url) => {
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `insights-${tab}-round${net.roundNo}.png`;
-      a.click();
+  const exportStage = useCallback(
+    (opts: ExportOptions) => {
+      const root = rootRef.current;
+      const target = root?.querySelector<HTMLElement>(
+        opts.scope === 'all' ? '.ins-ws' : '.ins-stage-body',
+      );
+      if (!root || !target) return;
+      // Names are hidden for the capture only, by class rather than by state:
+      // re-solving the label layout would reflow the map under the reader
+      // while it is being photographed.
+      if (!opts.names) root.classList.add('is-capture-unnamed');
+      void toPng(target, { pixelRatio: 2, backgroundColor: '#FFFFFF' })
+        .then((url) => {
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `insights-${tab}-round${net.roundNo}${opts.scope === 'all' ? '-full' : ''}${
+            opts.names ? '-named' : ''
+          }.png`;
+          a.click();
+        })
+        .finally(() => root.classList.remove('is-capture-unnamed'));
+    },
+    [net.roundNo, tab],
+  );
+
+  // ---- head to head
+  // Seeded with the two most trusted, so the tab opens on a real comparison
+  // rather than two empty pickers.
+  const [pairA, setPairA] = useState<number | null>(null);
+  const [pairB, setPairB] = useState<number | null>(null);
+  const pair = useMemo(() => {
+    const fallback = anchorLists.trusted.map((t) => t.no);
+    const a = pairA !== null && memberNos.includes(pairA) ? pairA : (fallback[0] ?? memberNos[0] ?? null);
+    const b =
+      pairB !== null && memberNos.includes(pairB) && pairB !== a
+        ? pairB
+        : (fallback.find((n) => n !== a) ?? memberNos.find((n) => n !== a) ?? null);
+    return { a, b };
+  }, [anchorLists.trusted, memberNos, pairA, pairB]);
+  // Ticked in the band below. Two or more take over the panel; fewer and it
+  // stays the two-person comparison the tab opens on.
+  const [picked, setPicked] = useState<ReadonlySet<number>>(new Set());
+  const [rowQuery, setRowQuery] = useState('');
+  const togglePicked = useCallback((no: number) => {
+    setPicked((cur) => {
+      const next = new Set(cur);
+      if (next.has(no)) next.delete(no);
+      else next.add(no);
+      return next;
     });
-  }, [net.roundNo, tab]);
+  }, []);
+  const compareNos = useMemo(() => {
+    const ticked = [...picked].filter((no) => memberNos.includes(no));
+    if (ticked.length >= 2) return ticked;
+    return pair.a !== null && pair.b !== null ? [pair.a, pair.b] : [];
+  }, [memberNos, pair.a, pair.b, picked]);
+
+  const compareSet = useMemo(() => new Set(compareNos), [compareNos]);
+
+  const pairMetrics = useMemo(
+    () => (compareNos.length < 2 ? [] : comparePeople(compareNos, memberNos, edges, cut, coverageOf)),
+    [compareNos, coverageOf, cut, edges, memberNos],
+  );
+  /** Every member on the same measures, transposed into one row each. */
+  const metricRows = useMemo(() => {
+    const cols = comparePeople(memberNos, memberNos, edges, cut, coverageOf);
+    return memberNos.map((no, i) => ({
+      no,
+      name: nameOf(no),
+      func: funcOf(no),
+      cells: cols.map((m) => ({
+        key: m.key,
+        label: m.label,
+        short: m.short,
+        text: m.texts[i] ?? '—',
+        value: m.values[i] ?? null,
+      })),
+    }));
+  }, [coverageOf, cut, edges, funcOf, memberNos, nameOf]);
+
+  /**
+   * What a facilitator should actually do about each person being compared.
+   *
+   * The measures above say where somebody stands; these say what that standing
+   * is a symptom of. Only conditions the instrument can actually evidence
+   * appear — nothing here is a guess about why.
+   */
+  const hrNotes = useCallback(
+    (no: number): { tone: 'warn' | 'ok' | 'plain'; text: string }[] => {
+      const out: { tone: 'warn' | 'ok' | 'plain'; text: string }[] = [];
+      const stand = shareOf.get(no);
+      const raters = coverageOf.get(no) ?? 0;
+
+      if (raters < net.minRaters) {
+        out.push({
+          tone: 'plain',
+          text: `Only ${raters} colleagues rated them — under the floor of ${net.minRaters}, so read every figure here as provisional.`,
+        });
+      }
+      if (stand?.gap !== null && stand !== undefined && stand.gap <= -DIVERGENCE_FLOOR) {
+        out.push({
+          tone: 'warn',
+          text: 'Relied on well beyond the say they are given — the group leans on them informally while the authority sits elsewhere. A candidate for a formal remit.',
+        });
+      }
+      if (stand?.gap !== null && stand !== undefined && stand.gap >= DIVERGENCE_FLOOR) {
+        out.push({
+          tone: 'warn',
+          text: 'Deferred to more than relied on — compliance without confidence. Worth asking what the deference is buying.',
+        });
+      }
+      const bridgeIx = allBridges.findIndex((x) => x.no === no);
+      if (bridgeIx >= 0 && bridgeIx < 3) {
+        out.push({
+          tone: 'warn',
+          text: `#${bridgeIx + 1} bridge in the group: trust between parts of it routes through them. A succession and holiday risk, whatever their title.`,
+        });
+      }
+      const edge = periphery.members.find((m) => m.no === no);
+      if (edge) {
+        out.push({
+          tone: 'warn',
+          text:
+            edge.kind === 'isolate'
+              ? 'Nobody puts them over the line on any question — an isolate. Worth checking whether they are new, remote, or simply unknown to the group.'
+              : 'On the periphery: rated, but by few and at low strength. Often a signal about exposure, not ability.',
+        });
+      }
+      const out2 = oneWayAll.filter((t) => t.a === no).length;
+      if (out2 >= 3) {
+        out.push({
+          tone: 'plain',
+          text: `Extends trust to ${out2} colleagues who do not return it — generous, and possibly isolated in the reaching.`,
+        });
+      }
+      if (out.length === 0) {
+        out.push({ tone: 'ok', text: 'Nothing stands out: their standing on both questions matches the group.' });
+      }
+      return out;
+    },
+    [allBridges, coverageOf, net.minRaters, oneWayAll, periphery.members, shareOf],
+  );
+
+  /**
+   * The band's rows: searched, and with the ticked floated to the top. A
+   * selection scattered over seven pages is a selection nobody can check.
+   */
+  const visibleMetricRows = useMemo(() => {
+    const q = rowQuery.trim().toLowerCase();
+    const rows = q
+      ? metricRows.filter(
+          (r) => r.name.toLowerCase().includes(q) || r.func.toLowerCase().includes(q),
+        )
+      : metricRows;
+    return [...rows].sort(
+      (a, b) => Number(picked.has(b.no)) - Number(picked.has(a.no)),
+    );
+  }, [metricRows, picked, rowQuery]);
+
+  const pairSentence = useMemo(
+    () =>
+      compareNos.length < 2
+        ? 'Pick two people to compare.'
+        : shortlistVerdict(compareNos.map(nameOf), pairMetrics),
+    [compareNos, nameOf, pairMetrics],
+  );
 
   /**
    * The nine findings at once, for the rail. Each is the very expression its
@@ -972,7 +1262,8 @@ export function InsightsView({
     oneway: oneWayFindingText,
     silos: silosFinding,
     spread: spreadFinding(spread),
-    compare: overlapSentence,
+    compare: divergenceShareFinding(shareRows, nameOf),
+    pair: pairSentence,
     facets: relOpen,
   };
 
@@ -997,17 +1288,28 @@ export function InsightsView({
     const cluster = clusters.entries.find((e) => e.fill === fill && !e.singleton)?.label;
     const share = spreadShares.find((r) => r.trust.no === no)?.trust.share;
     const facet = facetRows.find((r) => r.no === no);
-    const rank = rankRows.find((r) => r.no === no);
-    const quadShort: Record<string, string> = { watch: 'Watch list', anchor: 'Trusted + influential', peripheral: 'Peripheral', underused: 'Underused asset' };
+    const standing = shareOf.get(no);
+    const quadShort: Record<string, string> = { watch: 'Watch list', anchor: 'Trusted + powerful', peripheral: 'Peripheral', underused: 'Underused asset' };
     const cells: PersonCell[] = [
-      { tab: 'anchors', label: 'Trust · influence in', value: `${anchor?.trustIn ?? 0} · ${anchor?.powerIn ?? 0}`, share: (anchor?.trustIn ?? 0) / colMax.trustIn },
+      { tab: 'anchors', label: 'Trust · power in', value: `${anchor?.trustIn ?? 0} · ${anchor?.powerIn ?? 0}`, share: (anchor?.trustIn ?? 0) / colMax.trustIn },
       { tab: 'divergence', label: 'Quadrant', value: quad ? quadShort[quad.quadrant] ?? QUADRANT_NAME[quad.quadrant] : '—', tone: quad?.quadrant === 'watch' ? 'warn' : quad?.quadrant === 'anchor' ? 'ok' : undefined },
       { tab: 'bridges', label: 'Bridge rank', value: bridge ? `#${bridgeIx + 1} · ${bridge.score.toFixed(2)}` : 'Not a bridge' },
       { tab: 'isolates', label: 'At the edge', value: edge ? (edge.kind === 'isolate' ? 'Isolate' : 'Peripheral') : 'No', tone: edge ? 'warn' : 'ok' },
       { tab: 'oneway', label: 'One-way trust', value: `${given} out · ${got} in`, tone: given + got > 0 ? 'warn' : undefined },
       { tab: 'silos', label: 'Cluster', value: cluster ?? 'Unclustered' },
       { tab: 'spread', label: 'Share of trust', value: share !== undefined ? `${(share * 100).toFixed(1)}%` : '—', share: share !== undefined ? share / colMax.share : null },
-      { tab: 'compare', label: 'Trust · power rank', value: rank ? `#${rank.trustRank} · #${rank.powerRank}` : '—' },
+      {
+        tab: 'compare',
+        label: 'Relied on · deferred to',
+        value:
+          standing === undefined || standing.trust === null
+            ? '—'
+            : `${Math.round(standing.trust * 100)}% · ${Math.round((standing.power ?? 0) * 100)}%`,
+        tone:
+          standing !== undefined && standing.gap !== null && Math.abs(standing.gap) >= DIVERGENCE_FLOOR
+            ? 'warn'
+            : undefined,
+      },
       { tab: 'facets', label: 'Reliability − openness', value: facet ? (facet.gap > 0 ? `+${facet.gap}` : String(facet.gap)) : '—' },
     ];
     return (
@@ -1021,7 +1323,7 @@ export function InsightsView({
         onClear={() => setFocusNo(null)}
       />
     );
-  }, [allBridges, anchorRows, clusters, colMax, coverageOf, divergenceRows, facetRows, fillOfFunc, focusNo, funcOf, nameOf, oneWayAll, periphery.members, rankRows, spreadShares, tab, tenureOf]);
+  }, [allBridges, anchorRows, clusters, colMax, coverageOf, divergenceRows, facetRows, fillOfFunc, focusNo, funcOf, nameOf, oneWayAll, periphery.members, shareOf, spreadShares, tab, tenureOf]);
 
   return (
     <div
@@ -1043,6 +1345,8 @@ export function InsightsView({
             total={net.nodes.length}
             compare={!!scope.compare}
             onToggleCompare={(on) => setScope((cur) => ({ ...cur, compare: on }))}
+            allNames={allNames}
+            onToggleAllNames={toggleAllNames}
           />
         }
         search={
@@ -1118,6 +1422,8 @@ export function InsightsView({
             title={TAB_TITLE.anchors!}
             question={tabDef.question}
             onExport={exportStage}
+            isFull={!!isFull}
+            onToggleFull={onToggleFull}
             lead={
               <>
                 {compareOn && deptRows.length > 0 ? (
@@ -1143,23 +1449,55 @@ export function InsightsView({
                 lanes={lanes}
                 highlight={litDeptSet}
                 box={stageBox}
-                edges={trustEdges}
+                edges={shownLayers.trust ? trustEdges : EMPTY_EDGES}
+                edgeColor={TRUST_TIE}
+                edgeLabel="Trust"
+                overlay={
+                  shownLayers.power
+                    ? { edges: powerEdges, color: POWER_TIE, label: 'Power over' }
+                    : null
+                }
+                tieProps={tieProps}
+                /* Two lenses at once means twice the ink, and the shared 0.24
+                   leaves both as grey haze. Lifted so each line keeps its hue;
+                   focus still takes a tie to 0.9 above this. */
+                edgeFadeOf={() => 0.62}
+                directed
                 sizeOf={radiusTrust}
                 colorOf={fillOfFunc}
                 decorate={anchorDecor}
-                labelFor={trustLabels}
+                labelFor={namesFor(trustLabels)}
+                denseLabels={allNames}
                 activeNo={activeNo}
                 onPick={pick}
                 onHover={onMapHover}
                 onLeave={onMapLeave}
-                label="The trust network, with the five most trusted and the five most influential ringed"
+                label="Trust ties in green and power-over ties in orange, arrowed towards the person rated, with the five most trusted and the five most powerful ringed"
               />
             }
             legend={
               <div className="ins-legend-row">
-                <RingKey color={TRUST_ACCENT}>Most trusted</RingKey>
-                <RingKey color={POWER_ACCENT}>Most influential</RingKey>
-                <span className="ins-legend-note">Node size: trust ties received</span>
+                <LineKey color={TRUST_TIE} on={shownLayers.trust} onToggle={() => toggleLayer('trust')}>
+                  Trust
+                </LineKey>
+                <LineKey color={POWER_TIE} on={shownLayers.power} onToggle={() => toggleLayer('power')}>
+                  Power over
+                </LineKey>
+                <RingKey
+                  color={TRUST_ACCENT}
+                  on={shownLayers.trustedRings}
+                  onToggle={() => toggleLayer('trustedRings')}
+                >
+                  Most trusted
+                </RingKey>
+                <RingKey
+                  color={POWER_ACCENT}
+                  on={shownLayers.powerRings}
+                  onToggle={() => toggleLayer('powerRings')}
+                >
+                  Most powerful
+                </RingKey>
+                <span className="ins-legend-note">Arrow points to the person rated · node size: trust ties received</span>
               </div>
             }
             sidebar={
@@ -1167,6 +1505,7 @@ export function InsightsView({
                 <Finding text={null} />
                 <Panel title="Most trusted" accent={TRUST_ACCENT}>
                   <RankList
+                    coverageOf={coverageOf}
                     colorOf={fillOfFunc}
                     entries={anchorLists.trusted}
                     bold={anchorLists.both}
@@ -1178,8 +1517,9 @@ export function InsightsView({
                     personProps={personProps}
                   />
                 </Panel>
-                <Panel title="Most influential" accent={POWER_ACCENT}>
+                <Panel title="Most powerful" accent={POWER_ACCENT}>
                   <RankList
+                    coverageOf={coverageOf}
                     colorOf={fillOfFunc}
                     entries={anchorLists.influential}
                     bold={anchorLists.both}
@@ -1225,7 +1565,7 @@ export function InsightsView({
                   },
                   {
                     key: 'power',
-                    head: 'Influence in',
+                    head: 'Power in',
                     right: true,
                     width: 116,
                     sort: (a, b) => a.powerIn - b.powerIn,
@@ -1255,6 +1595,8 @@ export function InsightsView({
             title={TAB_TITLE.divergence!}
             question={tabDef.question}
             onExport={exportStage}
+            isFull={!!isFull}
+            onToggleFull={onToggleFull}
             lead={
               <>
                 {compareOn && deptRows.length > 0 ? (
@@ -1288,10 +1630,10 @@ export function InsightsView({
               <>
                 <Finding
                   text={null}
-                  caption="Influence without goodwill is a friction point and a succession risk; trusted people without influence are often overlooked for stretch roles."
+                  caption="Power without goodwill is a friction point and a succession risk; trusted people without power are often overlooked for stretch roles."
                 />
                 <div onMouseEnter={() => setLifted('watch')} onMouseLeave={() => setLifted(null)}>
-                  <Panel title="Watch list" sub="Influence ahead of trust" accent={QUADRANT_COLOR.watch}>
+                  <Panel title="Watch list" sub="Power ahead of trust" accent={QUADRANT_COLOR.watch}>
                     <QuadrantList
                       colorOf={fillOfFunc}
                       entries={lists.watch.slice(0, 5)}
@@ -1306,7 +1648,7 @@ export function InsightsView({
                 <div onMouseEnter={() => setLifted('underused')} onMouseLeave={() => setLifted(null)}>
                   <Panel
                     title="Underused assets"
-                    sub="Trust ahead of influence"
+                    sub="Trust ahead of power"
                     accent={QUADRANT_COLOR.underused}
                   >
                     <QuadrantList
@@ -1346,13 +1688,13 @@ export function InsightsView({
                     head: 'Trust',
                     note: r0Note(points),
                     right: true,
-                    width: 104,
+                    width: 86,
                     sort: (a, b) => a.trust - b.trust,
                     cell: (r) => (r.normalised ? r.trust.toFixed(2) : r.trustCount),
                   },
                   {
                     key: 'power',
-                    head: 'Influence',
+                    head: 'Power',
                     note: r0Note(points),
                     right: true,
                     width: 104,
@@ -1384,6 +1726,8 @@ export function InsightsView({
             title={TAB_TITLE.bridges!}
             question={tabDef.question}
             onExport={exportStage}
+            isFull={!!isFull}
+            onToggleFull={onToggleFull}
             lead={
               <>
                 {compareOn && deptRows.length > 0 ? (
@@ -1417,7 +1761,8 @@ export function InsightsView({
                   bridgeSet.has(e.from) || bridgeSet.has(e.to) ? 0.55 : 0.08
                 }
                 decorate={(no) => (bridgeTop3.has(no) ? { rings: [STRUCT_ACCENT] } : null)}
-                labelFor={bridgeLabels}
+                labelFor={namesFor(bridgeLabels)}
+                denseLabels={allNames}
                 callouts={bridgeCallouts}
                 margin={CALLOUT_MARGIN}
                 activeNo={activeNo}
@@ -1511,12 +1856,201 @@ export function InsightsView({
         ) : null}
 
         {/* --------------------------------------------------- 4 isolates */}
+        {/* ------------------------------------------------ head to head */}
+        {tab === 'pair' ? (
+          <Workspace
+            id={tab}
+            plain
+            title={compareNos.length > 2 ? 'Shortlist' : TAB_TITLE.pair!}
+            question={
+              compareNos.length > 2
+                ? `${compareNos.length} people, measure by measure`
+                : tabDef.question
+            }
+            onExport={exportStage}
+            isFull={!!isFull}
+            onToggleFull={onToggleFull}
+            lead={personCard}
+            finding={findings[tab] ?? null}
+            sidebar={
+              <>
+                <Finding text={null} />
+                {compareNos.map((no) => (
+                  <Panel key={no} title={nameOf(no)} sub={funcOf(no)} accent={fillOfFunc(no)}>
+                    <ul className="h2h-notes">
+                      {hrNotes(no).map((n, i) => (
+                        <li key={i} className={`h2h-note is-${n.tone}`}>
+                          {n.text}
+                        </li>
+                      ))}
+                    </ul>
+                  </Panel>
+                ))}
+                <Panel title="How to read it" accent={STRUCT_ACCENT}>
+                  <p className="hint">
+                    A row is marked only where leading means something. Bridge score, trust given
+                    and coverage describe the group&rsquo;s shape and who answered, not who is
+                    better, so they carry no mark.
+                  </p>
+                </Panel>
+              </>
+            }
+            bandTitle="Everyone, on the same measures"
+            bandNote={
+              picked.size >= 2
+                ? `${picked.size} ticked · comparing them above`
+                : `${metricRows.length} people · tick two or more to compare`
+            }
+            band={
+              <>
+                <div className="ins-band-tools">
+                  <input
+                    className="control control-sm"
+                    placeholder="Search everyone by name or function…"
+                    value={rowQuery}
+                    onChange={(e) => setRowQuery(e.target.value)}
+                    aria-label="Search the roster"
+                  />
+                  {picked.size > 0 ? (
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPicked(new Set())}>
+                      Clear {picked.size} ticked
+                    </button>
+                  ) : null}
+                </div>
+                <DetailTable
+                rows={visibleMetricRows}
+                rowKey={(r) => r.no}
+                personNo={(r) => r.no}
+                activeNo={activeNo}
+                personProps={personProps}
+                empty="Nobody to measure yet."
+                wide
+                columns={[
+                  {
+                    key: 'pick',
+                    head: '',
+                    width: 34,
+                    cell: (r) => (
+                      <input
+                        type="checkbox"
+                        checked={picked.has(r.no)}
+                        onChange={() => togglePicked(r.no)}
+                        aria-label={`Compare ${r.name}`}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    ),
+                  },
+                  {
+                    key: 'name',
+                    head: 'Person',
+                    cell: (r) => r.name,
+                    sort: (a, b) => a.name.localeCompare(b.name),
+                    width: 150,
+                  },
+                  {
+                    key: 'func',
+                    head: 'Function',
+                    cell: (r) => r.func,
+                    sort: (a, b) => a.func.localeCompare(b.func),
+                    width: 110,
+                  },
+                  ...(metricRows[0]?.cells ?? []).map((c, i) => ({
+                    key: c.key,
+                    head: c.short,
+                    cell: (r: (typeof metricRows)[number]) => r.cells[i]?.text ?? '—',
+                    sort: (x: (typeof metricRows)[number], y: (typeof metricRows)[number]) =>
+                      (x.cells[i]?.value ?? -1) - (y.cells[i]?.value ?? -1),
+                    width: 104,
+                  })),
+                ]}
+                />
+              </>
+            }
+            centre={
+              pair.a === null || pair.b === null ? (
+                <p className="hint">This cohort needs two people before anything can be compared.</p>
+              ) : (
+                <div className="h2h-stage">
+                  {picked.size >= 2 ? (
+                    <p className="h2h-picked">
+                      Comparing {picked.size} people ticked below.{' '}
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPicked(new Set())}>
+                        Clear the selection
+                      </button>
+                    </p>
+                  ) : null}
+                  <div className={`h2h-pickers${picked.size >= 2 ? ' is-hidden' : ''}`}>
+                    <PersonSearch
+                      people={searchPeople.filter((p) => p.no !== pair.b)}
+                      placeholder={`Left — ${nameOf(pair.a)}`}
+                      onPick={(no) => setPairA(no)}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm h2h-swap"
+                      onClick={() => {
+                        setPairA(pair.b);
+                        setPairB(pair.a);
+                      }}
+                      title="Swap sides"
+                    >
+                      Swap
+                    </button>
+                    <PersonSearch
+                      people={searchPeople.filter((p) => p.no !== pair.a)}
+                      placeholder={`Right — ${nameOf(pair.b)}`}
+                      onPick={(no) => setPairB(no)}
+                    />
+                  </div>
+                  <div className="h2h-map">
+                    <InsightGraph
+                      nodes={nodes}
+                      positions={seats}
+                      dock={dock}
+                      sizeScale={sizeScale * 0.8}
+                      lanes={lanes}
+                      highlight={compareSet}
+                      box={stageBox}
+                      edges={trustEdges}
+                      edgeColor={TRUST_TIE}
+                      edgeLabel="Trust"
+                      overlay={{ edges: powerEdges, color: POWER_TIE, label: 'Power over' }}
+                      edgeFadeOf={() => 0.3}
+                      directed
+                      sizeOf={radiusTrust}
+                      colorOf={fillOfFunc}
+                      labelFor={compareSet}
+                      activeNo={activeNo}
+                      onPick={pick}
+                      onHover={onMapHover}
+                      onLeave={onMapLeave}
+                      label="The people being compared, lit on the group's trust and power network"
+                    />
+                  </div>
+                  <HeadToHead
+                    sides={compareNos.map((no) => ({
+                      no,
+                      name: nameOf(no),
+                      func: funcOf(no),
+                      color: fillOfFunc(no),
+                    }))}
+                    metrics={pairMetrics}
+                    onPick={setFocusNo}
+                  />
+                </div>
+              )
+            }
+          />
+        ) : null}
+
         {tab === 'isolates' ? (
           <Workspace
             id={tab}
             title={TAB_TITLE.isolates!}
             question={tabDef.question}
             onExport={exportStage}
+            isFull={!!isFull}
+            onToggleFull={onToggleFull}
             lead={
               <>
                 {compareOn && deptRows.length > 0 ? (
@@ -1548,7 +2082,8 @@ export function InsightsView({
                 fadeOf={fadeExcept(peripheralSet, 0.25)}
                 edgeFadeOf={() => 0.08}
                 decorate={(no) => (isolateSet.has(no) ? { warn: FLAG_COLOR } : null)}
-                labelFor={peripheralSet}
+                labelFor={namesFor(peripheralSet)}
+                denseLabels={allNames}
                 activeNo={activeNo}
                 onPick={pick}
                 onHover={onMapHover}
@@ -1666,7 +2201,7 @@ export function InsightsView({
                   },
                   {
                     key: 'power',
-                    head: 'Influence in',
+                    head: 'Power in',
                     right: true,
                     width: 116,
                     sort: (a, b) => a.powerIn - b.powerIn,
@@ -1696,6 +2231,8 @@ export function InsightsView({
             title={TAB_TITLE.oneway!}
             question={tabDef.question}
             onExport={exportStage}
+            isFull={!!isFull}
+            onToggleFull={onToggleFull}
             lead={
               <>
                 {compareOn && deptRows.length > 0 ? (
@@ -1731,7 +2268,8 @@ export function InsightsView({
                 colorOf={fillOfFunc}
                 fadeOf={fadeExcept(oneWayFolk, 0.18)}
                 edgeFadeOf={() => 0.72}
-                labelFor={oneWayFolk}
+                labelFor={namesFor(oneWayFolk)}
+                denseLabels={allNames}
                 directed
                 activeNo={activeNo}
                 onPick={pick}
@@ -1822,6 +2360,8 @@ export function InsightsView({
             title={TAB_TITLE.silos!}
             question={tabDef.question}
             onExport={exportStage}
+            isFull={!!isFull}
+            onToggleFull={onToggleFull}
             lead={
               <>
                 {compareOn && deptRows.length > 0 ? (
@@ -1851,7 +2391,8 @@ export function InsightsView({
                 lanes={lanes}
                 hulls={compareOn ? undefined : hulls}
                 highlight={litDeptSet ?? (silosHover === null ? null : silosMembers.get(silosHover) ?? null)}
-                labelFor={trustLabels}
+                labelFor={namesFor(trustLabels)}
+                denseLabels={allNames}
                 activeNo={activeNo}
                 onPick={pick}
                 onHover={onMapHover}
@@ -2042,6 +2583,8 @@ export function InsightsView({
             title={TAB_TITLE.spread!}
             question={tabDef.question}
             onExport={exportStage}
+            isFull={!!isFull}
+            onToggleFull={onToggleFull}
             lead={
               <>
                 {compareOn && deptRows.length > 0 ? (
@@ -2077,7 +2620,8 @@ export function InsightsView({
                 hulls={compareOn ? undefined : hubHull}
                 fadeOf={(no) => (hubs.has(no) ? 1 : (trustIn.get(no) ?? 0) > 0 ? 0.78 : 0.42)}
                 decorate={(no) => (hubs.has(no) ? { rings: [STRUCT_ACCENT] } : null)}
-                labelFor={hubs}
+                labelFor={namesFor(hubs)}
+                denseLabels={allNames}
                 activeNo={activeNo}
                 onPick={pick}
                 onHover={onMapHover}
@@ -2216,6 +2760,8 @@ export function InsightsView({
             title={TAB_TITLE.compare!}
             question={tabDef.question}
             onExport={exportStage}
+            isFull={!!isFull}
+            onToggleFull={onToggleFull}
             lead={
               <>
                 {compareOn && deptRows.length > 0 ? (
@@ -2230,50 +2776,66 @@ export function InsightsView({
               </>
             }
             finding={findings[tab] ?? null}
-            bandTitle="Standing on each side"
-            bandNote="Competition ranks — equal counts take equal rank"
+            bandTitle="Both standings, per person"
+            bandNote="Share of the colleagues who rated them"
             centre={
-              <ComparePair
+              <InsightGraph
                 nodes={nodes}
-                edges={edges}
-                cut={cut}
-                visible={allVisible}
-                groupColor={groupColor}
-                ringed={ringed}
+                positions={seats}
+                dock={dock}
+                sizeScale={sizeScale}
+                lanes={lanes}
+                highlight={litDeptSet}
+                box={stageBox}
+                edges={trustEdges}
+                edgeColor={TRUST_TIE}
+                edgeLabel="Trust"
+                edgeFadeOf={() => 0.18}
+                sizeOf={radiusTrust}
+                colorOf={(no) => divergenceColor(gapOf.get(no) ?? null)}
+                labelFor={namesFor(divergentFolk)}
+                denseLabels={allNames}
                 activeNo={activeNo}
-                onSelect={pick}
-                onHover={(no, e, ctx) => {
+                onPick={pick}
+                onHover={(no, e) => {
                   setHoverNo(no);
-                  const gap = rankOf.get(no);
+                  const row = shareOf.get(no);
                   tip.show(
                     {
                       title: nameOf(no),
-                      sub: gap ? `${funcOf(no)} · ${rankDivergenceLabel(gap)}` : funcOf(no),
+                      sub: `${funcOf(no)} · ${divergenceWordFor(row?.gap ?? null)}`,
                       rows: [
-                        [
-                          ctx.pane === 'power' ? 'Power-over ties received' : 'Trust ties received',
-                          String(ctx.inDegree),
-                        ],
+                        ['Relied on', row?.trust === null || row === undefined ? '—' : `${Math.round(row.trust * 100)}% of raters`],
+                        ['Deferred to', row?.power === null || row === undefined ? '—' : `${Math.round(row.power * 100)}% of raters`],
                       ],
                     },
                     e,
                   );
                 }}
                 onLeave={onMapLeave}
+                label="Every member on the trust network, coloured by how far their two standings differ"
               />
+            }
+            legend={
+              <div className="ins-legend-row">
+                <Key color={divergenceColor(-0.5)}>Relied on, little say</Key>
+                <Key color={divergenceColor(null)}>The two agree</Key>
+                <Key color={divergenceColor(0.5)}>Deferred to, less relied on</Key>
+                <span className="ins-legend-note">Ties: trust · node size: trust ties received</span>
+              </div>
             }
             sidebar={
               <>
                 <Finding text={null} />
-                <Panel title="Standing shifts most" sub="Ringed in both panes">
-                  {rankGaps.length === 0 ? (
+                <Panel title="Furthest apart" sub="Widest gap between the two standings">
+                  {divergentRows.length === 0 ? (
                     <p className="hint">
-                      Nobody's standing differs between the two lenses — the group trusts the people it
-                      lets decide.
+                      Nobody&rsquo;s two standings differ by more than {Math.round(DIVERGENCE_FLOOR * 100)}
+                      {' '}points — the group trusts the people it lets decide.
                     </p>
                   ) : (
                     <div className="insights-rows">
-                      {rankGaps.map((d) => (
+                      {divergentRows.slice(0, 8).map((d) => (
                         <button
                           key={d.no}
                           type="button"
@@ -2282,80 +2844,88 @@ export function InsightsView({
                             title: nameOf(d.no),
                             sub: funcOf(d.no),
                             rows: [
-                              ['Trusted', `#${d.trustRank}`],
-                              ['Drives decisions', `#${d.powerRank}`],
+                              ['Relied on', `${Math.round((d.trust ?? 0) * 100)}%`],
+                              ['Deferred to', `${Math.round((d.power ?? 0) * 100)}%`],
                             ],
                           }))}
                         >
                           <span className="insights-row-name">{nameOf(d.no)}</span>
-                          <span className="insights-row-meta">{rankDivergenceLabel(d)}</span>
-                          <span className="insights-row-val">{d.delta} places</span>
+                          <span className="insights-row-meta">{divergenceWordFor(d.gap)}</span>
+                          <span className="insights-row-val" style={{ color: divergenceColor(d.gap) }}>
+                            {d.gap! > 0 ? '+' : ''}
+                            {Math.round(d.gap! * 100)}
+                          </span>
                         </button>
                       ))}
                     </div>
                   )}
                 </Panel>
-                <Panel title="Reading the panes">
-                  <div className="ins-legend-col">
-                    <Key color={TRUST_ACCENT}>Left: positive trust ties</Key>
-                    <Key color={POWER_ACCENT}>Right: positive power-over ties</Key>
-                    <RingKey color={STRUCT_ACCENT}>Standing differs most between the two</RingKey>
-                  </div>
+                <Panel title="Reading the map">
                   <p className="ins-panel-foot">
-                    Both panes share one layout: a person who is a hub on the left and a leaf on the
-                    right has not moved, which is the whole comparison.
+                    Both standings are a share of the colleagues who actually rated that person, so
+                    somebody judged by four is comparable with somebody judged by forty. A gap under
+                    {' '}{Math.round(DIVERGENCE_FLOOR * 100)} points is drawn as level: in a group this
+                    size it is one rater changing their mind, not a finding.
                   </p>
                 </Panel>
               </>
             }
             band={
-              <DetailTable<RankRow>
-                rows={rankRows}
+              <DetailTable<DivergenceShare>
+                rows={shareRows}
                 rowKey={(r) => r.no}
                 personNo={(r) => r.no}
                 activeNo={activeNo}
                 personProps={personProps}
-                tip={(r) => ({
-                  title: nameOf(r.no),
-                  sub: funcOf(r.no),
-                  rows: [
-                    ['Trusted', `#${r.trustRank} · ${r.trustCount} ties`],
-                    ['Drives decisions', `#${r.powerRank} · ${r.powerCount} ties`],
-                  ],
-                })}
                 empty="Nobody is on the roster yet."
                 columns={[
-                  nameCol<RankRow>(),
-                  funcCol<RankRow>(),
                   {
-                    key: 'trustRank',
-                    head: 'Trusted',
-                    note: 'rank',
+                    key: 'name',
+                    head: 'Person',
+                    width: 170,
+                    sort: (a, b) => nameOf(a.no).localeCompare(nameOf(b.no)),
+                    cell: (r) => nameOf(r.no),
+                  },
+                  {
+                    key: 'func',
+                    head: 'Function',
+                    width: 130,
+                    sort: (a, b) => funcOf(a.no).localeCompare(funcOf(b.no)),
+                    cell: (r) => funcOf(r.no),
+                  },
+                  {
+                    key: 'trust',
+                    head: 'Relied on',
+                    note: 'share of raters',
+                    right: true,
+                    width: 128,
+                    sort: (a, b) => (b.trust ?? -1) - (a.trust ?? -1),
+                    cell: (r) => (r.trust === null ? <span className="ins-dash">—</span> : `${Math.round(r.trust * 100)}%`),
+                  },
+                  {
+                    key: 'power',
+                    head: 'Deferred to',
+                    note: 'share of raters',
+                    right: true,
+                    width: 128,
+                    sort: (a, b) => (b.power ?? -1) - (a.power ?? -1),
+                    cell: (r) => (r.power === null ? <span className="ins-dash">—</span> : `${Math.round(r.power * 100)}%`),
+                  },
+                  {
+                    key: 'gap',
+                    head: 'Apart',
+                    note: 'points',
                     right: true,
                     width: 104,
-                    sort: (a, b) => b.trustRank - a.trustRank,
-                    cell: (r) => `#${r.trustRank}`,
-                  },
-                  {
-                    key: 'powerRank',
-                    head: 'Drives decisions',
-                    note: 'rank',
-                    right: true,
-                    width: 148,
-                    sort: (a, b) => b.powerRank - a.powerRank,
-                    cell: (r) => `#${r.powerRank}`,
-                  },
-                  {
-                    key: 'delta',
-                    head: 'Places apart',
-                    right: true,
-                    width: 126,
-                    sort: (a, b) => a.delta - b.delta,
+                    sort: (a, b) => Math.abs(b.gap ?? 0) - Math.abs(a.gap ?? 0),
                     cell: (r) =>
-                      r.delta === 0 ? (
+                      r.gap === null || Math.abs(r.gap) < DIVERGENCE_FLOOR ? (
                         <span className="ins-dash">level</span>
                       ) : (
-                        <span className="ins-delta">{r.delta}</span>
+                        <span style={{ color: divergenceColor(r.gap), fontWeight: 650 }}>
+                          {r.gap > 0 ? '+' : ''}
+                          {Math.round(r.gap * 100)}
+                        </span>
                       ),
                   },
                 ]}
@@ -2371,6 +2941,8 @@ export function InsightsView({
             title={TAB_TITLE.facets!}
             question={tabDef.question}
             onExport={exportStage}
+            isFull={!!isFull}
+            onToggleFull={onToggleFull}
             lead={
               <>
                 {compareOn && deptRows.length > 0 ? (
@@ -2399,7 +2971,8 @@ export function InsightsView({
                 edges={facetEdges}
                 sizeOf={radiusFacet}
                 colorOf={fillOfFunc}
-                labelFor={facetLabels}
+                labelFor={namesFor(facetLabels)}
+                denseLabels={allNames}
                 activeNo={activeNo}
                 onPick={pick}
                 onHover={(no, e) => {
@@ -2577,105 +3150,33 @@ export function InsightsView({
 
 // ------------------------------------------------------------ the two panes
 
-/**
- * The compare pair, measuring itself.
- *
- * It is the one centre that is not a single picture, and the one that has to
- * lay out in the pixels it is given: two panes side by side each solve in their
- * own virtual box, and the box's aspect has to match the pane's or sixty nodes
- * letterbox into a strip. The height is rounded to a coarse step so dragging a
- * window edge does not re-run the simulation on every frame.
- */
-function ComparePair({
-  nodes,
-  edges,
-  cut,
-  visible,
-  groupColor,
-  ringed,
-  activeNo,
-  onSelect,
-  onHover,
-  onLeave,
-}: {
-  nodes: CohortNetwork['nodes'];
-  edges: CohortNetwork['edges'];
-  cut: number;
-  visible: Set<number>;
-  groupColor: Map<string, string>;
-  ringed: ReadonlySet<number>;
-  activeNo: number | null;
-  onSelect: (no: number) => void;
-  onHover: (no: number, e: React.MouseEvent, ctx: { pane: string; inDegree: number }) => void;
-  onLeave: () => void;
-}) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const [size, setSize] = useState({ w: 900, h: 460 });
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const measure = () => {
-      // Layout size, not the rendered rectangle: the pane sits inside the
-      // zoom transform and its client rect scales with it.
-      setSize({ w: Math.max(320, el.offsetWidth), h: Math.max(220, el.offsetHeight) });
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  const stacked = size.w < 480;
-  const panePxW = Math.max(240, stacked ? size.w - 20 : (size.w - 30) / 2);
-  const panePxH = Math.max(200, stacked ? (size.h - 30) / 2 : size.h - 20);
-  const paneScale = 1000 / panePxW;
-  const paneBox: LayoutBox = useMemo(
-    // Rounded to 40 units: a two-pixel resize must not re-solve sixty nodes.
-    () => ({ w: 1000, h: Math.max(400, Math.round((panePxH * paneScale) / 40) * 40) }),
-    [paneScale, panePxH],
-  );
-  const positions = useMemo(() => {
-    const ties = unionTies(edges, [TRUST_LENS, POWER_LENS], cut);
-    const inTies = new Map<number, number>();
-    for (const t of ties) inTies.set(t.to, (inTies.get(t.to) ?? 0) + 1);
-    return forceMapLayout(
-      nodes.map((n) => ({
-        no: n.no,
-        inTies: inTies.get(n.no) ?? 0,
-        group: n.func.trim() || '—',
-      })),
-      ties.map((t) => ({ from: t.from, to: t.to, weight: 0.6 })),
-      new Map(),
-      paneBox,
-    );
-  }, [cut, edges, nodes, paneBox]);
-
-  return (
-    <div className="ins-panes" ref={ref}>
-      <CompareView
-        nodes={nodes}
-        edges={edges}
-        visible={visible}
-        positions={positions}
-        paneBox={paneBox}
-        stacked={stacked}
-        cut={cut}
-        fillOf={(n) => groupColor.get(n.func.trim()) ?? MUTED_GREY}
-        focus={null}
-        selectedNo={activeNo}
-        matches={null}
-        showLabels
-        ringed={ringed}
-        onSelect={onSelect}
-        onHover={onHover}
-        onLeave={onLeave}
-        labelSize={Math.round(12.5 * paneScale)}
-      />
-    </div>
-  );
-}
 
 // ------------------------------------------------------------- small lists
+
+/**
+ * Why this person is on the list, not merely that they are: the count against
+ * the colleagues who actually rated them. Sixteen ties from twenty raters and
+ * sixteen from fifty are not the same standing, and the bare count hides it.
+ */
+function shareText(
+  no: number,
+  count: number,
+  coverageOf?: ReadonlyMap<number, number>,
+): string {
+  const raters = coverageOf?.get(no) ?? 0;
+  return raters > 0 ? `${Math.round((count / raters) * 100)}% of ${raters}` : '—';
+}
+
+function shareMeta(
+  no: number,
+  count: number,
+  funcOf: (no: number) => string,
+  coverageOf?: ReadonlyMap<number, number>,
+): string {
+  const raters = coverageOf?.get(no) ?? 0;
+  const f = funcOf(no);
+  return raters > 0 ? `${f} · ${Math.round((count / raters) * 100)}% of ${raters} raters` : f;
+}
 
 function RankList({
   entries,
@@ -2687,6 +3188,7 @@ function RankList({
   colorOf,
   unit,
   personProps,
+  coverageOf,
 }: {
   entries: { no: number; count: number }[];
   bold: ReadonlySet<number>;
@@ -2697,6 +3199,8 @@ function RankList({
   colorOf: (no: number) => string;
   unit: string;
   personProps: PersonProps;
+  /** Raters per person, so a count can be said as a share of who judged them. */
+  coverageOf?: ReadonlyMap<number, number>;
 }) {
   if (entries.length === 0) return <p className="hint">Nobody has reached the tie line here yet.</p>;
   const max = entries[0]!.count;
@@ -2708,7 +3212,7 @@ function RankList({
           rank={i + 1}
           avatar={colorOf(e.no)}
           name={nameOf(e.no)}
-          meta={funcOf(e.no)}
+          meta={shareMeta(e.no, e.count, funcOf, coverageOf)}
           value={String(e.count)}
           share={max > 0 ? e.count / max : 0}
           fill={fill}
@@ -2717,7 +3221,10 @@ function RankList({
           {...personProps(e.no, () => ({
             title: nameOf(e.no),
             sub: funcOf(e.no),
-            rows: [[capitalise(unit), String(e.count)]],
+            rows: [
+              [capitalise(unit), String(e.count)],
+              ['Of those who rated them', shareText(e.no, e.count, coverageOf)],
+            ],
           }))}
         />
       ))}
@@ -2828,10 +3335,10 @@ function anchorFinding(
 function divergenceFinding(lists: { watch: unknown[]; underused: unknown[] }): string {
   const w = lists.watch.length;
   const u = lists.underused.length;
-  if (w === 0 && u === 0) return 'Trust and influence sit with the same people here — nobody falls off the diagonal.';
-  return `${w} ${w === 1 ? 'person holds' : 'people hold'} influence ahead of trust; ${u} ${
+  if (w === 0 && u === 0) return 'Trust and power sit with the same people here — nobody falls off the diagonal.';
+  return `${w} ${w === 1 ? 'person holds' : 'people hold'} power ahead of trust; ${u} ${
     u === 1 ? 'is trusted' : 'are trusted'
-  } ahead of their influence.`;
+  } ahead of their power.`;
 }
 
 function bridgeFinding(bridges: { no: number; score: number }[], nameOf: (no: number) => string): string | null {
