@@ -364,6 +364,14 @@ export function InsightsView({
   const [isolate, setIsolate] = useState(true);
   /** True only while a capture is in flight, so tables render whole. */
   const [capturing, setCapturing] = useState(false);
+  /**
+   * What the tables and panels treat as "current" — the pointer if it is over
+   * something, otherwise the selection.
+   *
+   * The maps are deliberately NOT given this. Feeding a hover in as the active
+   * person made the picture re-light and re-letter itself under a moving
+   * cursor; they take `focusNo` and settle until something is clicked.
+   */
   const activeNo = hoverNo ?? focusNo;
   const pick = useCallback((no: number) => {
     setFocusNo((cur) => {
@@ -1619,7 +1627,7 @@ export function InsightsView({
                 decorate={anchorDecor}
                 labelFor={namesFor(trustLabels)}
                 denseLabels={allNames}
-                activeNo={activeNo}
+                activeNo={focusNo}
                 isolate={isolate}
                 onPick={pick}
                 onHover={onMapHover}
@@ -1933,7 +1941,7 @@ export function InsightsView({
                 denseLabels={allNames}
                 callouts={bridgeCallouts}
                 margin={CALLOUT_MARGIN}
-                activeNo={activeNo}
+                activeNo={focusNo}
                 isolate={isolate}
                 onPick={pick}
                 onHover={onMapHover}
@@ -2191,7 +2199,7 @@ export function InsightsView({
                       sizeOf={radiusTrust}
                       colorOf={fillOfFunc}
                       labelFor={compareSet}
-                      activeNo={activeNo}
+                      activeNo={focusNo}
                       isolate={isolate}
                       onPick={pick}
                       onHover={onMapHover}
@@ -2256,7 +2264,7 @@ export function InsightsView({
                 decorate={(no) => (isolateSet.has(no) ? { warn: FLAG_COLOR } : null)}
                 labelFor={namesFor(peripheralSet)}
                 denseLabels={allNames}
-                activeNo={activeNo}
+                activeNo={focusNo}
                 isolate={isolate}
                 onPick={pick}
                 onHover={onMapHover}
@@ -2480,7 +2488,7 @@ export function InsightsView({
                 labelFor={namesFor(oneWayFolk)}
                 denseLabels={allNames}
                 directed
-                activeNo={activeNo}
+                activeNo={focusNo}
                 isolate={isolate}
                 onPick={pick}
                 onHover={onMapHover}
@@ -2603,7 +2611,7 @@ export function InsightsView({
                 highlight={litDeptSet ?? (silosHover === null ? null : silosMembers.get(silosHover) ?? null)}
                 labelFor={namesFor(trustLabels)}
                 denseLabels={allNames}
-                activeNo={activeNo}
+                activeNo={focusNo}
                 isolate={isolate}
                 onPick={pick}
                 onHover={onMapHover}
@@ -2834,7 +2842,7 @@ export function InsightsView({
                 decorate={(no) => (hubs.has(no) ? { rings: [STRUCT_ACCENT] } : null)}
                 labelFor={namesFor(hubs)}
                 denseLabels={allNames}
-                activeNo={activeNo}
+                activeNo={focusNo}
                 isolate={isolate}
                 onPick={pick}
                 onHover={onMapHover}
@@ -3009,7 +3017,7 @@ export function InsightsView({
                 colorOf={(no) => divergenceColor(gapOf.get(no) ?? null)}
                 labelFor={namesFor(divergentFolk)}
                 denseLabels={allNames}
-                activeNo={activeNo}
+                activeNo={focusNo}
                 isolate={isolate}
                 onPick={pick}
                 onHover={(no, e) => {
@@ -3189,7 +3197,7 @@ export function InsightsView({
                 colorOf={fillOfFunc}
                 labelFor={namesFor(facetLabels)}
                 denseLabels={allNames}
-                activeNo={activeNo}
+                activeNo={focusNo}
                 isolate={isolate}
                 onPick={pick}
                 onHover={(no, e) => {

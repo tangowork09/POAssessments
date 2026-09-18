@@ -123,6 +123,13 @@ export interface InsightGraphProps {
    * a little — the picture answers "who is this person connected to" before
    * the tooltip has finished appearing.
    */
+  /**
+   * Light a person's ties on hover, as a preview of what clicking them shows.
+   *
+   * This is dimming only. It never re-seats a name and never isolates: both of
+   * those follow the click. Re-solving sixty labels or re-fitting the map under
+   * a moving pointer is what made the picture flicker and never settle.
+   */
   egoOnHover?: boolean;
   /** Draw arrowheads: for a tab whose whole claim is the direction of a tie. */
   directed?: boolean;
@@ -454,7 +461,9 @@ function InsightGraphImpl({
           const t = shownPositions.get(e.to);
           if (!s || !t) return null;
           const onActive = e.from === activeNo || e.to === activeNo;
-          const onEgo = hoverNo !== null && (e.from === hoverNo || e.to === hoverNo);
+          // Emphasis follows the held selection, never the pointer: a tie that
+          // thickens as the cursor passes is the same flicker in another form.
+          const onEgo = egoOnHover && hoverNo !== null && (e.from === hoverNo || e.to === hoverNo);
           const inGroup = group ? group.has(e.from) && group.has(e.to) : true;
           const base = edgeFadeOf
             ? edgeFadeOf(e)
