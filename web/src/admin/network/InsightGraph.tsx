@@ -143,6 +143,14 @@ export interface InsightGraphProps {
    * needed to be given.
    */
   isolate?: boolean;
+  /**
+   * Draw exactly these people and nobody else, regardless of what is selected.
+   *
+   * For a picture that is about a named few rather than about the group: the
+   * whole network behind them dimmed to a haze is not context, it is noise
+   * with their two dots lost in it.
+   */
+  only?: ReadonlySet<number> | null;
   /** The primary tie set's colour. Defaults to the shared positive-tie green. */
   edgeColor?: string;
   /** What the primary tie set is called, for a tie's own tooltip. */
@@ -195,6 +203,7 @@ function InsightGraphImpl({
   margin = 0,
   directed = false,
   isolate = false,
+  only = null,
   edgeColor = POLARITY_STYLE.positive.color,
   edgeLabel = 'Tie',
   overlay = null,
@@ -264,7 +273,8 @@ function InsightGraphImpl({
   const group = highlight && highlight.size > 0 ? highlight : ego;
 
   /** Isolation only bites on a held selection, never on a passing hover. */
-  const isolated = isolate && stickyEgo !== null && stickyEgo.size > 0 ? stickyEgo : null;
+  const isolated =
+    only && only.size > 0 ? only : isolate && stickyEgo !== null && stickyEgo.size > 0 ? stickyEgo : null;
   const shownNodes = useMemo(
     () => (isolated ? nodes.filter((n) => isolated.has(n.no)) : nodes),
     [isolated, nodes],
@@ -323,9 +333,10 @@ function InsightGraphImpl({
   const labelSize = denseLabels ? LABEL_SIZE * 0.76 : LABEL_SIZE;
 
   const placed = useMemo(() => {
-    const wanted = isolated
-      ? [...isolated]
-      : [...new Set([...(labelFor ?? new Set<number>()), ...(stickyEgo ?? [])])];
+    const wanted =
+      isolated && !only
+        ? [...isolated]
+        : [...new Set([...(labelFor ?? new Set<number>()), ...(only ? [] : (stickyEgo ?? []))])];
     /** Every person's mark, as a box a name has to miss. */
     const marks = new Map<number, LabelBox>();
     // A lane's own header is furniture: no name may print across it either.
@@ -382,7 +393,7 @@ function InsightGraphImpl({
       [],
       labelSize * 0.3,
     );
-  }, [activeNo, box.h, box.w, isolated, labelFor, labelSize, lanes, margin, nodes, outerOf, shownPositions, stickyEgo]);
+  }, [activeNo, box.h, box.w, isolated, labelFor, labelSize, lanes, margin, nodes, only, outerOf, shownPositions, stickyEgo]);
 
   return (
     <svg

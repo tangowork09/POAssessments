@@ -50,8 +50,11 @@ export function HeadToHead({
       className="h2h"
       style={
         {
-          '--h2h-label': sides.length > 3 ? '230px' : 'minmax(200px, 1fr)',
-          '--h2h-col': sides.length > 3 ? '132px' : 'minmax(96px, 132px)',
+          // The measure column is capped rather than elastic: at 1fr it ate the
+          // width and left the people as two narrow columns pinned to the right
+          // edge, far from the label they belong to.
+          '--h2h-label': sides.length > 3 ? '230px' : 'minmax(240px, 340px)',
+          '--h2h-col': sides.length > 3 ? '132px' : 'minmax(120px, 1fr)',
         } as CSSProperties
       }
     >

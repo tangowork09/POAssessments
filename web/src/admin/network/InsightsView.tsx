@@ -173,7 +173,7 @@ import { HeadToHead } from './HeadToHead.js';
  */
 const FADE = {
   anchors: () => 0.62,
-  pair: () => 0.3,
+  pair: () => 0.55,
   bridges: () => 0.08,
   facets: () => 0.72,
   divergence: () => 0.18,
@@ -1156,6 +1156,22 @@ export function InsightsView({
   );
 
   const compareSet = useMemo(() => new Set(compareNos), [compareNos]);
+
+  /** The two (or more) being compared, ringed on their own map. */
+  const compareDecor = useCallback(
+    (no: number): NodeDecor | null => (compareSet.has(no) ? { rings: [STRUCT_ACCENT] } : null),
+    [compareSet],
+  );
+
+  /**
+   * On the comparison map the ties that touch the people being compared are
+   * the picture; the rest is the shape they sit in, and is drawn faintly.
+   */
+  const pairFade = useCallback(
+    (e: PaneEdge) => (compareSet.has(e.from) || compareSet.has(e.to) ? 0.75 : 0.06),
+    [compareSet],
+  );
+
 
   const pairMetrics = useMemo(
     () => (compareNos.length < 2 ? [] : comparePeople(compareNos, memberNos, edges, cut, coverageOf)),
@@ -2181,20 +2197,24 @@ export function InsightsView({
                       onPick={(no) => setPairB(no)}
                     />
                   </div>
-                  <div className="h2h-map">
+                  <figure className="h2h-map">
                     <InsightGraph
                       nodes={nodes}
                       positions={seats}
                       dock={dock}
-                      sizeScale={sizeScale * 0.8}
+                      sizeScale={sizeScale}
                       lanes={lanes}
-                      highlight={compareSet}
+                      /* Not isolated: when the two are hubs their neighbourhood
+                         is most of the group, so cutting to it buys nothing.
+                         The ties that touch them carry instead, and they are
+                         ringed and named. */
+                      decorate={compareDecor}
                       box={stageBox}
                       edges={trustEdges}
                       edgeColor={TRUST_TIE}
                       edgeLabel="Trust"
                       overlay={powerOverlay}
-                      edgeFadeOf={FADE.pair}
+                      edgeFadeOf={pairFade}
                       directed
                       sizeOf={radiusTrust}
                       colorOf={fillOfFunc}
@@ -2204,9 +2224,14 @@ export function InsightsView({
                       onPick={pick}
                       onHover={onMapHover}
                       onLeave={onMapLeave}
-                      label="The people being compared, lit on the group's trust and power network"
+                      label="The people being compared and everyone they are tied to"
                     />
-                  </div>
+                    <figcaption>
+                      Ringed: {compareNos.length === 2 ? 'the two' : `the ${compareNos.length}`} being
+                      compared. Their ties are drawn in full — green trust, orange power over — and
+                      the rest of the group is left faint behind them.
+                    </figcaption>
+                  </figure>
                   <HeadToHead
                     sides={compareNos.map((no) => ({
                       no,
