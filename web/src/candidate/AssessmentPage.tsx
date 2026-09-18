@@ -604,6 +604,19 @@ function BeginTest({
             </ul>
             {intro.emphasis ? <p className="ruleemph">{intro.emphasis}</p> : null}
           </div>
+
+          {/* Before a single rating is given, not buried in a policy page: this
+              instrument asks somebody to name how they experience named
+              colleagues, and it only gets an honest answer if the promise about
+              where it goes is made first. */}
+          {intro.confidentiality ? (
+            <p className="intro-consent">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 3l7 4v5c0 4.4-3 8.2-7 9-4-.8-7-4.6-7-9V7z" />
+              </svg>
+              <span>{intro.confidentiality}</span>
+            </p>
+          ) : null}
         </div>
 
         <div className="stage-pin">

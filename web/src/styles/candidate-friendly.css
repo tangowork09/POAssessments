@@ -524,6 +524,24 @@ body.fb-body {
   color: var(--teal-ink);
 }
 
+/* The promise about where these answers go. Stated on its own, above the
+   button, because it is a condition of answering honestly rather than a
+   footnote to the instructions. */
+.fb .intro-consent {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line, #E4E8EE);
+  border-radius: 12px;
+  background: var(--surface-2, #FAFBFC);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-2, #3D4859);
+}
+.fb .intro-consent svg { flex: none; margin-top: 2px; color: var(--teal, #0E7C5A); }
+
 .fb .tick {
   width: 26px;
   height: 26px;

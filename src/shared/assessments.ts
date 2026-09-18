@@ -77,6 +77,15 @@ export interface RatingScale {
 export interface AssessmentIntro {
   /** Small line above the title. */
   eyebrow: string;
+  /**
+   * What happens to the answers, said before any are given.
+   *
+   * Named relational data asks more of a respondent than a self-rating does,
+   * and the design guide is explicit that trust in the exercise is a
+   * precondition for honest data about trust. Absent for instruments that only
+   * ask somebody about themselves.
+   */
+  confidentiality?: string;
   /** The instrument's own title, as the client states it. */
   title: string;
   /** One or two sentences of plain-language orientation. */
@@ -201,6 +210,9 @@ export const ASSESSMENTS: Readonly<Record<AssessmentKind, AssessmentConfig>> = {
     },
     intro: {
       eyebrow: '12 statements per colleague - about 15 minutes',
+      // The consent wording the facilitator guide supplies, close to verbatim.
+      confidentiality:
+        'Your individual responses are seen only by the facilitation team and are never shared with other participants — nobody is told who rated them, or how. Results are reported as group-level patterns, to help strengthen how the leadership team works together.',
       // The workbook's own title for the exercise.
       title: 'Collaboration Sociometry',
       lede: 'This short exercise looks at how leaders in the group work together - who you rely on, and who you find it easy to work with. Your answers, combined with everyone else\'s, help build an honest picture of where collaboration is strong and where it can be strengthened. It is not a performance review, and it is not scored against any individual.',
