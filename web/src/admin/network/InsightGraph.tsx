@@ -222,27 +222,42 @@ function InsightGraphImpl({
    * do while keeping the mouse still, and it survives until they are cleared.
    * Hover still previews it for anybody else.
    */
-  const egoNo = hoverNo ?? activeNo;
-  const ego = useMemo(() => {
-    if (egoNo === null) return null;
-    if (!egoOnHover && hoverNo !== null) return null;
-    const set = new Set<number>([egoNo]);
-    for (const e of edges) {
-      if (e.from === egoNo) set.add(e.to);
-      if (e.to === egoNo) set.add(e.from);
-    }
-    for (const e of overlay?.edges ?? []) {
-      if (e.from === egoNo) set.add(e.to);
-      if (e.to === egoNo) set.add(e.from);
-    }
-    return set;
-  }, [edges, egoNo, egoOnHover, hoverNo, overlay]);
+  const neighboursOf = useCallback(
+    (no: number | null) => {
+      if (no === null) return null;
+      const set = new Set<number>([no]);
+      for (const e of edges) {
+        if (e.from === no) set.add(e.to);
+        if (e.to === no) set.add(e.from);
+      }
+      for (const e of overlay?.edges ?? []) {
+        if (e.from === no) set.add(e.to);
+        if (e.to === no) set.add(e.from);
+      }
+      return set;
+    },
+    [edges, overlay],
+  );
+
+  /**
+   * The held selection's neighbourhood. Labels and isolation follow THIS and
+   * never the hover: seating sixty names is a collision solve, and re-running
+   * it on every pointer move made the whole map flicker as names jumped
+   * between seats. A hover dims; only a click re-letters the picture.
+   */
+  const stickyEgo = useMemo(() => neighboursOf(activeNo), [activeNo, neighboursOf]);
+  /** The hover's neighbourhood, for dimming alone. */
+  const hoverEgo = useMemo(
+    () => (egoOnHover ? neighboursOf(hoverNo) : null),
+    [egoOnHover, hoverNo, neighboursOf],
+  );
+  const ego = hoverEgo ?? stickyEgo;
   // The hover ego is a highlight like any other, but it never replaces a
   // highlight the tab itself is holding (a silos row, a facet bar).
   const group = highlight && highlight.size > 0 ? highlight : ego;
 
   /** Isolation only bites on a held selection, never on a passing hover. */
-  const isolated = isolate && activeNo !== null && ego !== null && ego.size > 0 ? ego : null;
+  const isolated = isolate && stickyEgo !== null && stickyEgo.size > 0 ? stickyEgo : null;
   const shownNodes = useMemo(
     () => (isolated ? nodes.filter((n) => isolated.has(n.no)) : nodes),
     [isolated, nodes],
@@ -303,7 +318,7 @@ function InsightGraphImpl({
   const placed = useMemo(() => {
     const wanted = isolated
       ? [...isolated]
-      : [...new Set([...(labelFor ?? new Set<number>()), ...(ego ?? [])])];
+      : [...new Set([...(labelFor ?? new Set<number>()), ...(stickyEgo ?? [])])];
     /** Every person's mark, as a box a name has to miss. */
     const marks = new Map<number, LabelBox>();
     // A lane's own header is furniture: no name may print across it either.
@@ -360,7 +375,7 @@ function InsightGraphImpl({
       [],
       labelSize * 0.3,
     );
-  }, [activeNo, box.h, box.w, ego, isolated, labelFor, labelSize, lanes, margin, nodes, outerOf, shownPositions]);
+  }, [activeNo, box.h, box.w, isolated, labelFor, labelSize, lanes, margin, nodes, outerOf, shownPositions, stickyEgo]);
 
   return (
     <svg

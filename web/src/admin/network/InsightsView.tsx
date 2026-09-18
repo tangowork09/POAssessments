@@ -164,6 +164,21 @@ import {
 } from './exportDoc.js';
 import { HeadToHead } from './HeadToHead.js';
 
+/**
+ * Stable per-tab tie opacities.
+ *
+ * These are passed to a memoised component: an arrow function written inline in
+ * JSX is a new value on every render, so the memo never holds and a hover
+ * re-renders the entire map. Hoisted, they are the same function for ever.
+ */
+const FADE = {
+  anchors: () => 0.62,
+  pair: () => 0.3,
+  bridges: () => 0.08,
+  facets: () => 0.72,
+  divergence: () => 0.18,
+} as const;
+
 /** A stable empty list: a fresh [] each render would re-memo the map. */
 const EMPTY_EDGES: PaneEdge[] = [];
 
@@ -1126,6 +1141,12 @@ export function InsightsView({
     return pair.a !== null && pair.b !== null ? [pair.a, pair.b] : [];
   }, [memberNos, pair.a, pair.b, picked]);
 
+  /** One overlay object, not a fresh literal per render. */
+  const powerOverlay = useMemo(
+    () => ({ edges: powerEdges, color: POWER_TIE, label: 'Power over' }),
+    [powerEdges],
+  );
+
   const compareSet = useMemo(() => new Set(compareNos), [compareNos]);
 
   const pairMetrics = useMemo(
@@ -1586,16 +1607,12 @@ export function InsightsView({
                 edges={shownLayers.trust ? trustEdges : EMPTY_EDGES}
                 edgeColor={TRUST_TIE}
                 edgeLabel="Trust"
-                overlay={
-                  shownLayers.power
-                    ? { edges: powerEdges, color: POWER_TIE, label: 'Power over' }
-                    : null
-                }
+                overlay={shownLayers.power ? powerOverlay : null}
                 tieProps={tieProps}
                 /* Two lenses at once means twice the ink, and the shared 0.24
                    leaves both as grey haze. Lifted so each line keeps its hue;
                    focus still takes a tie to 0.9 above this. */
-                edgeFadeOf={() => 0.62}
+                edgeFadeOf={FADE.anchors}
                 directed
                 sizeOf={radiusTrust}
                 colorOf={fillOfFunc}
@@ -2168,8 +2185,8 @@ export function InsightsView({
                       edges={trustEdges}
                       edgeColor={TRUST_TIE}
                       edgeLabel="Trust"
-                      overlay={{ edges: powerEdges, color: POWER_TIE, label: 'Power over' }}
-                      edgeFadeOf={() => 0.3}
+                      overlay={powerOverlay}
+                      edgeFadeOf={FADE.pair}
                       directed
                       sizeOf={radiusTrust}
                       colorOf={fillOfFunc}
@@ -2235,7 +2252,7 @@ export function InsightsView({
                 sizeOf={radiusTrust}
                 colorOf={fillOfFunc}
                 fadeOf={fadeExcept(peripheralSet, 0.25)}
-                edgeFadeOf={() => 0.08}
+                edgeFadeOf={FADE.bridges}
                 decorate={(no) => (isolateSet.has(no) ? { warn: FLAG_COLOR } : null)}
                 labelFor={namesFor(peripheralSet)}
                 denseLabels={allNames}
@@ -2459,7 +2476,7 @@ export function InsightsView({
                 sizeOf={radiusTrust}
                 colorOf={fillOfFunc}
                 fadeOf={fadeExcept(oneWayFolk, 0.18)}
-                edgeFadeOf={() => 0.72}
+                edgeFadeOf={FADE.facets}
                 labelFor={namesFor(oneWayFolk)}
                 denseLabels={allNames}
                 directed
@@ -2987,7 +3004,7 @@ export function InsightsView({
                 edges={trustEdges}
                 edgeColor={TRUST_TIE}
                 edgeLabel="Trust"
-                edgeFadeOf={() => 0.18}
+                edgeFadeOf={FADE.divergence}
                 sizeOf={radiusTrust}
                 colorOf={(no) => divergenceColor(gapOf.get(no) ?? null)}
                 labelFor={namesFor(divergentFolk)}
