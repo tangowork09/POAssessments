@@ -631,11 +631,23 @@ export interface DivergencePoint {
   no: number;
   /** x — positive trust ties received, per rater when normalised. */
   trust: number;
-  /** y — positive power-over ties received, per rater when normalised. */
+  /**
+   * y — TOTAL power received: enabling plus controlling, per rater when
+   * normalised.
+   *
+   * The facilitator guide plots trust against total power and then reads the
+   * enabling/controlling split as a second question. Plotting power-over alone
+   * put a strong enabler with no gatekeeping in the low-power half, which is
+   * the opposite of the guide's "Collaborative Anchor" — the very person the
+   * instrument exists to find.
+   */
   power: number;
   /** The raw counts, always. A tooltip should say people, not rates. */
   trustCount: number;
   powerCount: number;
+  /** The halves of that total, for the "which kind of power" reading. */
+  enablingCount: number;
+  controllingCount: number;
   normalised: boolean;
 }
 
@@ -664,13 +676,18 @@ export function divergencePoints(
 ): DivergencePoint[] {
   const nos = [...new Set(memberNos)].sort((a, b) => a - b);
   const t = degrees(nos, [...edges], 'trust', tieThreshold);
-  const p = degrees(nos, [...edges], 'power_over', tieThreshold);
+  // Total power is the guide's horizontal axis: enabling and controlling
+  // added, with the split kept for the second reading.
+  const enabling = degrees(nos, [...edges], 'power_to', tieThreshold);
+  const controlling = degrees(nos, [...edges], 'power_over', tieThreshold);
   // Normalise only when the coverage actually says something: a map of zeroes
   // would put the whole cohort at the origin and call it a finding.
   const normalised = coverageOf !== undefined && nos.some((no) => (coverageOf.get(no) ?? 0) > 0);
   return nos.map((no) => {
     const trustCount = t.get(no)?.posIn ?? 0;
-    const powerCount = p.get(no)?.posIn ?? 0;
+    const enablingCount = enabling.get(no)?.posIn ?? 0;
+    const controllingCount = controlling.get(no)?.posIn ?? 0;
+    const powerCount = enablingCount + controllingCount;
     const cov = coverageOf?.get(no) ?? 0;
     const scale = normalised ? (cov > 0 ? 1 / cov : 0) : 1;
     return {
@@ -679,6 +696,8 @@ export function divergencePoints(
       power: powerCount * scale,
       trustCount,
       powerCount,
+      enablingCount,
+      controllingCount,
       normalised,
     };
   });

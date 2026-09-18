@@ -61,7 +61,7 @@ import {
 } from './ComparePane.js';
 import { FacetBar } from './FacetBar.js';
 import { DOCK_W, InsightGraph, type NodeDecor } from './InsightGraph.js';
-import { DivergenceChart, QUADRANT_COLOR, QUADRANT_NAME } from './DivergenceChart.js';
+import { DivergenceChart, QUADRANT_COLOR, QUADRANT_GLOSS, QUADRANT_NAME } from './DivergenceChart.js';
 import { MatrixGrid } from './MatrixGrid.js';
 import { toPng } from 'html-to-image';
 import {
@@ -153,6 +153,7 @@ import {
   scopedConcentration,
   type InsightScope,
 } from './model.js';
+import { influenceMix, signatures } from '../../../../src/shared/socio-scoring.js';
 import type { DivergenceShare, PaneEdge } from './model.js';
 import {
   downloadInsightHtml,
@@ -969,6 +970,10 @@ export function InsightsView({
   }, [powerShares, trustShares]);
 
 
+  // ---- the facilitator guide's two group readings
+  const mix = useMemo(() => (net.group ? influenceMix(net.group) : null), [net.group]);
+  const signaturesFound = useMemo(() => (net.group ? signatures(net.group) : null), [net.group]);
+
   // ---- 8 trust against power, as shares rather than ranks
   const shareRows = useMemo(
     () => divergenceShares(memberNos, edges, cut, coverageOf),
@@ -1401,7 +1406,9 @@ export function InsightsView({
     const share = spreadShares.find((r) => r.trust.no === no)?.trust.share;
     const facet = facetRows.find((r) => r.no === no);
     const standing = shareOf.get(no);
-    const quadShort: Record<string, string> = { watch: 'Watch list', anchor: 'Trusted + powerful', peripheral: 'Peripheral', underused: 'Underused asset' };
+    // The guide's own archetype names, so a card, a panel and the client's
+    // deck all say the same word for the same quadrant.
+    const quadShort = QUADRANT_NAME;
     const cells: PersonCell[] = [
       { tab: 'anchors', label: 'Trust · power in', value: `${anchor?.trustIn ?? 0} · ${anchor?.powerIn ?? 0}`, share: (anchor?.trustIn ?? 0) / colMax.trustIn },
       { tab: 'divergence', label: 'Quadrant', value: quad ? quadShort[quad.quadrant] ?? QUADRANT_NAME[quad.quadrant] : '—', tone: quad?.quadrant === 'watch' ? 'warn' : quad?.quadrant === 'anchor' ? 'ok' : undefined },
@@ -1762,7 +1769,21 @@ export function InsightsView({
                   caption="Power without goodwill is a friction point and a succession risk; trusted people without power are often overlooked for stretch roles."
                 />
                 <div onMouseEnter={() => setLifted('watch')} onMouseLeave={() => setLifted(null)}>
-                  <Panel title="Watch list" sub="Power ahead of trust" accent={QUADRANT_COLOR.watch}>
+                  {mix && mix.share !== null ? (
+                  <Panel title="How influence flows" sub="Enabling power against control">
+                    <div className="ins-mix">
+                      <div className="ins-mix-bar">
+                        <span style={{ width: `${Math.round(mix.share * 100)}%` }} />
+                      </div>
+                      <p className="ins-mix-ends">
+                        <b>Enabling {mix.enabling}</b>
+                        <b>{mix.controlling} Controlling</b>
+                      </p>
+                      <p className="ins-panel-foot">{mix.verdict}</p>
+                    </div>
+                  </Panel>
+                ) : null}
+                <Panel title={QUADRANT_NAME.watch} sub={QUADRANT_GLOSS.watch} accent={QUADRANT_COLOR.watch}>
                     <QuadrantList
                       colorOf={fillOfFunc}
                       entries={lists.watch.slice(0, 5)}
@@ -1776,8 +1797,8 @@ export function InsightsView({
                 </div>
                 <div onMouseEnter={() => setLifted('underused')} onMouseLeave={() => setLifted(null)}>
                   <Panel
-                    title="Underused assets"
-                    sub="Trust ahead of power"
+                    title={QUADRANT_NAME.underused}
+                    sub={QUADRANT_GLOSS.underused}
                     accent={QUADRANT_COLOR.underused}
                   >
                     <QuadrantList
@@ -2238,6 +2259,41 @@ export function InsightsView({
                   text={null}
                   caption="A newer hire or a support function can sit here by role; anyone else may be an inclusion problem worth a conversation."
                 />
+                {signaturesFound ? (
+                  <Panel title="Where collaboration is not happening" sub="Three patterns of absence">
+                    {(
+                      [
+                        ['dominating', 'Depended on, not trusted', 'Control ahead of trust, and colleagues asking for more.'],
+                        ['unreliable', 'Quietly unreliable', 'Low on delivery and on being straightforward. A trust problem, not a power one.'],
+                        ['disconnected', 'Outside the network', 'Too few had a basis to judge. Connect, do not correct.'],
+                      ] as const
+                    ).map(([kind, title, note]) =>
+                      signaturesFound[kind].length === 0 ? null : (
+                        <div key={kind} className="ins-signature">
+                          <b>{title}</b>
+                          <span>{note}</span>
+                          <div className="insights-rows">
+                            {signaturesFound[kind].slice(0, 6).map((m) => (
+                              <button
+                                key={m.memberNo}
+                                type="button"
+                                className={`insights-row is-tappable is-stack${activeNo === m.memberNo ? ' is-active' : ''}`}
+                                {...personProps(m.memberNo, () => ({
+                                  title: m.name,
+                                  sub: m.func,
+                                  rows: [['Why', m.why]],
+                                }))}
+                              >
+                                <span className="insights-row-name">{m.name}</span>
+                                <span className="insights-row-meta">{m.why}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ),
+                    )}
+                  </Panel>
+                ) : null}
                 {periphery.members.length === 0 ? (
                   <Panel title="At the edge">
                     <p className="hint">

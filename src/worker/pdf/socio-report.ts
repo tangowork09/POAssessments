@@ -24,7 +24,8 @@ import type {
   SocioGroupReportPayload,
   SocioMemberReportPayload,
 } from '../../shared/types.js';
-import type { SocioBlockNetwork } from '../../shared/socio-scoring.js';
+import { influenceMix, signatures } from '../../shared/socio-scoring.js';
+import type { SignatureMember, SocioBlockNetwork } from '../../shared/socio-scoring.js';
 import { SOCIO_MAX_ANSWER, SOCIO_SCALE_LABELS } from '../../shared/socio.js';
 import type { EmbeddedImage } from './image.js';
 import { drawLogoLockup, drawRibbon } from './report.js';
@@ -368,10 +369,13 @@ function drawStatTiles(doc: PdfDoc, x: number, y: number, width: number, tiles: 
 
 function drawGroupChapters(ctx: Ctx, report: SocioGroupReportPayload): void {
   drawHowToRead(ctx, report);
+  // The design's own first group-level question, before any of the detail.
+  drawInfluenceMix(ctx, report);
   drawNetworks(ctx, report);
   drawAuthorityTrust(ctx, report);
   drawSupportGaps(ctx, report);
   drawFunctionSeams(ctx, report);
+  drawSignatures(ctx, report);
   // The structural chapters. Absent from reports generated before the findings
   // were stored with the scores, so the whole section is skipped rather than
   // printed empty — a heading over "no data" reads as a fault in the group.
@@ -726,6 +730,124 @@ function drawHowToRead(ctx: Ctx, report: SocioGroupReportPayload): void {
   ctx.y += 10;
 }
 
+/**
+ * How influence flows — enabling power against controlling power.
+ *
+ * The whole point of banding power-to/with apart from power-over is to be able
+ * to answer this in one sentence, so it is given a chapter of its own near the
+ * front rather than being left for a reader to work out from four densities.
+ */
+function drawInfluenceMix(ctx: Ctx, report: SocioGroupReportPayload): void {
+  const { doc } = ctx;
+  const mix = influenceMix(report.group);
+
+  ensure(ctx, 170);
+  sectionHead(ctx, 'How influence flows', 'Enabling power against control');
+
+  ctx.y = doc.paragraph(
+    'Power here is counted in two bands that are never added together. Enabling power is being sought out, relied on to read the organisation, able to unlock what somebody needs, or trusted to bring people with you. Controlling power is deference, gatekeeping, consequence and agenda-setting. A group can be influential through either.',
+    M.left,
+    ctx.y,
+    CONTENT_W,
+    { size: BODY.size, color: T.ink2, leading: BODY.leading },
+  ) + 14;
+
+  if (mix.share === null) {
+    doc.text(mix.verdict, M.left, ctx.y, { size: 8.8, color: T.ink4 });
+    ctx.y += 26;
+    return;
+  }
+
+  const h = 56;
+  ensure(ctx, h + 60);
+  const barW = CONTENT_W;
+  const enabW = Math.max(2, barW * mix.share);
+  doc.roundRect(M.left, ctx.y + 20, barW, 16, 8, T.surface2);
+  doc.roundRect(M.left, ctx.y + 20, enabW, 16, 8, T.good);
+  doc.text(`Enabling  ${mix.enabling}`, M.left, ctx.y + 12, { font: 'Helvetica-Bold', size: 8.6, color: T.good });
+  doc.textRight(`${mix.controlling}  Controlling`, M.left + CONTENT_W, ctx.y + 12, {
+    font: 'Helvetica-Bold',
+    size: 8.6,
+    color: T.warn,
+  });
+  ctx.y += h;
+
+  ensure(ctx, 44);
+  ctx.y = doc.paragraph(mix.verdict, M.left, ctx.y, CONTENT_W, { size: 9.2, color: T.ink, leading: 13.5 }) + 20;
+}
+
+/**
+ * The three ways non-collaboration shows up, each as a pattern of absence.
+ *
+ * Nobody was asked who they distrust, so none of this is a nomination: it is
+ * read off low ratings, missing ratings and the support gap. The three are
+ * kept apart because they call for opposite responses — the last one is a
+ * connection problem, not a conduct one.
+ */
+function drawSignatures(ctx: Ctx, report: SocioGroupReportPayload): void {
+  const { doc } = ctx;
+  const found = signatures(report.group);
+  const sections: { title: string; note: string; color: string; rows: SignatureMember[] }[] = [
+    {
+      title: 'Depended on, not trusted',
+      note: 'Control ahead of trust, and colleagues asking for more than they get.',
+      color: T.warn,
+      rows: found.dominating,
+    },
+    {
+      title: 'Quietly unreliable',
+      note: 'Low on delivery and on being straightforward to work with. A trust problem, not a power one.',
+      color: T.warn,
+      rows: found.unreliable,
+    },
+    {
+      title: 'Outside the network',
+      note: 'Too few colleagues had a basis to judge. Connect, do not correct.',
+      color: T.ink3,
+      rows: found.disconnected,
+    },
+  ];
+  if (sections.every((s) => s.rows.length === 0)) return;
+
+  ensure(ctx, 150);
+  sectionHead(ctx, 'Where collaboration is not happening', 'Three patterns of absence');
+
+  ctx.y = doc.paragraph(
+    'Nobody was asked to name who they avoid or distrust. These three readings are what a refusal to collaborate looks like in a positive-only instrument: ratings that stay low, colleagues who ask for more, and people nobody had a basis to rate at all.',
+    M.left,
+    ctx.y,
+    CONTENT_W,
+    { size: BODY.size, color: T.ink2, leading: BODY.leading },
+  ) + 14;
+
+  for (const section of sections) {
+    if (section.rows.length === 0) continue;
+    const rows = section.rows.slice(0, 6);
+    const h = 50 + rows.length * 24 + 6;
+    ensure(ctx, h + 12);
+    doc.roundRect(M.left, ctx.y, CONTENT_W, h, 7, T.surface);
+    doc.rect(M.left, ctx.y, 3, h, section.color);
+    doc.text(section.title, M.left + 14, ctx.y + 17, { font: 'Helvetica-Bold', size: 9.2, color: T.ink });
+    doc.text(section.note, M.left + 14, ctx.y + 30, { size: 7.8, color: T.ink3 });
+    let y = ctx.y + 50;
+    for (const r of rows) {
+      doc.text(`${r.name}${r.func ? ` · ${r.func}` : ''}`, M.left + 14, y, {
+        font: 'Helvetica-Bold',
+        size: 8.6,
+        color: T.ink,
+      });
+      doc.textRight(r.why, M.left + CONTENT_W - 14, y, { size: 7.8, color: T.ink2 });
+      y += 24;
+    }
+    ctx.y += h + 10;
+    if (section.rows.length > rows.length) {
+      doc.text(`and ${section.rows.length - rows.length} more`, M.left + 14, ctx.y, { size: 7.8, color: T.ink4 });
+      ctx.y += 14;
+    }
+  }
+  ctx.y += 10;
+}
+
 function drawNetworks(ctx: Ctx, report: SocioGroupReportPayload): void {
   const g = report.group;
 
@@ -847,10 +969,10 @@ function drawSupportGaps(ctx: Ctx, report: SocioGroupReportPayload): void {
   const gaps = report.group.supportGaps;
 
   ensure(ctx, 120);
-  sectionHead(ctx, 'Where more is wanted', 'The one statement where a high score is a request');
+  sectionHead(ctx, 'Where more is wanted', 'How many colleagues asked for more');
 
   ctx.y = doc.paragraph(
-    'Colleagues were asked whether they would like more support or cooperation than they currently get. A high figure here is not a verdict on the person named: it is most often a load problem, an unclear boundary, or a queue nobody owns.',
+    'Colleagues were asked whether they would like more support or cooperation than they currently get. The bar is how many asked — the measure the design calls for, since one person asking loudly is a different finding from eight asking steadily. A high figure is not a verdict on the person named: it is most often a load problem, an unclear boundary, or a queue nobody owns.',
     M.left,
     ctx.y,
     CONTENT_W,
@@ -868,11 +990,19 @@ function drawSupportGaps(ctx: Ctx, report: SocioGroupReportPayload): void {
   const barX = M.left + 170;
   const barW = RIGHT - 74 - barX;
 
+  // The bar is how many colleagues asked, which is the guide's measure; the
+  // mean beside it is how strongly they asked.
+  const mostWanters = Math.max(1, ...gaps.map((g) => g.wanters));
   for (const gp of gaps) {
     doc.text(truncate(gp.name, 'Helvetica', 8.8, 160), M.left, ctx.y, { size: 8.8, color: T.ink2 });
     doc.roundRect(barX, ctx.y - 1, barW, 8, 4, T.track);
-    doc.roundRect(barX, ctx.y - 1, Math.max(4, (barW * gp.mean) / SOCIO_MAX_ANSWER), 8, 4, T.warn);
-    doc.textRight(`${gp.mean.toFixed(2)}  (n=${gp.n})`, RIGHT, ctx.y, { size: 8, color: T.ink3 });
+    doc.roundRect(barX, ctx.y - 1, Math.max(4, (barW * gp.wanters) / mostWanters), 8, 4, T.warn);
+    doc.textRight(
+      `${gp.wanters} of ${gp.n} asked  ·  ${gp.mean.toFixed(2)}`,
+      RIGHT,
+      ctx.y,
+      { size: 8, color: T.ink3 },
+    );
     ctx.y += rowH;
   }
   ctx.y += 12;

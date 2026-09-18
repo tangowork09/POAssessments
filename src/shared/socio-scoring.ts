@@ -101,7 +101,11 @@ export interface SocioMemberResult {
   items: SocioItemStat[];
   blocks: SocioBlockStat[];
   /** Item 12, kept out of the blocks because a high score there is a deficit. */
-  supportGap: SocioStat & { band: SocioGapBand | null };
+  supportGap: SocioStat & {
+    /** How many colleagues asked for more, at or above the tie threshold. */
+    wanters: number;
+    band: SocioGapBand | null;
+  };
   /**
    * Power-over mean minus trust mean. Positive means the group falls in line
    * with this person more readily than it relies on them; negative is the
@@ -182,8 +186,11 @@ export interface SocioGroupResult {
   authorityWithoutTrust: { memberNo: number; name: string; gap: number }[];
   /** Largest negative gaps: relied on, without the leverage to act. */
   trustWithoutAuthority: { memberNo: number; name: string; gap: number }[];
-  /** Highest item-12 means: where the group asks for more than it gets. */
-  supportGaps: { memberNo: number; name: string; mean: number; n: number }[];
+  /**
+   * Where the group asks for more than it gets, ranked by how many people ask.
+   * `wanters` is the guide's support-gap in-degree; `mean` is how strongly.
+   */
+  supportGaps: { memberNo: number; name: string; wanters: number; mean: number; n: number }[];
   /** Function-to-function trust, for reading the seams between departments. */
   functionMatrix: SocioFunctionCell[];
   /** Distinct functions present on the roster, in roster order. */
@@ -330,6 +337,12 @@ export function scoreSocioCohort(
 
     const gapValues = received.map((c) => c.values.get(SOCIO_SUPPORT_GAP_ITEM)).filter(isNumber);
     const gapStat = stat(gapValues);
+    // The facilitator guide scores the support gap as an in-degree — "how many
+    // people want more from them" — not as an average. A mean rewards being
+    // asked by few people loudly over being asked by many: one colleague
+    // answering 5 outranks eight answering 4, which inverts "in demand but not
+    // delivering". The mean is kept beside it as the strength of the ask.
+    const gapWanters = gapValues.filter((v) => v >= tieThreshold).length;
 
     const powerOver = blocks.find((b) => b.blockKey === 'power_over')!.mean;
     const trust = blocks.find((b) => b.blockKey === 'trust')!.mean;
@@ -351,7 +364,11 @@ export function scoreSocioCohort(
       suppressed: coverage < opts.minRaters,
       items,
       blocks,
-      supportGap: { ...gapStat, band: gapStat.mean === null ? null : socioGapBandFor(gapStat.mean) },
+      supportGap: {
+        ...gapStat,
+        wanters: gapWanters,
+        band: gapStat.mean === null ? null : socioGapBandFor(gapStat.mean),
+      },
       authorityTrustGap: powerOver !== null && trust !== null ? round2(powerOver - trust) : null,
       given: {
         outDegree: gaveCells.length,
@@ -447,9 +464,15 @@ export function scoreSocioCohort(
     .slice(0, 5);
 
   const supportGaps = memberResults
-    .filter((r) => !r.suppressed && r.supportGap.mean !== null)
-    .map((r) => ({ memberNo: r.memberNo, name: r.name, mean: r.supportGap.mean!, n: r.supportGap.n }))
-    .sort((a, b) => b.mean - a.mean || a.memberNo - b.memberNo)
+    .filter((r) => !r.suppressed && r.supportGap.wanters > 0)
+    .map((r) => ({
+      memberNo: r.memberNo,
+      name: r.name,
+      wanters: r.supportGap.wanters,
+      mean: r.supportGap.mean ?? 0,
+      n: r.supportGap.n,
+    }))
+    .sort((a, b) => b.wanters - a.wanters || b.mean - a.mean || a.memberNo - b.memberNo)
     .slice(0, 5);
 
   // ---------------------------------------------------------- function seams
@@ -745,3 +768,135 @@ export function socioEdges(
   }
   return edges;
 }
+
+// ------------------------------------------------- the guide's two readings
+//
+// Both are derived from a scored cohort rather than from the raw responses, so
+// they are available for every report ever generated, not only ones scored
+// after they were written.
+
+export interface InfluenceMix {
+  /** Ties received on the enabling band, across the whole group. */
+  enabling: number;
+  /** Ties received on the controlling band. */
+  controlling: number;
+  /** enabling / (enabling + controlling), 2dp. Null when neither exists. */
+  share: number | null;
+  verdict: string;
+}
+
+/**
+ * How influence flows in this group — the facilitator guide's first
+ * group-level question.
+ *
+ * "A system where influence runs mainly through enabling power is
+ * collaborative; one where it runs through control is a domination culture."
+ * It is one number and one sentence, and it is the reading the whole
+ * power-to/power-over split exists to produce.
+ */
+export function influenceMix(group: SocioGroupResult): InfluenceMix {
+  const tiesOn = (key: string) => group.networks.find((n) => n.blockKey === key)?.ties ?? 0;
+  const enabling = tiesOn('power_to');
+  const controlling = tiesOn('power_over');
+  const total = enabling + controlling;
+  if (total === 0) {
+    return { enabling, controlling, share: null, verdict: 'Nobody is over the line on either kind of power yet.' };
+  }
+  const share = Math.round((enabling / total) * 100) / 100;
+  const pct = Math.round(share * 100);
+  if (share >= 0.65) {
+    return {
+      enabling,
+      controlling,
+      share,
+      verdict: `Influence here runs mainly through enabling power — ${pct}% of the power ties are people being sought out, unlocked or rallied rather than deferred to. That is the collaborative pattern.`,
+    };
+  }
+  if (share <= 0.45) {
+    return {
+      enabling,
+      controlling,
+      share,
+      verdict: `Influence here runs mainly through control — only ${pct}% of the power ties are enabling, the rest are deference, gatekeeping and agenda-setting. The model calls this a domination culture, whatever the org chart says.`,
+    };
+  }
+  return {
+    enabling,
+    controlling,
+    share,
+    verdict: `Enabling and controlling power are close to even here (${pct}% enabling). Influence is carried as much by position as by what people offer.`,
+  };
+}
+
+export type SignatureKind = 'dominating' | 'unreliable' | 'disconnected';
+
+export interface SignatureMember {
+  memberNo: number;
+  name: string;
+  func: string;
+  /** The figures behind the flag, already phrased. */
+  why: string;
+}
+
+/**
+ * The three non-collaborative signatures the guide names.
+ *
+ * Every one is a pattern of absence rather than a rejection: nobody is ever
+ * asked who they distrust, so these are read off low ratings, missing ratings
+ * and the support gap. They are deliberately not ranked against each other —
+ * "connect, don't correct" applies to the third and not to the first.
+ */
+export function signatures(group: SocioGroupResult): Record<SignatureKind, SignatureMember[]> {
+  const out: Record<SignatureKind, SignatureMember[]> = {
+    dominating: [],
+    unreliable: [],
+    disconnected: [],
+  };
+  const blockMean = (m: SocioMemberResult, key: string) =>
+    m.blocks.find((b) => b.blockKey === key)?.mean ?? null;
+
+  for (const m of group.members) {
+    // Disconnected is about reach, so it is the one signature that still
+    // applies to somebody whose profile was withheld for thin coverage.
+    if (m.coverage < group.minRaters) {
+      out.disconnected.push({
+        memberNo: m.memberNo,
+        name: m.name,
+        func: m.func,
+        why: `Rated by ${m.coverage} of the group, below the floor of ${group.minRaters}.`,
+      });
+      continue;
+    }
+    if (m.suppressed) continue;
+
+    const power = blockMean(m, 'power_over');
+    const trust = blockMean(m, 'trust');
+    if (power !== null && trust !== null && power > trust && m.supportGap.wanters > 0) {
+      out.dominating.push({
+        memberNo: m.memberNo,
+        name: m.name,
+        func: m.func,
+        why: `Power-over ${power.toFixed(2)} against trust ${trust.toFixed(2)}; ${m.supportGap.wanters} ${m.supportGap.wanters === 1 ? 'colleague wants' : 'colleagues want'} more.`,
+      });
+    }
+
+    const ease = blockMean(m, 'ease');
+    if (trust !== null && trust < SOCIO_MIXED_FLOOR && (ease === null || ease < SOCIO_MIXED_FLOOR)) {
+      out.unreliable.push({
+        memberNo: m.memberNo,
+        name: m.name,
+        func: m.func,
+        why: `Trust ${trust.toFixed(2)}${ease !== null ? `, ease ${ease.toFixed(2)}` : ''}.`,
+      });
+    }
+  }
+
+  const bySeverity = (a: SignatureMember, b: SignatureMember) => a.name.localeCompare(b.name);
+  out.dominating.sort(bySeverity);
+  out.unreliable.sort(bySeverity);
+  out.disconnected.sort(bySeverity);
+  return out;
+}
+
+/** Below this a band mean reads as "Mixed" rather than "Strong". */
+const SOCIO_MIXED_FLOOR = 3.5;

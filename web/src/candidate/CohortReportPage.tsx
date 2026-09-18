@@ -207,11 +207,11 @@ function GroupBody({ report }: { report: SocioGroupReportPayload }) {
                 <span className="co-track">
                   <span
                     className="co-fill"
-                    style={{ width: `${(s.mean / SOCIO_MAX_ANSWER) * 100}%`, background: '#B54708' }}
+                    style={{ width: `${(s.wanters / Math.max(1, s.n)) * 100}%`, background: '#B54708' }}
                   />
                 </span>
                 <span className="co-val">
-                  {s.mean.toFixed(2)} (n={s.n})
+                  {s.wanters} of {s.n} asked
                 </span>
               </li>
             ))}

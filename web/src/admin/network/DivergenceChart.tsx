@@ -1,5 +1,6 @@
 /**
- * The quadrant plot: everyone placed by trust received against power
+ * The quadrant plot: everyone placed by trust received against TOTAL power —
+ * enabling plus controlling, as the facilitator guide specifies
  * received, split on the two medians.
  *
  * The one insight whose graph is not the network map, and rightly so — the
@@ -37,11 +38,20 @@ export const QUADRANT_COLOR: Record<Quadrant, string> = {
   peripheral: '#5A6678',
 };
 
+/** The facilitator guide's own four archetypes, in its words. */
 export const QUADRANT_NAME: Record<Quadrant, string> = {
-  watch: 'Power without trust',
-  underused: 'Trusted, little power',
-  anchor: 'Trusted and powerful',
+  watch: 'Risk Zone',
+  underused: 'Trusted Advisors',
+  anchor: 'Collaborative Anchors',
   peripheral: 'Peripheral',
+};
+
+/** What each archetype means, for a legend or a report. */
+export const QUADRANT_GLOSS: Record<Quadrant, string> = {
+  watch: 'Influential but not trusted',
+  underused: 'Trusted but under-leveraged',
+  anchor: 'Trusted and influential',
+  peripheral: 'Few incoming ties; many blanks',
 };
 
 const CHART = { w: 1000, h: 580, l: 92, r: 26, t: 44, b: 72 };
@@ -213,7 +223,7 @@ export function DivergenceChart({
         transform="rotate(-90)"
         className="insights-quad-axis-label"
       >
-        Power received{normalised ? ' — per rater' : ' — ties'}
+        Total power received{normalised ? ' — per rater' : ' — ties'}
       </text>
 
       {/* Dots below the furniture: a name must never be printed over. */}
