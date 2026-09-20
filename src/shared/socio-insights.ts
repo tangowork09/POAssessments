@@ -13,8 +13,8 @@
  * authority-trust gaps and coverage lists stay where they were.
  */
 
-import { SOCIO_BLOCKS } from './socio.js';
-import { socioEdges, type SocioEdge } from './socio-scoring.js';
+import { SOCIO_BLOCKS, SOCIO_COVERT_POWER_ITEMS, SOCIO_ITEM_BY_NO } from './socio.js';
+import { concentrationOfRates, socioEdges, type SocioEdge } from './socio-scoring.js';
 import type { SocioMember, SocioResponseInput } from './socio-scoring.js';
 import {
   betweenness,
@@ -67,6 +67,24 @@ export interface SocioInsights {
     reliability: number | null;
     openness: number | null;
     gap: number | null;
+    verdict: string;
+  };
+  /**
+   * The covert half of power-over, read apart from the open half — the guide's
+   * "hidden imbalance no structure chart reveals".
+   *
+   * `concentration` is over the covert statements alone; `overt` is the same
+   * measure over the power-over band as a whole, so the two can be compared.
+   * The statements behind it are named because "covert" is a strong word and
+   * the reader is owed the wording it was read off.
+   */
+  covertPower: {
+    statements: string[];
+    ties: number;
+    density: number | null;
+    concentration: number | null;
+    overtConcentration: number | null;
+    holders: NamedScore[];
     verdict: string;
   };
 }
@@ -184,26 +202,84 @@ export function socioInsights(
       concentration: concentrationOf(edges, b.key, nodes),
     })),
     reliabilityVsOpenness: { reliability, openness, gap, verdict: verdictFor(gap) },
+    covertPower: (() => {
+      const covertTies = tiesFor(edges, COVERT_LENS);
+      const concentration = concentrationOf(edges, COVERT_LENS, nodes);
+      const overtConcentration = concentrationOf(edges, 'power_over', nodes);
+      return {
+        statements: SOCIO_COVERT_POWER_ITEMS.map((no) => SOCIO_ITEM_BY_NO[no]?.short ?? `Item ${no}`),
+        ties: covertTies.length,
+        density: densityFor(edges, COVERT_LENS),
+        concentration,
+        overtConcentration,
+        holders: rank(inDegree(covertTies, nodes), nameOf),
+        verdict: covertPowerVerdict(covertTies.length, concentration, overtConcentration),
+      };
+    })(),
   };
 }
 
 /**
  * How unevenly received ties are held under one lens, 0 (flat) to 1 (one
- * person holds every tie) — the same shortfall-from-even measure the group
- * result uses, recomputed here per lens rather than per block network.
+ * person holds every tie).
+ *
+ * This used to carry its own arithmetic — shortfall from the *mean*, over raw
+ * in-degree counts — while the scored group result measured shortfall from the
+ * *top*, over coverage-normalised tie rates. Both were printed under the word
+ * "Concentration", in the same PDF, and disagreed: 0.43 here against 0.75
+ * there on identical data. The formula now comes from the engine and the only
+ * thing left in this file is turning edges into the rates it takes.
+ *
+ * Rates, not counts: a person eight colleagues could rate and one only two
+ * colleagues could rate are not comparable on a count, and the lens denominator
+ * is the pairs that answered *this* lens.
  */
 function concentrationOf(
   edges: readonly SocioEdge[],
   blockKey: string,
   nodes: readonly number[],
 ): number | null {
-  const received = inDegree(tiesFor(edges, blockKey), nodes);
-  const counts = [...received.values()];
-  const total = counts.reduce((a, b) => a + b, 0);
-  if (total === 0 || counts.length < 2) return null;
-  const even = total / counts.length;
-  const shortfall = counts.reduce((a, c) => a + Math.max(0, even - c), 0);
-  return Math.round((shortfall / (total - even + shortfall || 1)) * 100) / 100;
+  const rated = new Map<number, number>();
+  const ties = new Map<number, number>();
+  for (const e of edges) {
+    const b = e.blocks[blockKey];
+    if (!b || b.n <= 0) continue;
+    rated.set(e.to, (rated.get(e.to) ?? 0) + 1);
+    if (b.tie) ties.set(e.to, (ties.get(e.to) ?? 0) + 1);
+  }
+  const rates: number[] = [];
+  for (const no of nodes) {
+    const n = rated.get(no) ?? 0;
+    if (n > 0) rates.push((ties.get(no) ?? 0) / n);
+  }
+  return concentrationOfRates(rates);
+}
+
+/** How many covert-power ties each person received, ranked. */
+const COVERT_LENS = 'covert_power';
+
+/**
+ * The guide's §5.4 warning, as a sentence.
+ *
+ * Concentrated power is not by itself a fault — a group can reasonably route
+ * authority through a few people. The finding is concentration in the half of
+ * power that no structure chart shows, which is why the covert figure is read
+ * against the power-over band as a whole rather than against a fixed line.
+ */
+export function covertPowerVerdict(ties: number, covert: number | null, overt: number | null): string {
+  if (ties === 0 || covert === null) {
+    return 'Nobody in this group was put over the line on the covert statements, so there is no hidden concentration to read.';
+  }
+  const held = covert >= 0.5;
+  if (overt !== null && covert >= overt + 0.1) {
+    return held
+      ? 'Agenda-setting and pre-wiring are held by markedly fewer people than open decision rights are. This is the imbalance the guide warns about: the half of power no structure chart shows is the more concentrated half.'
+      : 'Covert power sits in fewer hands than open power does. The gap is not yet wide, but it is pointing the wrong way — watch who is shaping issues before they reach the room.';
+  }
+  if (held) {
+    return 'Covert power is concentrated, but open decision rights are concentrated to a similar degree: influence in this group runs through a few people whichever way it is measured, rather than hiding in the informal half.';
+  }
+  return 'Shaping issues before they reach the room is spread across the group rather than held by a few. No hidden imbalance on this reading.';
 }
 
 /** Said as a sentence, because a gap of 0.18 is not a finding on its own. */

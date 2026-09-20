@@ -20,6 +20,8 @@
 import { TENURE_BANDS } from '../../../../src/shared/types.js';
 import type { CohortNetworkEdge, CohortRosterMember } from '../../../../src/shared/types.js';
 import { betweenness } from '../../../../src/shared/socio-network.js';
+import { concentrationOfRates, powerKindOf, powerKindReading } from '../../../../src/shared/socio-scoring.js';
+import type { PowerKind } from '../../../../src/shared/socio-scoring.js';
 import type {
   DirectedTie,
   SubgroupTieStats,
@@ -732,6 +734,33 @@ export function quadrantOf(p: DivergencePoint, m: Medians): Quadrant {
   if (influential) return 'watch';
   if (trusted) return 'underused';
   return 'peripheral';
+}
+
+/** What to call each kind of power on screen. */
+export const POWER_KIND_LABEL: Record<PowerKind, string> = {
+  bottleneck: 'Control, not enablement',
+  capable_expert: 'Enablement, not control',
+  mixed: 'Both kinds, evenly',
+};
+
+/**
+ * Which kind of power carries this person, from the two halves the chart
+ * already counted. Null when they are over the line on neither.
+ *
+ * The guide asks for this specifically inside the Risk Zone, where it decides
+ * the intervention — "high power-OVER = a coercive bottleneck (the priority for
+ * redesign); high power-TO but low trust = a capable expert who needs
+ * relational development — a different fix." It is computed for everyone
+ * because the same split reads usefully on an Anchor too, and the rule is the
+ * engine's so a dossier and a chart cannot disagree about it.
+ */
+export function riskKindOf(p: DivergencePoint): PowerKind | null {
+  return powerKindOf(p.enablingCount, p.controllingCount);
+}
+
+/** The guide's prescription for a kind, for the panel beside the chart. */
+export function riskKindFix(kind: PowerKind): string {
+  return powerKindReading(kind).fix;
 }
 
 export interface DivergenceEntry {
@@ -2178,8 +2207,9 @@ export function applyScope(
 /**
  * The engine's concentration, recomputed over a scope: coverage-normalised
  * tie rate per member (ties received under the lens over colleagues who rated
- * them under it), then the same shortfall-from-the-top ratio `concentrationOf`
- * uses server-side. Members nobody in scope rated are left out, as the engine
+ * them under it), then `concentrationOfRates` — the engine's own formula,
+ * imported rather than copied, because three hand-written copies of this is how
+ * the report came to print two different numbers under one word. Members nobody in scope rated are left out, as the engine
  * leaves out members with no tie rate. Null below two rated members.
  */
 export function scopedConcentration(
@@ -2201,11 +2231,7 @@ export function scopedConcentration(
     const n = rated.get(no) ?? 0;
     if (n > 0) rates.push((ties.get(no) ?? 0) / n);
   }
-  if (rates.length < 2) return null;
-  const max = Math.max(...rates);
-  const shortfall = rates.reduce((t, v) => t + (max - v), 0);
-  const maxShortfall = max * (rates.length - 1);
-  return maxShortfall > 0 ? Math.round((shortfall / maxShortfall) * 100) / 100 : 0;
+  return concentrationOfRates(rates);
 }
 
 // ------------------------------------------------------------ head-to-head

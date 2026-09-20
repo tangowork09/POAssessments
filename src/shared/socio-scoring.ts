@@ -20,6 +20,7 @@
 
 import {
   SOCIO_BLOCKS,
+  SOCIO_COVERT_POWER_ITEMS,
   SOCIO_ITEMS,
   SOCIO_MAX_ANSWER,
   SOCIO_MIN_ANSWER,
@@ -112,6 +113,12 @@ export interface SocioMemberResult {
    * reverse. null when either side has no ratings.
    */
   authorityTrustGap: number | null;
+  /**
+   * Which of the two power bands this person's incoming ties actually sit in.
+   * Null when they are over the line on neither. The guide reads this together
+   * with trust: it is what separates a bottleneck from an expert.
+   */
+  powerKind: PowerKind | null;
   /** How many colleagues this person rated, and how they rated them. */
   given: {
     outDegree: number;
@@ -182,8 +189,12 @@ export interface SocioGroupResult {
   isolates: { memberNo: number; name: string; func: string; coverage: number }[];
   /** Members too thinly rated to report on at all. */
   underCovered: { memberNo: number; name: string; func: string; coverage: number }[];
-  /** Largest positive authority-minus-trust gaps: complied with, not relied on. */
-  authorityWithoutTrust: { memberNo: number; name: string; gap: number }[];
+  /**
+   * Largest positive authority-minus-trust gaps: complied with, not relied on.
+   * `powerKind` says which half of power is doing it, because the guide's fix
+   * for the two halves is not the same fix.
+   */
+  authorityWithoutTrust: { memberNo: number; name: string; gap: number; powerKind: PowerKind | null }[];
   /** Largest negative gaps: relied on, without the leverage to act. */
   trustWithoutAuthority: { memberNo: number; name: string; gap: number }[];
   /**
@@ -206,6 +217,59 @@ export interface SocioGroupResult {
 }
 
 // ------------------------------------------------------------------ scoring
+
+/**
+ * Which kind of power carries a person — the guide's §5.2 split.
+ *
+ * "Split by kind of power: high power-OVER = a coercive bottleneck (the
+ * priority for redesign); high power-TO but low trust = a capable expert who
+ * needs relational development — a different fix."
+ *
+ * Two people can sit in the same corner of the Power x Trust map and need
+ * opposite interventions: one is an organisational problem, the other a
+ * personal-development one. Both halves of the split were already counted
+ * here; naming which is which is the whole point of banding the two kinds of
+ * power apart in the first place.
+ */
+export type PowerKind = 'bottleneck' | 'capable_expert' | 'mixed';
+
+/**
+ * How lopsided the two bands have to be before the split is called. Below it
+ * the honest answer is "both", and saying so beats picking the larger of two
+ * numbers that are barely apart.
+ */
+export const POWER_KIND_SHARE = 0.6;
+
+/** Null when the person is over the line on neither band: there is no kind to name. */
+export function powerKindOf(enabling: number, controlling: number): PowerKind | null {
+  const total = enabling + controlling;
+  if (total === 0) return null;
+  const enablingShare = enabling / total;
+  if (enablingShare >= POWER_KIND_SHARE) return 'capable_expert';
+  if (enablingShare <= 1 - POWER_KIND_SHARE) return 'bottleneck';
+  return 'mixed';
+}
+
+/** What to call each kind, and what the guide says to do about it. */
+export function powerKindReading(kind: PowerKind): { label: string; fix: string } {
+  switch (kind) {
+    case 'bottleneck':
+      return {
+        label: 'Control, not enablement',
+        fix: 'Deference, gatekeeping and agenda-setting carry this person rather than what they offer. Where trust is also low the guide calls this a coercive bottleneck and makes it the priority for redesign — the fix is to the decision rights, not to the person.',
+      };
+    case 'capable_expert':
+      return {
+        label: 'Enablement, not control',
+        fix: 'People seek this person out rather than having to go through them. Where trust is low alongside it, the guide reads a capable expert who needs relational development — a different fix entirely, and not an organisational one.',
+      };
+    case 'mixed':
+      return {
+        label: 'Both kinds, evenly',
+        fix: 'Enabling and controlling power are close to even for this person, so the guide\u2019s split does not resolve. Read the trust figure and the support gap before deciding which half to act on.',
+      };
+  }
+}
 
 export function socioBandFor(mean: number): SocioBand {
   if (mean < 2.5) return 'Low';
@@ -344,8 +408,10 @@ export function scoreSocioCohort(
     // delivering". The mean is kept beside it as the strength of the ask.
     const gapWanters = gapValues.filter((v) => v >= tieThreshold).length;
 
-    const powerOver = blocks.find((b) => b.blockKey === 'power_over')!.mean;
+    const powerOverBlock = blocks.find((b) => b.blockKey === 'power_over')!;
+    const powerOver = powerOverBlock.mean;
     const trust = blocks.find((b) => b.blockKey === 'trust')!.mean;
+    const enablingTies = blocks.find((b) => b.blockKey === 'power_to')!.ties;
 
     const gaveCells = givenBy.get(m.no) ?? [];
     const gaveValues: number[] = [];
@@ -370,6 +436,7 @@ export function scoreSocioCohort(
         band: gapStat.mean === null ? null : socioGapBandFor(gapStat.mean),
       },
       authorityTrustGap: powerOver !== null && trust !== null ? round2(powerOver - trust) : null,
+      powerKind: powerKindOf(enablingTies, powerOverBlock.ties),
       given: {
         outDegree: gaveCells.length,
         mean: givenMean,
@@ -380,19 +447,25 @@ export function scoreSocioCohort(
   });
 
   // ---------------------------------------------------------------- networks
-  const ratedPair = new Set<string>();
-  for (const c of cells) ratedPair.add(`${c.raterNo}>${c.targetNo}`);
-
   const networks: SocioBlockNetwork[] = SOCIO_BLOCKS.map((block) => {
     let ties = 0;
     const tieSet = new Set<string>();
+    // A pair belongs in this network's denominator only if the rater answered
+    // at least one of THIS block's statements about that colleague. Counting
+    // every rated pair instead — including pairs where only the trust columns
+    // were filled in — puts people in the bottom of the fraction who could
+    // never appear in the top, and biases every density downward.
+    const ratedHere = new Set<string>();
     for (const c of cells) {
       const v = rowMean(c, block.items);
-      if (v !== null && v >= tieThreshold) {
+      if (v === null) continue;
+      ratedHere.add(`${c.raterNo}>${c.targetNo}`);
+      if (v >= tieThreshold) {
         ties += 1;
         tieSet.add(`${c.raterNo}>${c.targetNo}`);
       }
     }
+    const ratedPairsHere = ratedHere.size;
 
     let mutualPairs = 0;
     let mutualWithAny = 0;
@@ -400,7 +473,9 @@ export function scoreSocioCohort(
     for (const m of members) {
       for (const o of members) {
         if (o.no <= m.no) continue;
-        if (!ratedPair.has(`${m.no}>${o.no}`) || !ratedPair.has(`${o.no}>${m.no}`)) continue;
+        // Same rule for reciprocity: "did they return it" is only a question
+        // where both of them answered these statements about each other.
+        if (!ratedHere.has(`${m.no}>${o.no}`) || !ratedHere.has(`${o.no}>${m.no}`)) continue;
         mutualPairs += 1;
         const tieAb = tieSet.has(`${m.no}>${o.no}`);
         const tieBa = tieSet.has(`${o.no}>${m.no}`);
@@ -431,11 +506,11 @@ export function scoreSocioCohort(
       short: block.short,
       color: block.color,
       ties,
-      ratedPairs: ratingsGiven,
-      density: ratingsGiven > 0 ? round2(ties / ratingsGiven) : null,
+      ratedPairs: ratedPairsHere,
+      density: ratedPairsHere > 0 ? round2(ties / ratedPairsHere) : null,
       mutualPairs,
       reciprocity: mutualWithAny > 0 ? round2(mutualWithBoth / mutualWithAny) : null,
-      concentration: concentrationOf(rates),
+      concentration: concentrationOfRates(rates),
       ranked,
     };
   });
@@ -451,7 +526,7 @@ export function scoreSocioCohort(
 
   const gaps = memberResults
     .filter((r) => !r.suppressed && r.authorityTrustGap !== null)
-    .map((r) => ({ memberNo: r.memberNo, name: r.name, gap: r.authorityTrustGap! }));
+    .map((r) => ({ memberNo: r.memberNo, name: r.name, gap: r.authorityTrustGap!, powerKind: r.powerKind }));
 
   const authorityWithoutTrust = gaps
     .filter((g) => g.gap > 0)
@@ -488,12 +563,12 @@ export function scoreSocioCohort(
     const to = byNo.get(c.targetNo)?.func || 'Unassigned';
     const v = rowMean(c, trustItems);
     if (v === null) continue;
-    push(buckets, `${from} ${to}`, v);
+    push(buckets, `${from}\u0000${to}`, v);
   }
   const functionMatrix: SocioFunctionCell[] = [];
   for (const from of functions) {
     for (const to of functions) {
-      const vals = buckets.get(`${from} ${to}`) ?? [];
+      const vals = buckets.get(`${from}\u0000${to}`) ?? [];
       functionMatrix.push({ from, to, trust: vals.length > 0 ? round2(mean(vals)) : null, n: vals.length });
     }
   }
@@ -553,8 +628,15 @@ function mean(values: readonly number[]): number {
  * How far a distribution sits from flat, on the same 0..1 scale whatever the
  * group size: the summed shortfall from the highest value, over the largest
  * shortfall a group of this size could produce.
+ *
+ * Exported because concentration is printed in more than one chapter of the
+ * report and on more than one screen, and it used to be written out separately
+ * in each place. Two of those copies measured the shortfall from the *top* and
+ * one from the *mean*, which are different questions — the same trust network
+ * read 0.75 in one chapter and 0.43 in another, and 0.50 where the other said
+ * "not enough data". There is now one definition and every caller uses it.
  */
-function concentrationOf(values: readonly number[]): number | null {
+export function concentrationOfRates(values: readonly number[]): number | null {
   if (values.length < 2) return null;
   const max = Math.max(...values);
   const shortfall = values.reduce((t, v) => t + (max - v), 0);
@@ -620,9 +702,9 @@ export function socioMemberSummary(m: SocioMemberResult, g: SocioGroupResult): s
   if (m.suppressed) {
     return (
       `${m.name} was rated by ${m.coverage} ${m.coverage === 1 ? 'colleague' : 'colleagues'}, below the ` +
-      `${g.minRaters}-rater floor this cohort reports at. No profile is shown: in a group this small, an ` +
-      'average of one or two responses is close enough to a quotation that reporting it would break the ' +
-      'confidentiality the exercise was run under.'
+      `${g.minRaters}-rater floor this cohort reports at. No profile is shown: with this few raters the ` +
+      'figures would reproduce what one colleague said rather than describe a pattern, which is the one ' +
+      'thing the exercise promised not to do.'
     );
   }
 
@@ -674,9 +756,10 @@ export interface SocioEdge {
   /**
    * Per-block means and tie flags. A block with no answers is absent.
    *
-   * Alongside the instrument's own blocks this carries two pseudo-blocks,
-   * `reliability` (item 8) and `openness` (item 9): single-item lenses onto
-   * the trust block rather than blocks in their own right.
+   * Alongside the instrument's own blocks this carries three pseudo-blocks:
+   * `reliability` (item 8) and `openness` (item 9), two single-item lenses onto
+   * the trust block, and `covert_power`, the hidden half of the power-over
+   * band. None of them are blocks in their own right.
    */
   blocks: Record<string, { mean: number; n: number; tie: boolean }>;
   /** Item 12, the deficit item, kept apart as everywhere else. */
@@ -738,20 +821,25 @@ export function socioEdges(
         assetN += n;
       }
 
-      // Two single-item lenses onto the trust block, not blocks of the
-      // instrument: reliability (item 8) and openness (item 9) are the two
-      // facets trust comes apart along, and the console lets a facilitator
-      // filter the map by either. They read the same cells the trust block
-      // already counted, so they are added after the asset totals are closed
-      // — counting them again would inflate the pair's overall mean — and the
-      // real `trust` block above is untouched.
-      for (const [key, itemNo] of [
-        ['reliability', SOCIO_RELIABILITY_ITEM],
-        ['openness', SOCIO_OPENNESS_ITEM],
+      // Lenses, not blocks of the instrument: each reads cells a real block
+      // has already counted, so all of them are added after the asset totals
+      // are closed — counting them again would inflate the pair's overall
+      // mean — and the real blocks above are untouched.
+      //
+      // reliability (item 8) and openness (item 9) are the two facets trust
+      // comes apart along. `covert_power` is the guide's §5.4 reading: the
+      // power-over statements whose every underlying criterion is one of the
+      // covert faces, which on the shipped form is item 7 alone — agenda-
+      // setting and pre-wiring, and not the veto rights an org chart shows.
+      for (const [key, itemNos] of [
+        ['reliability', [SOCIO_RELIABILITY_ITEM]],
+        ['openness', [SOCIO_OPENNESS_ITEM]],
+        ['covert_power', SOCIO_COVERT_POWER_ITEMS],
       ] as const) {
-        const v = bag.get(itemNo);
-        if (v === undefined) continue;
-        blocks[key] = { mean: v, n: 1, tie: v >= tieThreshold };
+        const vals = itemNos.map((no) => bag.get(no)).filter(isNumber);
+        if (vals.length === 0) continue;
+        const m = round2(vals.reduce((t, v) => t + v, 0) / vals.length);
+        blocks[key] = { mean: m, n: vals.length, tie: m >= tieThreshold };
       }
 
       const gapValue = bag.get(SOCIO_SUPPORT_GAP_ITEM);

@@ -16,6 +16,7 @@ import {
 } from '../src/shared/cohort-identity.js';
 import { roundName } from '../src/worker/lib/cohort.js';
 import { cohortPdfName } from '../src/worker/lib/cohort-report-render.js';
+import { SOCIO_DEFAULT_MIN_RATERS } from '../src/shared/socio.js';
 
 describe('cohortCreateSchema', () => {
   it('fills in the defaults a facilitator does not have to think about', () => {
@@ -23,7 +24,9 @@ describe('cohortCreateSchema', () => {
     expect(parsed).toEqual({
       name: 'Acme leadership',
       organisation: '',
-      minRaters: 3,
+      // Two is the guide's own rule as a number: below it a "mean" is one
+      // colleague's answer reproduced, which is the thing §6 forbids.
+      minRaters: SOCIO_DEFAULT_MIN_RATERS,
       tieThreshold: 4,
       minRatedTargets: 1,
     });

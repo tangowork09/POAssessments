@@ -59,6 +59,7 @@ import {
   type CohortReportRow,
 } from '../lib/cohort-report-render.js';
 import { ASSESSMENT_ID } from '../../shared/assessments.js';
+import { SOCIO_DEFAULT_MIN_RATERS } from '../../shared/socio.js';
 import { cohortIdentityMode } from '../../shared/cohort-identity.js';
 import { scoreSocioCohort, socioEdges } from '../../shared/socio-scoring.js';
 import type { CohortDetail, CohortNetwork, CohortRoundSummary, CohortSummary } from '../../shared/types.js';
@@ -1032,10 +1033,13 @@ cohortRoutes.post('/import', async (c) => {
 
   const id = newId('coh');
   const statements = [
+    // The rater floor is bound rather than left to the column default, so the
+    // import path and the create form start a cohort on the same number and
+    // there is one place to change it.
     c.env.DB.prepare(
-      `INSERT INTO cohorts (id, assessment_id, name, organisation, status)
-       VALUES (?1, ?2, ?3, ?4, 'draft')`,
-    ).bind(id, ASSESSMENT_ID.socio, name, organisation),
+      `INSERT INTO cohorts (id, assessment_id, name, organisation, status, min_raters)
+       VALUES (?1, ?2, ?3, ?4, 'draft', ?5)`,
+    ).bind(id, ASSESSMENT_ID.socio, name, organisation, SOCIO_DEFAULT_MIN_RATERS),
     c.env.DB.prepare('INSERT INTO cohort_rounds (id, cohort_id, no, label) VALUES (?1, ?2, 1, ?3)').bind(
       newId('crd'),
       id,

@@ -106,6 +106,9 @@ import {
   clusterView,
   concentrationReading,
   concentrationTable,
+  POWER_KIND_LABEL,
+  riskKindFix,
+  riskKindOf,
   divergenceMedians,
   divergencePoints,
   divergenceTable,
@@ -153,7 +156,9 @@ import {
   scopedConcentration,
   type InsightScope,
 } from './model.js';
+import { covertPowerVerdict } from '../../../../src/shared/socio-insights.js';
 import { influenceMix, signatures } from '../../../../src/shared/socio-scoring.js';
+import type { PowerKind } from '../../../../src/shared/socio-scoring.js';
 import type { DivergenceShare, PaneEdge } from './model.js';
 import {
   downloadInsightHtml,
@@ -227,6 +232,16 @@ const GROUPS: readonly TabGroupDef[] = [
   { no: 2, name: 'Relationships' },
   { no: 3, name: 'Whole network' },
 ];
+
+/**
+ * The covert half of power-over, as the map and the panels address it.
+ *
+ * A lens, not a block: it reads statements the power-over block has already
+ * counted, and exists so the guide's "hidden imbalance no structure chart
+ * reveals" can be read apart from open decision rights.
+ */
+const COVERT_LENS = 'covert_power';
+const COVERT_ACCENT = '#7A4DB8';
 
 const TABS: readonly TabDef[] = [
   { id: 'anchors', name: 'Anchors', group: 1, question: 'Who the group leans on' },
@@ -758,6 +773,23 @@ export function InsightsView({
     [medians, points],
   );
   const divergenceRows = useMemo(() => divergenceTable(points, medians), [medians, points]);
+  /**
+   * The Risk Zone, split the way the guide splits it: by which kind of power
+   * carries the person, because a gatekeeper and a capable expert nobody warms
+   * to sit in the same corner and need opposite things done about them.
+   */
+  const watchKinds = useMemo(() => {
+    const byKind = new Map<PowerKind, string[]>();
+    for (const row of divergenceRows) {
+      if (row.quadrant !== 'watch') continue;
+      const kind = riskKindOf(row);
+      if (kind === null) continue;
+      const names = byKind.get(kind);
+      if (names) names.push(nameOf(row.no));
+      else byKind.set(kind, [nameOf(row.no)]);
+    }
+    return [...byKind.entries()].map(([kind, names]) => ({ kind, names }));
+  }, [divergenceRows, nameOf]);
   const [lifted, setLifted] = useState<'watch' | 'underused' | null>(null);
 
   // ---- 3 bridges
@@ -954,12 +986,21 @@ export function InsightsView({
       [
         { key: TRUST_LENS, name: 'Trust', color: TRUST_ACCENT },
         { key: POWER_LENS, name: 'Power over', color: POWER_ACCENT },
+        // The guide's §5.4 warning is specifically about the covert half:
+        // "especially covert power-over ('sets the agenda', 'works behind the
+        // scenes')". Concentration across the whole band cannot answer it —
+        // a formal veto right is on the org chart and discussable, and
+        // pre-meeting agenda-shaping is neither.
+        { key: COVERT_LENS, name: 'Hidden power', color: COVERT_ACCENT },
       ].map((l) => ({
         ...l,
         density: lensDensity(edges, l.key, cut),
-        concentration: whole
-          ? blockConcentration(net.group?.networks, l.key)
-          : scopedConcentration(memberNos, edges, l.key, cut),
+        // The covert lens has no block of its own in the scored result, so it
+        // is always computed from the edges — same formula either way.
+        concentration:
+          whole && l.key !== COVERT_LENS
+            ? blockConcentration(net.group?.networks, l.key)
+            : scopedConcentration(memberNos, edges, l.key, cut),
       })),
     [cut, edges, memberNos, net.group, whole],
   );
@@ -971,6 +1012,17 @@ export function InsightsView({
     () => concentrationTable(memberNos, edges, POWER_LENS, cut),
     [cut, edges, memberNos],
   );
+  /**
+   * The guide's §5.4 sentence, said the same way on screen as in the report:
+   * concentration in the informal half of power, read against the formal half
+   * rather than against a fixed line, because someone has to set an agenda and
+   * the finding is about how few people do it.
+   */
+  const covertVerdict = useMemo(() => {
+    const covert = spread.find((l) => l.key === COVERT_LENS);
+    const overt = spread.find((l) => l.key === POWER_LENS);
+    return covertPowerVerdict(covert?.density.ties ?? 0, covert?.concentration ?? null, overt?.concentration ?? null);
+  }, [spread]);
   const hubs = useMemo(() => topDecile(trustIn, 0.1), [trustIn]);
   /**
    * A contour around "the few hands" — the same hull machinery the clusters
@@ -1834,6 +1886,25 @@ export function InsightsView({
                       funcOf={funcOf}
                       personProps={personProps}
                     />
+                    {/* The guide splits this corner in two and prescribes
+                        opposite fixes for the halves, so the list alone is a
+                        flag with no action attached. Named per person, because
+                        a corner can hold one of each. */}
+                    {watchKinds.length > 0 ? (
+                      <div className="ins-kinds">
+                        {watchKinds.map((k) => (
+                          <div className="ins-kind-row" key={k.kind}>
+                            <p className="ins-kind-head">
+                              <span className={k.kind === 'bottleneck' ? 'ins-kind is-control' : 'ins-kind'}>
+                                {POWER_KIND_LABEL[k.kind]}
+                              </span>
+                              <span className="ins-kind-who">{joinNames(k.names)}</span>
+                            </p>
+                            <p className="ins-panel-foot">{riskKindFix(k.kind)}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                   </Panel>
                 </div>
                 <div onMouseEnter={() => setLifted('underused')} onMouseLeave={() => setLifted(null)}>
@@ -1868,7 +1939,8 @@ export function InsightsView({
                   sub: `${funcOf(r.no)} · ${QUADRANT_NAME[r.quadrant]}`,
                   rows: [
                     ['Trust ties received', String(r.trustCount)],
-                    ['Power-over ties received', String(r.powerCount)],
+                    ['Power ties received', String(r.powerCount)],
+                    ['Enabling · controlling', `${r.enablingCount} · ${r.controllingCount}`],
                   ],
                 })}
                 empty="Nobody to place yet."
@@ -1904,6 +1976,29 @@ export function InsightsView({
                         {QUADRANT_NAME[r.quadrant]}
                       </span>
                     ),
+                  },
+                  {
+                    // The guide reads the Risk Zone by kind of power, because
+                    // the fix for a gatekeeper is not the fix for an expert
+                    // nobody warms to. Shown for everyone: the same split is
+                    // worth knowing about an Anchor too.
+                    key: 'kind',
+                    head: 'Kind of power',
+                    note: 'which half carries them',
+                    width: 190,
+                    sort: (a, b) =>
+                      (riskKindOf(a) ? POWER_KIND_LABEL[riskKindOf(a)!] : '').localeCompare(
+                        riskKindOf(b) ? POWER_KIND_LABEL[riskKindOf(b)!] : '',
+                      ),
+                    cell: (r) => {
+                      const kind = riskKindOf(r);
+                      if (kind === null) return <span className="ins-muted">—</span>;
+                      return (
+                        <span className={kind === 'bottleneck' ? 'ins-kind is-control' : 'ins-kind'}>
+                          {POWER_KIND_LABEL[kind]}
+                        </span>
+                      );
+                    },
                   },
                 ]}
               />
@@ -2918,6 +3013,7 @@ export function InsightsView({
                         />
                       </div>
                     </div>
+                    {l.key === COVERT_LENS ? <p className="ins-panel-foot">{covertVerdict}</p> : null}
                   </Panel>
                 ))}
                 <Panel title="How few hold half">

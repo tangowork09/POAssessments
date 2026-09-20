@@ -793,7 +793,7 @@ function ReportsPanel({
     <section className="card">
       <CardHead
         title="Reports"
-        sub={`One group report plus one per member. A member rated by fewer than ${cohort.minRaters} colleagues is withheld rather than reported — an average of one or two responses in a named group identifies who gave them.`}
+        sub={`One group report plus one per member. A member rated by fewer than ${cohort.minRaters} colleagues is withheld rather than reported — below that the figures reproduce what one colleague said instead of describing a pattern.`}
         aside={
           <button
             className="btn btn-primary btn-sm"

@@ -239,12 +239,24 @@ export const SOCIO_TIE_THRESHOLD = 4;
 
 /**
  * How many raters must have rated a person before that person gets an
- * individual report. Below it their profile is one or two colleagues' opinions
- * wearing the authority of an average, and — since the group is small and named
- * — a suppressed cell is the only thing standing between an "aggregate" and a
- * quotation. Overridable per cohort.
+ * individual report.
+ *
+ * Two, because that is where the guide's own rule bites and not a step beyond
+ * it. Section 6 asks for one thing: "report only patterns, never who said what
+ * about whom". With a single rater there is no pattern to report — the printed
+ * mean *is* that colleague's answer, reproduced exactly, and in a small named
+ * group the person can usually work out whose it was. At two the figure is an
+ * aggregate and neither answer can be recovered from it.
+ *
+ * It used to be three, which withheld profiles the guide would have allowed:
+ * the guide expects individuals to be able to learn their own reading in a
+ * coaching setting, and a floor set for comfort rather than for confidentiality
+ * takes that away from thinly-connected people — exactly the ones a
+ * facilitator most needs to talk to. Raise it per cohort where the group is
+ * small enough that two raters would still be identifiable; the setting
+ * accepts anything from 1 to 50.
  */
-export const SOCIO_DEFAULT_MIN_RATERS = 3;
+export const SOCIO_DEFAULT_MIN_RATERS = 2;
 
 // ------------------------------------------------------------- answer coding
 
@@ -275,3 +287,273 @@ export function decodeCell(no: number): { memberNo: number; itemNo: number } {
 export function cellsForMember(memberNo: number): number[] {
   return SOCIO_ITEMS.map((i) => cellNo(memberNo, i.no));
 }
+
+// --------------------------------------------------- the guide's 19 criteria
+//
+// The shipped instrument is the client's 12-item workbook, which merges pairs
+// of the facilitator guide's nineteen criteria into single statements. The
+// merge is the client's, not ours, and every one of the nineteen survives
+// inside it — but the guide also tags each criterion with two things the
+// merged wording throws away: which *face* of power it samples (visible,
+// hidden, invisible) and which base or dimension it rests on.
+//
+// Section 5.4 of the guide needs the first of those. "If a few leaders hold
+// most incoming power ties — especially covert power-over ('sets the agenda',
+// 'works behind the scenes') — you have a hidden imbalance no structure chart
+// reveals." Without visibility recorded somewhere, covert power cannot be read
+// apart from the veto rights an org chart already shows.
+//
+// So the nineteen are carried here in full, each pointing at the shipped item
+// that absorbed it. Nothing scores off this table directly; it is the source
+// the visibility lenses and the item documentation derive from, and the place
+// the mapping can be checked against the guide by a human or a test.
+
+/** The three expressions of power the instrument samples. Power-within is out of scope. */
+export type PowerExpression = 'power_to' | 'power_with' | 'power_over';
+
+/** Lukes' faces, as the guide's Visibility column names them. */
+export type PowerVisibility = 'visible' | 'hidden' | 'invisible';
+
+/** What a criterion belongs to, above the level of an individual block. */
+export type CriterionFamily = PowerExpression | 'trust' | 'overall';
+
+export interface SocioCriterion {
+  /** 1-based, in the guide's own table order. */
+  no: number;
+  /** The guide's Label column. */
+  label: string;
+  /** The guide's Statement column, verbatim. */
+  statement: string;
+  family: CriterionFamily;
+  /**
+   * The guide's Visibility column. Null for trust and overall criteria, where
+   * the guide prints an em dash: visibility is a property of power.
+   */
+  visibility: readonly PowerVisibility[] | null;
+  /** The guide's "Base / dimension" column, verbatim. */
+  base: string;
+  /** The shipped item that carries this criterion. */
+  itemNo: number;
+}
+
+export const SOCIO_CRITERIA: readonly SocioCriterion[] = [
+  {
+    no: 1,
+    label: 'Expert judgment',
+    statement: "I seek out this person's judgment on tough technical/professional problems.",
+    family: 'power_to',
+    visibility: ['visible'],
+    base: 'Expert · personal',
+    itemNo: 1,
+  },
+  {
+    no: 2,
+    label: 'Reads the org',
+    statement: "I rely on this person to know what's really going on across the organisation.",
+    family: 'power_to',
+    visibility: ['hidden'],
+    base: 'Informational · personal',
+    itemNo: 4,
+  },
+  {
+    no: 3,
+    label: 'Unlocks resources',
+    statement: 'This person can unlock resources, budget or priority I depend on.',
+    family: 'power_to',
+    visibility: ['visible'],
+    base: 'Reward · positional',
+    itemNo: 2,
+  },
+  {
+    no: 4,
+    label: 'Respected view',
+    statement: "I adopt this person's view out of the respect I have for them.",
+    family: 'power_with',
+    visibility: ['visible'],
+    base: 'Referent · personal',
+    itemNo: 1,
+  },
+  {
+    no: 5,
+    label: 'Rallies others',
+    statement: 'This person brings people together and builds shared commitment across teams.',
+    family: 'power_with',
+    visibility: ['visible'],
+    base: 'Mobilising · personal',
+    itemNo: 3,
+  },
+  {
+    no: 6,
+    label: 'Route through',
+    statement: 'To move things across departments, I route them through this person.',
+    family: 'power_with',
+    visibility: ['hidden'],
+    base: 'Brokerage · network',
+    itemNo: 4,
+  },
+  {
+    no: 7,
+    label: 'Others fall in line',
+    statement: 'When this person takes a firm position, others tend to fall in line with it.',
+    family: 'power_over',
+    visibility: ['visible'],
+    base: 'Deference / dominance',
+    itemNo: 5,
+  },
+  {
+    no: 8,
+    label: 'Approves or blocks',
+    statement: 'This person can approve or hold up an initiative largely on their own.',
+    family: 'power_over',
+    visibility: ['visible'],
+    base: 'Gatekeeping · positional',
+    itemNo: 6,
+  },
+  {
+    no: 9,
+    label: 'Carries consequences',
+    statement: 'Their backing or disapproval has real consequences for how things go for people.',
+    family: 'power_over',
+    visibility: ['visible'],
+    base: 'Reward / coercive · positional',
+    itemNo: 6,
+  },
+  {
+    no: 10,
+    label: 'Sets the agenda',
+    statement: 'This person shapes which issues get attention and which quietly slip off.',
+    family: 'power_over',
+    visibility: ['hidden'],
+    base: 'Agenda-setting (2nd face)',
+    itemNo: 7,
+  },
+  {
+    no: 11,
+    label: 'Works behind scenes',
+    statement: 'Many decisions are shaped by this person informally, before they reach the room.',
+    family: 'power_over',
+    visibility: ['hidden', 'invisible'],
+    base: 'Pre-wiring / coalitions · personal',
+    itemNo: 7,
+  },
+  {
+    no: 12,
+    label: 'On time',
+    statement: 'I get what I need from this person on time, as promised.',
+    family: 'trust',
+    visibility: null,
+    base: 'Reliability',
+    itemNo: 8,
+  },
+  {
+    no: 13,
+    label: 'Quality to build on',
+    statement: 'I trust their work enough to build on it without re-checking.',
+    family: 'trust',
+    visibility: null,
+    base: 'Ability (cognitive)',
+    itemNo: 8,
+  },
+  {
+    no: 14,
+    label: 'Keeps their word',
+    statement: 'This person does what they say, even when inconvenient.',
+    family: 'trust',
+    visibility: null,
+    base: 'Integrity',
+    itemNo: 10,
+  },
+  {
+    no: 15,
+    label: 'Looks out for me',
+    statement: 'They look out for my interests and the shared goal, not just their own.',
+    family: 'trust',
+    visibility: null,
+    base: 'Benevolence',
+    itemNo: 9,
+  },
+  {
+    no: 16,
+    label: 'Safe to be open',
+    statement: 'I could admit a mistake or ask for help without fear.',
+    family: 'trust',
+    visibility: null,
+    base: 'Affective / vulnerability',
+    itemNo: 9,
+  },
+  {
+    no: 17,
+    label: 'Shares openly',
+    statement: 'They share information openly, including difficult news, early.',
+    family: 'trust',
+    visibility: null,
+    base: 'Openness / integrity',
+    itemNo: 10,
+  },
+  {
+    no: 18,
+    label: 'Easy to work with',
+    statement: 'Working with this person is straightforward and productive.',
+    family: 'overall',
+    visibility: null,
+    base: 'Overall trust',
+    itemNo: 11,
+  },
+  {
+    no: 19,
+    label: 'Wish for more support',
+    statement: "I'd like more support or cooperation from them than I get.",
+    family: 'overall',
+    visibility: null,
+    base: 'Support gap',
+    itemNo: 12,
+  },
+];
+
+/** The guide criteria a shipped item absorbed, in guide order. */
+export function criteriaForItem(itemNo: number): SocioCriterion[] {
+  return SOCIO_CRITERIA.filter((c) => c.itemNo === itemNo);
+}
+
+/**
+ * Every face of power a shipped item samples, deduplicated.
+ *
+ * Empty for trust and overall items, which the guide leaves unlabelled. A
+ * merged item can span two faces — item 7 carries one hidden criterion and one
+ * the guide files as "Hidden / invisible" — so this is a set, not a value.
+ */
+export function itemVisibility(itemNo: number): PowerVisibility[] {
+  const seen: PowerVisibility[] = [];
+  for (const c of criteriaForItem(itemNo)) {
+    for (const v of c.visibility ?? []) if (!seen.includes(v)) seen.push(v);
+  }
+  return seen;
+}
+
+/**
+ * True when every criterion behind an item is one of the covert faces.
+ *
+ * Covert, not merely "contains something hidden": an item that merges a
+ * visible criterion with a hidden one describes power that is at least partly
+ * on show, and counting it as covert would let a plain veto right in through
+ * the back door.
+ */
+export function isCovertItem(itemNo: number): boolean {
+  const vis = criteriaForItem(itemNo).map((c) => c.visibility);
+  if (vis.length === 0 || vis.some((v) => v === null || v.length === 0)) return false;
+  return vis.every((v) => v!.every((face) => face === 'hidden' || face === 'invisible'));
+}
+
+/**
+ * The covert half of the power-over band — the guide's §5.4 reading.
+ *
+ * Derived rather than written down, so that if the client ever re-splits the
+ * instrument this follows the criteria table instead of silently pointing at
+ * the wrong column. On the shipped 12-item form it resolves to item 7,
+ * "shapes which issues get attention, often informally and before they reach
+ * the room", which is exactly the guide's "sets the agenda" and "works behind
+ * the scenes" and nothing else.
+ */
+export const SOCIO_COVERT_POWER_ITEMS: readonly number[] = SOCIO_ITEMS.filter(
+  (i) => i.blockKey === 'power_over' && isCovertItem(i.no),
+).map((i) => i.no);

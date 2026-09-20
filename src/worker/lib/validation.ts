@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { AGE_MAX, AGE_MIN, EXPERIENCE_MAX, EXPERIENCE_MIN, TENURE_BANDS } from '../../shared/types.js';
+import { SOCIO_DEFAULT_MIN_RATERS } from '../../shared/socio.js';
 
 const trimmed = (max: number) => z.string().trim().max(max);
 
@@ -213,7 +214,7 @@ const cohortFields = {
 export const cohortCreateSchema = z.object({
   name: cohortFields.name,
   organisation: cohortFields.organisation.default(''),
-  minRaters: cohortFields.minRaters.default(3),
+  minRaters: cohortFields.minRaters.default(SOCIO_DEFAULT_MIN_RATERS),
   tieThreshold: cohortFields.tieThreshold.default(4),
   minRatedTargets: cohortFields.minRatedTargets.default(1),
 });

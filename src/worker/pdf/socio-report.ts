@@ -24,7 +24,8 @@ import type {
   SocioGroupReportPayload,
   SocioMemberReportPayload,
 } from '../../shared/types.js';
-import { influenceMix, signatures } from '../../shared/socio-scoring.js';
+import { influenceMix, powerKindReading, signatures } from '../../shared/socio-scoring.js';
+import { itemVisibility } from '../../shared/socio.js';
 import type { SignatureMember, SocioBlockNetwork } from '../../shared/socio-scoring.js';
 import { SOCIO_MAX_ANSWER, SOCIO_SCALE_LABELS } from '../../shared/socio.js';
 import type { EmbeddedImage } from './image.js';
@@ -310,7 +311,9 @@ function statTiles(report: CohortReportPayload, accent: string): Tile[] {
       {
         label: 'Trust concentration',
         value: trust?.concentration === null || trust?.concentration === undefined ? '—' : trust.concentration.toFixed(2),
-        note: '0 = spread, 1 = one person',
+        // Short enough to survive the tile width: the long form truncated to
+        // "0 = spread, 1 = one per…", which reads as a rendering fault.
+        note: '0 spread, 1 one person',
         color: T.ink2,
       },
     ];
@@ -397,6 +400,7 @@ function drawInsightChapters(ctx: Ctx, report: SocioGroupReportPayload): void {
   drawUnreturned(ctx, ins, report.group.tieThreshold);
   drawSilos(ctx, ins);
   drawSpread(ctx, ins);
+  drawCovertPower(ctx, ins);
   drawReliabilityOpenness(ctx, ins);
 }
 
@@ -644,6 +648,81 @@ function drawSpread(ctx: Ctx, ins: SocioInsights): void {
   ctx.y += h + 20;
 }
 
+/**
+ * The half of power no org chart shows — the guide's §5.4 warning.
+ *
+ * "If a few leaders hold most incoming power ties — especially covert
+ * power-over ('sets the agenda', 'works behind the scenes') — you have a
+ * hidden imbalance no structure chart reveals." Concentration across the whole
+ * power-over band cannot answer that, because a formal veto right is visible
+ * and discussable in a way that pre-meeting agenda-shaping is not. So the
+ * covert statements are read on their own and against the band as a whole.
+ */
+function drawCovertPower(ctx: Ctx, ins: SocioInsights): void {
+  const { doc } = ctx;
+  const c = ins.covertPower;
+  if (!c || c.statements.length === 0) return;
+
+  ensure(ctx, 170);
+  sectionHead(ctx, 'Hidden power', 'Influence exercised before the room');
+
+  ctx.y = doc.paragraph(
+    `Some power is on show: who signs, who can hold an initiative up. Some is not: who decides which issues get attention, and who has shaped a decision informally before it reaches the room. Only the second kind is invisible to a structure chart, and it is read here on its own — off "${c.statements.join('" and "')}" — rather than averaged in with open decision rights.`,
+    M.left,
+    ctx.y,
+    CONTENT_W,
+    { size: BODY.size, color: T.ink2, leading: BODY.leading },
+  ) + 14;
+
+  const tiles: Tile[] = [
+    { label: 'Covert ties', value: String(c.ties), note: 'people put over the line', color: T.warn },
+    { label: 'Density', value: pct(c.density), note: 'of the pairs asked', color: T.ink2 },
+    {
+      label: 'Covert concentration',
+      value: c.concentration === null ? '—' : c.concentration.toFixed(2),
+      note: '0 spread, 1 one person',
+      color: T.ink2,
+    },
+    {
+      label: 'All power-over',
+      value: c.overtConcentration === null ? '—' : c.overtConcentration.toFixed(2),
+      note: 'for the whole band',
+      color: T.ink2,
+    },
+  ];
+  ensure(ctx, 70);
+  ctx.y = drawStatTiles(doc, M.left, ctx.y, CONTENT_W, tiles) + 14;
+
+  if (c.holders.length > 0) {
+    const rows = c.holders.slice(0, 6);
+    const h = 36 + rows.length * 18;
+    ensure(ctx, h + 12);
+    doc.roundRect(M.left, ctx.y, CONTENT_W, h, 7, T.surface);
+    doc.text('Who holds it', M.left + 14, ctx.y + 17, { font: 'Helvetica-Bold', size: 8.8, color: T.ink });
+    let y = ctx.y + 36;
+    for (const r of rows) {
+      doc.text(`${r.name}${r.func ? ` · ${r.func}` : ''}`, M.left + 14, y, { size: 8.6, color: T.ink2 });
+      doc.textRight(
+        `${r.value} ${r.value === 1 ? 'colleague' : 'colleagues'}`,
+        M.left + CONTENT_W - 14,
+        y,
+        { font: 'Helvetica-Bold', size: 8.4, color: T.ink },
+      );
+      y += 18;
+    }
+    ctx.y += h + 12;
+  }
+
+  ensure(ctx, 46);
+  ctx.y = doc.paragraph(c.verdict, M.left, ctx.y, CONTENT_W, { size: 9.2, color: T.ink, leading: 13.5 }) + 8;
+  drawNote(
+    ctx,
+    'Not an accusation',
+    'Shaping an issue before a meeting is ordinary leadership, and someone has to set an agenda. The finding is about concentration, not conduct: it matters when the informal half of power sits in markedly fewer hands than the formal half, because that is the half nobody can point at on a chart.',
+  );
+  ctx.y += 10;
+}
+
 function drawReliabilityOpenness(ctx: Ctx, ins: SocioInsights): void {
   const { doc } = ctx;
   const r = ins.reliabilityVsOpenness;
@@ -698,7 +777,15 @@ function drawHowToRead(ctx: Ctx, report: SocioGroupReportPayload): void {
   ) + 14;
 
   for (const block of report.blocks) {
-    const itemLines = report.items.filter((i) => block.items.includes(i.no)).map((i) => i.short);
+    // Power items carry their face — visible, hidden, or both — because the
+    // guide's whole warning about concentration turns on which face it is, and
+    // a reader who meets "Hidden power" later is owed the wording it came from.
+    const itemLines = report.items
+      .filter((i) => block.items.includes(i.no))
+      .map((i) => {
+        const faces = itemVisibility(i.no);
+        return faces.length > 0 ? `${i.short} (${faces.join('/')})` : i.short;
+      });
     const h = 44;
     ensure(ctx, h + 10);
     doc.roundRect(M.left, ctx.y, CONTENT_W, h, 6, T.surface);
@@ -962,6 +1049,64 @@ function drawAuthorityTrust(ctx: Ctx, report: SocioGroupReportPayload): void {
   });
 
   ctx.y += h + 20;
+  drawPowerKindSplit(ctx, report);
+}
+
+/**
+ * The guide's §5.2 instruction, which the two columns above cannot carry on
+ * their own: "split by kind of power".
+ *
+ * A person colleagues comply with more than they rely on is either a
+ * gatekeeper or an expert nobody warms to, and the guide prescribes opposite
+ * responses — redesign the decision rights, or develop the relationships. The
+ * two used to print identically, which made the list a flag with no action
+ * attached to it.
+ */
+function drawPowerKindSplit(ctx: Ctx, report: SocioGroupReportPayload): void {
+  const { doc } = ctx;
+  const named = report.group.authorityWithoutTrust.filter((e) => e.powerKind !== null);
+  if (named.length === 0) return;
+
+  const kinds = [...new Set(named.map((e) => e.powerKind!))];
+  const rowsH = 34 + named.length * 18;
+  const notesH = kinds.length * 46;
+  ensure(ctx, rowsH + notesH + 20);
+
+  doc.text('Which kind of power is doing it', M.left, ctx.y, {
+    font: 'Helvetica-Bold',
+    size: 9.6,
+    color: T.ink,
+  });
+  ctx.y += 18;
+
+  for (const e of named) {
+    const reading = powerKindReading(e.powerKind!);
+    doc.text(truncate(e.name, 'Helvetica-Bold', 8.8, 200), M.left + 14, ctx.y, {
+      font: 'Helvetica-Bold',
+      size: 8.8,
+      color: T.ink,
+    });
+    doc.textRight(reading.label, M.left + CONTENT_W - 14, ctx.y, {
+      size: 8.4,
+      color: e.powerKind === 'bottleneck' ? T.warn : T.ink2,
+    });
+    ctx.y += 18;
+  }
+  ctx.y += 8;
+
+  for (const kind of kinds) {
+    const reading = powerKindReading(kind);
+    ensure(ctx, 52);
+    const start = ctx.y;
+    const end = doc.paragraph(reading.fix, M.left + 16, start + 12, CONTENT_W - 30, {
+      size: 8.4,
+      color: T.ink2,
+      leading: 12,
+    });
+    doc.rect(M.left, start, 2, end - start + 10, kind === 'bottleneck' ? T.warn : T.line);
+    ctx.y = end + 14;
+  }
+  ctx.y += 6;
 }
 
 function drawSupportGaps(ctx: Ctx, report: SocioGroupReportPayload): void {

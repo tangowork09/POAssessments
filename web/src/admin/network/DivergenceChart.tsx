@@ -1,7 +1,13 @@
 /**
- * The quadrant plot: everyone placed by trust received against TOTAL power —
- * enabling plus controlling, as the facilitator guide specifies
- * received, split on the two medians.
+ * The quadrant plot: everyone placed by TOTAL power received — enabling plus
+ * controlling, as the facilitator guide specifies — against trust received,
+ * split on the two medians.
+ *
+ * Power runs across and trust runs up, which is the guide's own orientation.
+ * It used to be drawn the other way round: the same four boxes, the same four
+ * names, everyone in the same one — but a facilitator holding the printed
+ * guide beside the screen was reading a mirrored picture, and the two-second
+ * doubt that causes is not worth the axis being the way round we found it.
  *
  * The one insight whose graph is not the network map, and rightly so — the
  * finding is a POSITION on a plane, not a place in a structure, and putting it
@@ -21,8 +27,10 @@ import {
   cullLabels,
   outerLabels,
   POLARITY_STYLE,
+  POWER_KIND_LABEL,
   quadrantOf,
   rankByDivergence,
+  riskKindOf,
   textBox,
   type DivergencePoint,
   type LabelBox,
@@ -102,25 +110,25 @@ export function DivergenceChart({
 
   const plot = useMemo(() => {
     if (points.length === 0) return null;
-    const maxX = Math.max(...points.map((p) => p.trust), medians.trust, 1e-6) * 1.1;
-    const maxY = Math.max(...points.map((p) => p.power), medians.power, 1e-6) * 1.1;
+    const maxX = Math.max(...points.map((p) => p.power), medians.power, 1e-6) * 1.1;
+    const maxY = Math.max(...points.map((p) => p.trust), medians.trust, 1e-6) * 1.1;
     // Inset by more than a dot's radius so someone on zero sits fully inside
     // the plot rather than half-hidden behind the axis.
     const DOT_INSET = 20;
     const x = (v: number) => left + DOT_INSET + (v / maxX) * (right - left - DOT_INSET * 2);
     const y = (v: number) => bottom - DOT_INSET - (v / maxY) * (bottom - top - DOT_INSET * 2);
-    const mx = x(medians.trust);
-    const my = y(medians.power);
+    const mx = x(medians.power);
+    const my = y(medians.trust);
 
     // The fixed furniture lives OUTSIDE the plot, by construction: quadrant
     // captions along the top and bottom edges, the medians as tick labels on
     // the axes. Nothing drawn for the reader's orientation can ever cover a
     // dot or a name, so nothing inside needs reserving.
     const corners: { q: Quadrant; text: string; cx: number; cy: number; anchor: 'start' | 'end' }[] = [
-      { q: 'watch', text: `${QUADRANT_NAME.watch} — watch list`, cx: left, cy: top - 14, anchor: 'start' },
+      { q: 'underused', text: `${QUADRANT_NAME.underused} — underused assets`, cx: left, cy: top - 14, anchor: 'start' },
       { q: 'anchor', text: QUADRANT_NAME.anchor, cx: right, cy: top - 14, anchor: 'end' },
       { q: 'peripheral', text: QUADRANT_NAME.peripheral, cx: left, cy: bottom + 24, anchor: 'start' },
-      { q: 'underused', text: `${QUADRANT_NAME.underused} — underused assets`, cx: right, cy: bottom + 24, anchor: 'end' },
+      { q: 'watch', text: `${QUADRANT_NAME.watch} — watch list`, cx: right, cy: bottom + 24, anchor: 'end' },
     ];
     const cornerPills = corners.map((c) => ({ ...c, box: textBox(c.text, c.cx, c.cy, 19.5, c.anchor, { x: 0, y: 0 }) }));
     // "median" under the vertical median on the x axis, beside the horizontal
@@ -141,7 +149,14 @@ export function DivergenceChart({
       { text: 'median', cx: medianX.cx, cy: medianX.cy, anchor: medianX.anchor, tick: { x1: mx, y1: medianX.cy > my ? bottom : top, x2: mx, y2: medianX.cy > my ? bottom + 8 : top - 8 } },
       { text: 'median', cx: left - 10, cy: my + 5, anchor: 'end' as const, tick: { x1: left - 8, y1: my, x2: left, y2: my } },
     ];
-    const reserved: LabelBox[] = [];
+    // The furniture is reserved against the names, not merely drawn before
+    // them. It always was outside the plot area, but a corner caption still
+    // sits on the same pixels as a label seated above a dot near that corner —
+    // which is exactly where the most notable names want to go.
+    const reserved: LabelBox[] = [
+      ...cornerPills.map((c) => c.box),
+      ...guides.map((g) => textBox(g.text, g.cx, g.cy, 15, g.anchor, { x: 4, y: 0 })),
+    ];
 
     // Names, most notable first, each offered a seat above its dot and then
     // below it, and kept only if one of the two clears everything already
@@ -159,7 +174,7 @@ export function DivergenceChart({
         // Seats keep their index: an illegal one is nulled, never removed, so
         // the index cullLabels returns still addresses NAME_SEATS.
         boxes: NAME_SEATS.map((seat) => {
-          const b = textBox(nameOf(p.no), x(p.trust) + seat.dx, y(p.power) + seat.dy, NAME_SIZE, seat.anchor);
+          const b = textBox(nameOf(p.no), x(p.power) + seat.dx, y(p.trust) + seat.dy, NAME_SIZE, seat.anchor);
           return inside(b) ? b : null;
         }),
       }));
@@ -179,10 +194,10 @@ export function DivergenceChart({
   }
   const { x, y, mx, my, cornerPills, guides, named } = plot;
   const quadRect: Record<Quadrant, { x: number; y: number; w: number; h: number }> = {
-    watch: { x: left, y: top, w: mx - left, h: my - top },
+    underused: { x: left, y: top, w: mx - left, h: my - top },
     anchor: { x: mx, y: top, w: right - mx, h: my - top },
     peripheral: { x: left, y: my, w: mx - left, h: bottom - my },
-    underused: { x: mx, y: my, w: right - mx, h: bottom - my },
+    watch: { x: mx, y: my, w: right - mx, h: bottom - my },
   };
   const activePoint = activeNo === null ? null : points.find((p) => p.no === activeNo) ?? null;
 
@@ -192,7 +207,7 @@ export function DivergenceChart({
       viewBox={`0 0 ${W} ${H}`}
       preserveAspectRatio="xMidYMid meet"
       role="img"
-      aria-label="Trust received against power received, split on the group's medians"
+      aria-label="Power received against trust received, split on the group's medians"
     >
       {(Object.keys(quadRect) as Quadrant[]).map((q) => (
         <rect
@@ -214,7 +229,7 @@ export function DivergenceChart({
       <line x1={left} y1={my} x2={right} y2={my} className="insights-quad-median" />
 
       <text x={(left + right) / 2} y={H - 14} textAnchor="middle" className="insights-quad-axis-label">
-        Trust received{normalised ? ' — per colleague who rated them' : ' — ties'}
+        Total power received{normalised ? ' — per rater' : ' — ties'}
       </text>
       <text
         x={-(top + bottom) / 2}
@@ -223,7 +238,7 @@ export function DivergenceChart({
         transform="rotate(-90)"
         className="insights-quad-axis-label"
       >
-        Total power received{normalised ? ' — per rater' : ' — ties'}
+        Trust received{normalised ? ' — per colleague who rated them' : ' — ties'}
       </text>
 
       {/* Dots below the furniture: a name must never be printed over. */}
@@ -236,22 +251,28 @@ export function DivergenceChart({
             key={p.no}
             className={`insights-dot${on ? ' is-active' : ''}`}
             role="img"
-            aria-label={`${nameOf(p.no)}, ${funcOf(p.no)}, ${QUADRANT_NAME[q].toLowerCase()}, ${p.trustCount} trust and ${p.powerCount} power-over ties received`}
+            aria-label={`${nameOf(p.no)}, ${funcOf(p.no)}, ${QUADRANT_NAME[q].toLowerCase()}, ${p.trustCount} trust and ${p.powerCount} power ties received${
+              riskKindOf(p) ? `, ${POWER_KIND_LABEL[riskKindOf(p)!].toLowerCase()}` : ''
+            }`}
             {...personProps(p.no, () => ({
               title: nameOf(p.no),
               sub: `${funcOf(p.no)} · ${QUADRANT_NAME[q]}`,
               rows: [
                 ['Trust received', normalised ? `${p.trust.toFixed(2)} per rater` : String(p.trustCount)],
                 ['Power received', normalised ? `${p.power.toFixed(2)} per rater` : String(p.powerCount)],
+                // Which half of that power, always — the guide reads the Risk
+                // Zone by kind, and two people on the same spot can need
+                // opposite things done about them.
+                ['Enabling · controlling', `${p.enablingCount} · ${p.controllingCount}`],
               ],
             }))}
           >
             {on ? (
-              <circle cx={x(p.trust)} cy={y(p.power)} r={22} fill={QUADRANT_COLOR[q]} opacity={0.18} />
+              <circle cx={x(p.power)} cy={y(p.trust)} r={22} fill={QUADRANT_COLOR[q]} opacity={0.18} />
             ) : null}
             <circle
-              cx={x(p.trust)}
-              cy={y(p.power)}
+              cx={x(p.power)}
+              cy={y(p.trust)}
               r={on ? 13.5 : 11}
               fill={QUADRANT_COLOR[q]}
               stroke={on ? 'var(--ink)' : '#fff'}
@@ -291,8 +312,8 @@ export function DivergenceChart({
         return (
           <text
             key={p.no}
-            x={x(p.trust) + seat.dx}
-            y={y(p.power) + seat.dy}
+            x={x(p.power) + seat.dx}
+            y={y(p.trust) + seat.dy}
             textAnchor={seat.anchor}
             className="insights-quad-name"
             opacity={activeNo === null ? 1 : 0.45}
@@ -306,12 +327,12 @@ export function DivergenceChart({
       {activePoint ? (
         <g className="insights-quad-pill is-active">
           {(() => {
-            const b = textBox(nameOf(activePoint.no), x(activePoint.trust), y(activePoint.power) - 16, NAME_SIZE, 'middle', { x: 7, y: 4 });
+            const b = textBox(nameOf(activePoint.no), x(activePoint.power), y(activePoint.trust) - 16, NAME_SIZE, 'middle', { x: 7, y: 4 });
             return <rect x={b.x} y={b.y} width={b.w} height={b.h} rx={5} />;
           })()}
           <text
-            x={x(activePoint.trust)}
-            y={y(activePoint.power) - 16}
+            x={x(activePoint.power)}
+            y={y(activePoint.trust) - 16}
             textAnchor="middle"
             className="insights-quad-name is-active"
           >
