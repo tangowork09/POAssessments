@@ -115,16 +115,21 @@ export async function loadRunResponses(
 /**
  * How many people were asked, started and finished.
  *
- * `invited` counts the ways in that were handed to a named person, falling back
- * to the roster when a run is being chased by list rather than by link. A run
- * on one shared link has no honest denominator, and reports 0 rather than
- * inventing one — the console shows a count answered instead of a rate.
+ * `invited` counts the ways in that a facilitator handed to a named person,
+ * falling back to the roster when a run is being chased by list rather than by
+ * link. Continuation links are excluded: a respondent arriving on a shared link
+ * is given one so they can resume, and counting those would make every
+ * shared-link run report that it invited exactly as many people as answered —
+ * a response rate of 100%, always, which is the numerator wearing a different
+ * name. A run with no invitations and no roster has no honest denominator and
+ * reports 0, so the console shows a count answered instead of a rate.
  */
 export async function runTurnout(env: Env, cohortId: string, roundNo: number): Promise<CollabRunTurnout> {
   const row = await env.DB.prepare(
     `SELECT
        (SELECT COUNT(*) FROM links
-         WHERE cohort_id = ?1 AND round_no = ?2 AND kind = 'personal' AND active = 1) AS personal_links,
+         WHERE cohort_id = ?1 AND round_no = ?2 AND kind = 'personal' AND active = 1
+           AND self_issued = 0) AS personal_links,
        (SELECT COUNT(*) FROM cohort_members WHERE cohort_id = ?1 AND active = 1) AS roster,
        (SELECT COUNT(*) FROM responses
          WHERE cohort_id = ?1 AND round_no = ?2 AND status IN ('in_progress','completed')) AS started,

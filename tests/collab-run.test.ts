@@ -109,6 +109,15 @@ describe('turnout', () => {
     expect((await runTurnout(env, 'co1', 1)).invited).toBe(32);
   });
 
+  it('counts invitations only, never the continuation links respondents mint', async () => {
+    // A respondent arriving on a shared link is given a personal link so they
+    // can resume. Counting those makes invited == answered for every
+    // shared-link run: a 100% response rate that is the numerator restated.
+    const { env, seen } = stubDb({ turnout: { personal_links: 0, roster: 0, started: 3, completed: 3 } });
+    await runTurnout(env, 'co1', 1);
+    expect(seen.join(' ')).toContain('self_issued = 0');
+  });
+
   it('reports no denominator for a run on one shared link, rather than inventing one', async () => {
     const { env } = stubDb({ turnout: { personal_links: 0, roster: 0, started: 12, completed: 11 } });
     const turnout = await runTurnout(env, 'co1', 1);

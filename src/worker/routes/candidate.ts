@@ -4,6 +4,7 @@
  */
 
 import { Hono } from 'hono';
+import type { CollabRunForCandidate } from '../../shared/types.js';
 import type { Context } from 'hono';
 import { z } from 'zod';
 import type { Env } from '../env.js';
@@ -25,6 +26,12 @@ import {
   fieldErrors,
 } from '../lib/validation.js';
 import { ASSESSMENTS, isCohortKind, kindForAssessment } from '../../shared/assessments.js';
+import {
+  checkCollabSubmission,
+  collabSessionFor,
+  isCollabLink,
+  startCollabResponse,
+} from './collab-candidate.js';
 import {
   allowedTargetsFor,
   loadCohort,
@@ -347,6 +354,21 @@ candidateRoutes.get('/session/:token', async (c) => {
     );
   }
 
+  /*
+   * A diagnostic run carries no roster — there is nobody to rate — but it does
+   * carry the cuts it collects and whether answers are stored anonymously.
+   * Both are decided by the facilitator before anyone is invited, and both
+   * have to reach the respondent before they answer: the department question
+   * is asked up front, and a promise of anonymity is worthless if the person
+   * making it is never told.
+   */
+  let run: CollabRunForCandidate | null = null;
+  if (isCollabLink(link)) {
+    const resolved = await collabSessionFor(c.env, link, response?.responseId ?? null);
+    if ('error' in resolved) return c.json({ error: resolved.error }, resolved.code);
+    run = resolved;
+  }
+
   const config = configForLink(link);
 
   const session: CandidateSession = {
@@ -364,6 +386,7 @@ candidateRoutes.get('/session/:token', async (c) => {
     branding,
     perPage: link.per_page,
     cohort,
+    run,
     scale: scaleForLink(link),
     intro: (config ?? ASSESSMENTS.isi).intro,
     response,
@@ -420,11 +443,28 @@ candidateRoutes.get('/session/:token/state', async (c) => {
 candidateRoutes.post('/start/:token', async (c) => {
   const token = c.req.param('token');
 
-  const rl = await rateLimit(c.env, `start:${clientKey(c.req.raw)}`, 20, 300);
-  if (!rl.allowed) return c.json({ error: 'Too many attempts. Try again shortly.' }, 429);
+  /*
+   * Two limits, because there are two things happening on this route and only
+   * one of them is an attack.
+   *
+   * A cohort or a diagnostic run is fifty colleagues in one company, and a
+   * company reaches the internet through one address. Twenty starts per five
+   * minutes keyed on that address is not a rate limit on abuse, it is a rate
+   * limit on a leadership team being in the same meeting — which is exactly
+   * how a facilitator runs this: everyone opens the link at once. The
+   * generous ceiling here is a volume guard, not a credential check.
+   *
+   * What is worth limiting hard is a token that does not resolve. Guessing a
+   * 32-byte token is the only reason to send a stream of unrecognised ones, so
+   * that is where the strict bucket sits.
+   */
+  const volume = await rateLimit(c.env, `start:${clientKey(c.req.raw)}`, 200, 300);
+  if (!volume.allowed) return c.json({ error: 'Too many attempts. Try again shortly.' }, 429);
 
   const link = await resolveLink(c.env, token);
   if (!link || linkRefusal(link) || link.status !== 'live') {
+    const guessing = await rateLimit(c.env, `startbad:${clientKey(c.req.raw)}`, 20, 300);
+    if (!guessing.allowed) return c.json({ error: 'Too many attempts. Try again shortly.' }, 429);
     return c.json({ error: 'This link is not available.' }, 404);
   }
 
@@ -433,6 +473,15 @@ candidateRoutes.post('/start/:token', async (c) => {
   // facts, and demographics are irrelevant to a network score.
   if (isCohortKind(kindForAssessment(link.assessment_id))) {
     return startCohortResponse(c, link);
+  }
+
+  // A diagnostic respondent is not described, only placed: the cuts the run
+  // collects, and an email only when the run is a named one. Name, age band,
+  // experience band and gender are not asked, because none of them moves a
+  // section mean and asking for them in a run promised as anonymous would be a
+  // lie told in a form field.
+  if (isCollabLink(link)) {
+    return startCollabResponse(c, link);
   }
 
   const parsed = candidateDetailsSchema.safeParse(await c.req.json().catch(() => ({})));
@@ -1061,7 +1110,10 @@ candidateRoutes.post('/submit/:token', async (c) => {
   const link = await resolveLink(c.env, c.req.param('token'));
   if (!link || linkRefusal(link)) return c.json({ error: 'This link is not available.' }, 404);
 
-  const rl = await rateLimit(c.env, `submit:${clientKey(c.req.raw)}`, 30, 300);
+  // Thirty per five minutes keyed on one office address is fewer than the
+  // number of leaders in a single run finishing together. A submission has
+  // already presented a token that resolved, so this is a volume guard too.
+  const rl = await rateLimit(c.env, `submit:${clientKey(c.req.raw)}`, 200, 300);
   if (!rl.allowed) return c.json({ error: 'Too many attempts. Try again shortly.' }, 429);
 
   const parsed = submitSchema.safeParse(await c.req.json().catch(() => ({})));
@@ -1099,6 +1151,30 @@ candidateRoutes.post('/submit/:token', async (c) => {
     // response at once, when the facilitator generates the reports -- there is
     // nothing to score at the moment one person finishes.
     return c.json({ completed: true, reportToken: null, cohort: true });
+  }
+
+  /*
+   * A diagnostic sheet is finished or it is not submitted. Every statement is
+   * about the respondent's own organisation, so unlike a peer matrix there is
+   * nothing here they have no basis to judge, and a section mean over three of
+   * four statements is a different quantity wearing the same name.
+   *
+   * Nothing is dispatched on completion and no report token is minted. A run
+   * is scored across every response at once, when the facilitator reads the
+   * results; one leader finishing scores nothing. The respondent is promised
+   * nothing in return, and the completion screen says so.
+   */
+  if (isCollabLink(link)) {
+    const missingNos = await checkCollabSubmission(c.env, resp.id);
+    if (missingNos.length > 0) {
+      return c.json({ error: 'Some statements are still unanswered.', missing: missingNos }, 400);
+    }
+    await c.env.DB.prepare(
+      `UPDATE responses SET status = 'completed', completed_at = datetime('now') WHERE id = ?1`,
+    )
+      .bind(resp.id)
+      .run();
+    return c.json({ completed: true, reportToken: null, run: true });
   }
 
   const missing = await c.env.DB.prepare(
