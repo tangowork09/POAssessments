@@ -79,6 +79,7 @@ import {
   Panel,
   LineKey,
   RingKey,
+  HollowKey,
   type NameMode,
   type ExportOptions,
   ScopePicker,
@@ -3153,6 +3154,10 @@ export function InsightsView({
                 edgeFadeOf={FADE.divergence}
                 sizeOf={radiusTrust}
                 colorOf={(no) => divergenceColor(gapOf.get(no) ?? null)}
+                // Grey was carrying two different findings: "their two
+                // standings agree" and "nobody rated them at all". The second
+                // is not a position on the scale, so it is drawn off it.
+                hollowOf={(no) => (gapOf.get(no) ?? null) === null}
                 labelFor={namesFor(divergentFolk)}
                 denseLabels={allNames}
                 activeNo={focusNo}
@@ -3182,6 +3187,7 @@ export function InsightsView({
                 <Key color={divergenceColor(-0.5)}>Relied on, little say</Key>
                 <Key color={divergenceColor(null)}>The two agree</Key>
                 <Key color={divergenceColor(0.5)}>Deferred to, less relied on</Key>
+                <HollowKey color={divergenceColor(null)}>Nobody rated them</HollowKey>
                 <span className="ins-legend-note">Ties: trust · node size: trust ties received</span>
               </div>
             }

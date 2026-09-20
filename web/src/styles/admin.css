@@ -2096,6 +2096,8 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
 .ins-key.is-toggle.is-off i{ opacity:.3; }
 .ins-key i{ width:9px; height:9px; border-radius:50%; flex:none; }
 .ins-key i.is-ring{ width:11px; height:11px; background:transparent; border:2px solid; }
+/* Not a colour on the scale: the measure does not apply to this person. */
+.ins-key i.is-hollow{ width:11px; height:11px; background:transparent; border:2px dashed; }
 /* A tie, not a node: the legend reads the same shape it points at. */
 .ins-key i.is-line{ width:16px; height:3px; border-radius:2px; }
 .ins-key b{ color:var(--ink-2); font-variant-numeric:tabular-nums; }

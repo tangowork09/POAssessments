@@ -819,6 +819,21 @@ export function RingKey({
   );
 }
 
+/**
+ * A dashed outline: the measure does not apply to this person.
+ *
+ * Distinct from a colour on the scale, because "nobody rated them" is not a
+ * value the scale can take — it is the absence of one, and painting it in a
+ * scale colour made it read as a finding.
+ */
+export function HollowKey({ color, children }: { color: string; children: React.ReactNode }) {
+  return (
+    <LegendKey mark={<i className="is-hollow" style={{ borderColor: color }} aria-hidden="true" />} on>
+      {children}
+    </LegendKey>
+  );
+}
+
 
 // ----------------------------------------------------------- the findings rail
 

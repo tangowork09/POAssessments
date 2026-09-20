@@ -83,6 +83,14 @@ export interface InsightGraphProps {
    */
   sizeScale?: number;
   colorOf: (no: number) => string;
+  /**
+   * Draw this person as an outline rather than a filled disc.
+   *
+   * For "nobody has rated them", which otherwise has to borrow a colour from
+   * the scale and so reads as a finding. An empty ring says the measure does
+   * not apply here — different in kind from any value it could take.
+   */
+  hollowOf?: (no: number) => boolean;
   /** 0..1 per person, before focus overrides it. Absent = everyone at full. */
   fadeOf?: (no: number) => number;
   /** 0..1 per tie. Absent = the shared positive-tie opacity. */
@@ -191,6 +199,7 @@ function InsightGraphImpl({
   sizeOf: rawSizeOf,
   sizeScale = 1,
   colorOf,
+  hollowOf,
   fadeOf,
   edgeFadeOf,
   decorate,
@@ -591,14 +600,31 @@ function InsightGraphImpl({
                 opacity={0.85}
               />
             ) : null}
-            <circle
-              cx={p.x}
-              cy={p.y}
-              r={r}
-              fill={colorOf(n.no)}
-              stroke={active ? 'var(--ink)' : '#fff'}
-              strokeWidth={active ? 5 : 2.4}
-            />
+            {hollowOf?.(n.no) ? (
+              // Two rings: a white one underneath so ties passing behind do
+              // not read as the node's own fill.
+              <>
+                <circle cx={p.x} cy={p.y} r={r} fill="#fff" />
+                <circle
+                  cx={p.x}
+                  cy={p.y}
+                  r={r - 1.2}
+                  fill="none"
+                  stroke={active ? 'var(--ink)' : colorOf(n.no)}
+                  strokeWidth={active ? 4 : 2.4}
+                  strokeDasharray="3 3"
+                />
+              </>
+            ) : (
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r={r}
+                fill={colorOf(n.no)}
+                stroke={active ? 'var(--ink)' : '#fff'}
+                strokeWidth={active ? 5 : 2.4}
+              />
+            )}
           </g>
         );
       })}
