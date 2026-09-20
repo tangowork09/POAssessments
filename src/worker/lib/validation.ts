@@ -218,6 +218,77 @@ const cohortFields = {
   linkOnlyIdentity: z.boolean(),
 };
 
+/**
+ * A Collaboration Diagnostic run. It is a cohort, so it reuses the name,
+ * organisation and link fields above, and adds the two things the diagnostic
+ * decides for itself.
+ */
+const collabFields = {
+  /**
+   * Fewest respondents in a segment before that segment is reported on. The
+   * floor may be raised but never dropped below two: at one respondent a
+   * "departmental average" is that person's answers, republished.
+   */
+  minSegment: z.number().int().min(2).max(50),
+  /**
+   * Whether responses are detached from the people who gave them. See
+   * migration 0022 — this is where the answers are stored, not what the
+   * console chooses to draw.
+   */
+  anonymous: z.boolean(),
+};
+
+/**
+ * One cut a run collects: what it is called, and the values a respondent may
+ * pick from.
+ *
+ * Options are a closed list. Free text arrives as "Ops", "ops" and
+ * "Operations ", which is one department to the organisation and three to a
+ * GROUP BY, and no cleaning afterwards recovers who meant which.
+ */
+export const collabFacetSchema = z.object({
+  key: z
+    .string()
+    .trim()
+    .min(1)
+    .max(32)
+    .regex(/^[a-z][a-z0-9_]*$/, 'Use lower-case letters, digits and underscores.'),
+  label: z.string().trim().min(1).max(80),
+  options: z
+    .array(z.string().trim().min(1).max(80))
+    .min(2, 'A cut needs at least two values to be a cut.')
+    .max(40)
+    .refine(
+      (list) => new Set(list.map((v) => v.toLowerCase())).size === list.length,
+      'Two values differ only by case, which would split one segment in two.',
+    ),
+  required: z.boolean().default(true),
+});
+
+export const collabFacetsSchema = z.object({
+  facets: z.array(collabFacetSchema).max(6),
+});
+
+export const collabRunCreateSchema = z.object({
+  name: cohortFields.name,
+  organisation: cohortFields.organisation.default(''),
+  minSegment: collabFields.minSegment.default(5),
+  anonymous: collabFields.anonymous.default(false),
+});
+
+export const collabRunUpdateSchema = z
+  .object({
+    name: cohortFields.name,
+    organisation: cohortFields.organisation,
+    status: z.enum(['draft', 'open', 'closed']),
+    minSegment: collabFields.minSegment,
+    anonymous: collabFields.anonymous,
+    linkTtlDays: cohortFields.linkTtlDays,
+    otpRequired: cohortFields.otpRequired,
+    linkOnlyIdentity: cohortFields.linkOnlyIdentity,
+  })
+  .partial();
+
 export const cohortCreateSchema = z.object({
   name: cohortFields.name,
   organisation: cohortFields.organisation.default(''),

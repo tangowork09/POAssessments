@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Collaboration Tests — group results</title>
+<style>
+/* ============================================================
+   Collaboration Tests — prototype for the admin console.
+   Tokens are the console's own (web/src/styles/base.css); everything
+   added here is the instrument's measurement language.
+   ============================================================ */
+:root{
+  color-scheme: light;
+  --bg:#F5F7FA; --surface:#FFFFFF; --surface-2:#FAFBFC; --surface-3:#F1F4F8;
+  --line:#E4E8EE; --line-2:#D6DCE5; --line-3:#C3CBD7;
+  --ink:#0C1421; --ink-2:#3D4859; --ink-3:#616C80; --ink-4:#8D97A6;
+  --accent:#1A4FD6; --accent-2:#1440B0; --accent-soft:#EDF2FE; --accent-line:#C2D3FA;
+  --ok:#067647; --ok-soft:#ECFDF3; --ok-line:#A9E5C4;
+  --warn:#B54708; --warn-soft:#FFFAEB; --warn-line:#F5DA9C;
+  --danger:#B42318; --danger-soft:#FEF3F2; --danger-line:#F5C6C1;
+  --neutral:#5A6678; --neutral-soft:#F1F3F7; --neutral-line:#DDE2EA;
+
+  /* Converted-score diverging ramp, 1 unhealthy → 5 healthy.
+     Two hues with a light neutral midpoint; validated for CVD
+     separation (worst adjacent ΔE 18.9 deutan, 19.0 normal). */
+  --d1:#8F3F08; --d2:#D98C3F; --d3:#D7DCE3; --d4:#4FA57C; --d5:#0B6B46;
+
+  /* Band scale — status colours, always shipped with their name. */
+  --band-healthy:#067647; --band-friction:#8A6D0B;
+  --band-barriers:#B4530E; --band-breaking:#B42318;
+
+  --shadow-1:0 1px 2px rgba(12,20,33,.06);
+  --shadow-2:0 1px 3px rgba(12,20,33,.07), 0 8px 24px rgba(12,20,33,.06);
+  --r-1:4px; --r-2:6px; --r-3:8px; --r-4:12px;
+  --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --maxw:1240px;
+}
+*,*::before,*::after{ box-sizing:border-box; }
+html{ -webkit-text-size-adjust:100%; }
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--sans); font-size:15px; line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4,p,ul,ol,figure{ margin:0; }
+ul{ padding:0; list-style:none; }
+button{ background:none; border:0; padding:0; cursor:pointer; font:inherit; color:inherit; }
+svg{ display:block; }
+.num{ font-variant-numeric:tabular-nums; font-feature-settings:"tnum" 1; }
+:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; border-radius:var(--r-1); }
+::selection{ background:var(--accent-soft); color:var(--accent-2); }
+::-webkit-scrollbar{ width:11px; height:11px; }
+::-webkit-scrollbar-thumb{ background:var(--line-3); border:3px solid var(--bg); border-radius:99px; }
+::-webkit-scrollbar-thumb:hover{ background:var(--ink-4); }
+::-webkit-scrollbar-track{ background:var(--bg); }
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{ animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; }
+}
+
+.wrap{ max-width:var(--maxw); margin:0 auto; padding:28px 24px 80px; }
+@media (max-width:640px){ .wrap{ padding:20px 16px 64px; } }
+
+/* ============================================================ run header */
+.runbar{
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--r-4);
+  box-shadow:var(--shadow-1); padding:22px 24px;
+  display:grid; grid-template-columns:minmax(0,1fr) auto; gap:24px 32px; align-items:start;
+}
+@media (max-width:820px){ .runbar{ grid-template-columns:1fr; } }
+.runbar h1{ font-size:26px; letter-spacing:-.022em; line-height:1.15; font-weight:680; }
+.runmeta{ display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; margin-top:8px; color:var(--ink-3); font-size:13.5px; }
+.dotsep{ width:3px; height:3px; border-radius:50%; background:var(--line-3); }
+.pill{
+  display:inline-flex; align-items:center; gap:6px; height:24px; padding:0 10px;
+  border-radius:99px; font-size:12px; font-weight:600; letter-spacing:.01em;
+  background:var(--ok-soft); color:var(--ok); border:1px solid var(--ok-line);
+}
+.pill i{ width:6px; height:6px; border-radius:50%; background:currentColor; display:block; }
+
+/* the sample drawn as people, because the sample is 50 people */
+.turnout{ display:flex; flex-direction:column; gap:10px; min-width:0; width:min(320px,100%); }
+.turnout-head{ display:flex; align-items:baseline; gap:8px; }
+.turnout-head b{ font-size:22px; font-weight:680; letter-spacing:-.02em; }
+.turnout-head span{ font-size:13px; color:var(--ink-3); }
+.seats{ display:grid; grid-template-columns:repeat(25, minmax(0,1fr)); gap:3px; min-width:0; }
+.seat{ aspect-ratio:1; border-radius:2px; background:var(--line-2); }
+.seat.in{ background:var(--accent); }
+.seat.in:nth-child(2n){ background:var(--accent-2); }
+.turnout-note{ font-size:12.5px; color:var(--ink-3); }
+
+/* ============================================================ section head */
+.sec{ margin-top:32px; }
+.sec-top{ display:flex; align-items:flex-end; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:14px; }
+.sec-top > div{ flex:1 1 420px; min-width:0; }
+.sec-top h2{ font-size:17px; font-weight:660; letter-spacing:-.012em; }
+.sec-top p{ font-size:13.5px; color:var(--ink-3); max-width:70ch; margin-top:3px; }
+.panel{
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--r-4);
+  box-shadow:var(--shadow-1);
+}
+
+/* ============================================================ index scale */
+.indexwrap{ padding:26px 28px 22px; display:grid; grid-template-columns:auto minmax(0,1fr); gap:34px; align-items:center; }
+@media (max-width:780px){ .indexwrap{ grid-template-columns:1fr; gap:22px; padding:22px 20px; } }
+.indexfig{ display:flex; flex-direction:column; gap:4px; }
+.indexfig .val{ font-size:64px; line-height:.95; font-weight:690; letter-spacing:-.04em; }
+.indexfig .val small{ font-size:22px; font-weight:600; color:var(--ink-3); letter-spacing:-.01em; }
+.indexfig .sub{ font-size:13px; color:var(--ink-3); }
+.indexfig .bandname{ font-size:14px; font-weight:640; margin-top:6px; }
+
+.scale{ position:relative; padding-top:26px; padding-bottom:30px; }
+.scale-track{ display:flex; height:34px; border-radius:var(--r-2); overflow:hidden; border:1px solid var(--line-2); }
+.scale-track span{ display:block; }
+.zone-breaking{ background:color-mix(in srgb, var(--band-breaking) 14%, #fff); }
+.zone-barriers{ background:color-mix(in srgb, var(--band-barriers) 16%, #fff); }
+.zone-friction{ background:color-mix(in srgb, var(--band-friction) 15%, #fff); }
+.zone-healthy { background:color-mix(in srgb, var(--band-healthy) 14%, #fff); }
+.scale-labels{ display:flex; margin-top:7px; }
+.scale-labels div{ font-size:11.5px; color:var(--ink-3); padding-right:8px; text-align:center; min-width:0; }
+.scale-labels b{ display:block; color:var(--ink-2); font-weight:620; font-size:12px; }
+.marker{ position:absolute; top:4px; height:56px; width:2px; background:var(--ink); border-radius:2px; }
+.marker::after{
+  content:""; position:absolute; top:20px; left:50%; width:13px; height:13px;
+  transform:translate(-50%,0) rotate(45deg); background:var(--ink); border-radius:2px;
+}
+.marker .tag{
+  position:absolute; top:-2px; left:50%; transform:translateX(-50%);
+  background:var(--ink); color:#fff; font-size:11.5px; font-weight:640;
+  padding:2px 8px; border-radius:var(--r-1); white-space:nowrap;
+}
+
+/* ============================================================ sections */
+.ladder{ padding:8px 4px 4px; }
+.srow{
+  display:grid; grid-template-columns:200px minmax(0,1fr) 92px; gap:18px; align-items:center;
+  padding:13px 24px; border-top:1px solid var(--line);
+}
+.ladder .srow:first-child{ border-top:0; }
+.srow:hover{ background:var(--surface-2); }
+.srow .name{ font-size:14px; font-weight:600; }
+.srow .name em{ display:block; font-style:normal; font-size:11.5px; color:var(--ink-3); font-weight:500; margin-top:1px; }
+.track{ position:relative; height:26px; }
+.track .rail{ position:absolute; inset:9px 0; background:var(--surface-3); border-radius:99px; }
+.track .tick{ position:absolute; top:3px; bottom:3px; width:1px; background:var(--line-2); }
+.track .fill{
+  position:absolute; top:9px; height:8px; border-radius:99px; background:var(--accent);
+  transform-origin:left center;
+}
+.track .whisk{ position:absolute; top:12px; height:2px; background:var(--accent-line); border-radius:2px; }
+.track .whisk::before, .track .whisk::after{
+  content:""; position:absolute; top:-4px; width:2px; height:10px; background:var(--accent-line); border-radius:2px;
+}
+.track .whisk::before{ left:0; } .track .whisk::after{ right:0; }
+.srow .val{ text-align:right; font-size:17px; font-weight:660; letter-spacing:-.02em; }
+.srow .val em{ display:block; font-style:normal; font-size:11px; color:var(--ink-3); font-weight:500; letter-spacing:0; }
+.axis{ display:grid; grid-template-columns:200px minmax(0,1fr) 92px; gap:18px; padding:0 24px 12px; }
+.axis .ticks{ grid-column:2; display:flex; justify-content:space-between; font-size:11px; color:var(--ink-3); }
+.axis .ticks b{ font-weight:600; color:var(--ink-3); }
+.srow.weakest .val{ color:var(--band-barriers); }
+.srow.strongest .val{ color:var(--band-healthy); }
+
+/* the gap, drawn as a measurement between the two rows it spans */
+.gapline{
+  display:grid; grid-template-columns:200px minmax(0,1fr) 92px; gap:18px;
+  padding:0 24px 16px; align-items:center;
+}
+.gapline .caliper{
+  grid-column:2; position:relative; height:30px;
+}
+.caliper .bar{ position:absolute; top:14px; height:1px; background:var(--ink-3); }
+.caliper .bar::before, .caliper .bar::after{
+  content:""; position:absolute; top:-5px; width:1px; height:11px; background:var(--ink-3);
+}
+.caliper .bar::before{ left:0; } .caliper .bar::after{ right:0; }
+.caliper .lab{
+  position:absolute; top:0; transform:translateX(-50%); background:var(--surface);
+  padding:0 7px; font-size:11.5px; font-weight:620; color:var(--ink-2); white-space:nowrap;
+}
+.gapline .why{ grid-column:3; font-size:11.5px; color:var(--ink-3); text-align:right; }
+@media (max-width:760px){
+  .axis{ grid-template-columns:1fr 78px; gap:10px 14px; padding-inline:18px; }
+  .axis .ticks{ grid-column:1 / -1; }
+  .srow, .gapline{ grid-template-columns:1fr 78px; gap:10px 14px; padding-inline:18px; }
+  .srow .track{ grid-column:1 / -1; order:3; }
+  .gapline .caliper{ grid-column:1 / -1; }
+  .gapline .why{ grid-column:1 / -1; text-align:left; }
+}
+
+/* ============================================================ controls */
+.controls{
+  display:flex; flex-wrap:wrap; gap:10px; align-items:center;
+  padding:14px 20px; border-bottom:1px solid var(--line);
+}
+.chips{ display:flex; gap:6px; flex-wrap:wrap; }
+.chip{
+  height:30px; padding:0 12px; border-radius:99px; border:1px solid var(--line-2);
+  font-size:13px; font-weight:560; color:var(--ink-2); background:var(--surface);
+  display:inline-flex; align-items:center; gap:7px; transition:background .12s, border-color .12s, color .12s;
+}
+.chip:hover{ background:var(--surface-3); }
+.chip[aria-pressed="true"]{ background:var(--ink); border-color:var(--ink); color:#fff; }
+.chip .n{ font-size:11.5px; color:var(--ink-3); font-variant-numeric:tabular-nums; }
+.chip[aria-pressed="true"] .n{ color:#C8D2E4; }
+.spacer{ flex:1 1 auto; }
+.sortsel{
+  height:30px; border:1px solid var(--line-2); border-radius:var(--r-2); padding:0 10px;
+  font-size:13px; color:var(--ink-2); background:var(--surface);
+}
+.legend{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; font-size:11.5px; color:var(--ink-3); }
+.legend .sw{ display:inline-flex; align-items:center; gap:5px; }
+.legend .sw i{ width:12px; height:10px; border-radius:2px; display:block; }
+
+/* ============================================================ item field */
+.items{ }
+.irow{
+  display:grid; grid-template-columns:34px minmax(0,1fr) 250px 116px; gap:16px;
+  padding:14px 20px; border-top:1px solid var(--line); align-items:start;
+}
+.items .irow:first-child{ border-top:0; }
+.irow:hover{ background:var(--surface-2); }
+.irow .no{ font-family:var(--mono); font-size:12px; color:var(--ink-3); padding-top:3px; font-variant-numeric:tabular-nums; }
+.irow .stmt{ font-size:14px; line-height:1.5; color:var(--ink); }
+.irow .tags{ display:flex; gap:8px; flex-wrap:wrap; margin-top:5px; align-items:center; }
+.tag{
+  font-size:11px; font-weight:600; letter-spacing:.02em; color:var(--ink-3);
+  border:1px solid var(--line-2); border-radius:var(--r-1); padding:1px 6px; background:var(--surface-2);
+}
+.tag.rev{ color:var(--ink-2); }
+.tag.split{
+  color:var(--warn); background:var(--warn-soft); border-color:var(--warn-line);
+  display:inline-flex; align-items:center; gap:5px;
+}
+.tag.split svg{ width:11px; height:11px; }
+
+/* the diverging strip: 47 answers, 2px gaps, counts on every segment that fits */
+.strip{ display:flex; gap:2px; height:26px; }
+.strip span{
+  display:flex; align-items:center; justify-content:center; min-width:0;
+  font-size:10.5px; font-weight:640; color:#fff; font-variant-numeric:tabular-nums;
+  border-radius:2px; transition:filter .12s;
+}
+.strip span:first-child{ border-radius:var(--r-1) 2px 2px var(--r-1); }
+.strip span:last-child{ border-radius:2px var(--r-1) var(--r-1) 2px; }
+.strip span:hover{ filter:brightness(1.08); }
+.v1{ background:var(--d1); } .v2{ background:var(--d2); }
+.v3{ background:var(--d3); color:var(--ink-2); }
+.v4{ background:var(--d4); } .v5{ background:var(--d5); }
+.striplab{ font-size:11px; color:var(--ink-3); margin-top:5px; display:flex; justify-content:space-between; }
+.irow .figs{ text-align:right; }
+.irow .figs .m{ font-size:17px; font-weight:660; letter-spacing:-.02em; }
+.irow .figs .s{ font-size:11.5px; color:var(--ink-3); margin-top:2px; }
+.irow .figs .s b{ font-weight:600; color:var(--ink-2); }
+@media (max-width:900px){
+  .irow{ grid-template-columns:30px minmax(0,1fr) 88px; gap:12px; padding-inline:16px; }
+  .irow .distcell{ grid-column:1 / -1; }
+}
+@media (max-width:560px){
+  .controls{ padding:12px 16px; }
+  .runmeta .dotsep{ display:none; }
+  .runmeta{ gap:6px 12px; }
+  .irow{ grid-template-columns:28px minmax(0,1fr); }
+  .irow .figs{ grid-column:2; text-align:left; display:flex; align-items:baseline; gap:10px; }
+  .irow .figs .s{ margin-top:0; }
+  .indexfig .val{ font-size:52px; }
+  .scale-labels div{ font-size:11px; }
+}
+
+/* ============================================================ table view */
+.tableview{ overflow-x:auto; }
+table{ border-collapse:collapse; width:100%; min-width:620px; font-size:13.5px; }
+th,td{ text-align:left; padding:9px 14px; border-bottom:1px solid var(--line); }
+thead th{ font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-3); background:var(--surface-2); font-weight:600; }
+td.n{ text-align:right; font-variant-numeric:tabular-nums; }
+
+/* ============================================================ segments */
+.matrix{ overflow-x:auto; }
+.matrix table{ min-width:760px; }
+.matrix td.cell{ padding:0; }
+.cellbox{
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+  padding:9px 14px; font-variant-numeric:tabular-nums; font-weight:600;
+}
+.cellbox .bar{ flex:1 1 auto; height:6px; border-radius:99px; background:var(--surface-3); position:relative; min-width:34px; }
+.cellbox .bar i{ position:absolute; inset:0 auto 0 0; border-radius:99px; background:var(--accent); display:block; }
+.suppressed{
+  padding:9px 14px; font-size:12px; color:var(--ink-3); background:
+    repeating-linear-gradient(135deg, var(--surface-2) 0 6px, var(--surface-3) 6px 12px);
+}
+.segname{ font-weight:600; }
+.segname em{ display:block; font-style:normal; font-size:11.5px; color:var(--ink-3); font-weight:500; }
+
+.foot{ margin-top:26px; font-size:12.5px; color:var(--ink-3); max-width:86ch; display:flex; flex-direction:column; gap:7px; }
+.foot b{ color:var(--ink-2); font-weight:600; }
+
+/* one authored moment: the measurement draws itself, from a visible default */
+@media (prefers-reduced-motion: no-preference){
+  .fill, .strip span, .cellbox .bar i{ animation:draw .62s cubic-bezier(.16,1,.3,1) both; }
+  .strip span{ animation-name:rise; }
+  @keyframes draw{ from{ transform:scaleX(.001); } to{ transform:scaleX(1); } }
+  @keyframes rise{ from{ opacity:0; transform:translateY(4px); } to{ opacity:1; transform:none; } }
+  .marker{ animation:slide .7s cubic-bezier(.16,1,.3,1) both .12s; }
+  @keyframes slide{ from{ opacity:0; } to{ opacity:1; } }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ===================================================== run header -->
+  <header class="runbar">
+    <div>
+      <h1>Acme Pharma · Collaboration Diagnostic</h1>
+      <div class="runmeta">
+        <span class="pill"><i></i>Open</span>
+        <span>Wave 1 · September 2026</span><span class="dotsep"></span>
+        <span>Closes 30 Sep</span><span class="dotsep"></span>
+        <span>Anonymous · department recorded</span>
+      </div>
+    </div>
+    <div class="turnout">
+      <div class="turnout-head"><b class="num">47<span style="color:var(--ink-3)">/50</span></b><span>leaders answered</span></div>
+      <div class="seats" id="seats" role="img" aria-label="47 of 50 invited leaders have answered"></div>
+      <p class="turnout-note">3 outstanding. Every figure below is computed from the 47 completed responses.</p>
+    </div>
+  </header>
+
+  <!-- ===================================================== index -->
+  <section class="sec">
+    <div class="sec-top">
+      <div>
+        <h2>Where this organisation stands</h2>
+        <p>The 24 converted scores, summed. The bands are the master copy's own indicative guide, not a cut-off.</p>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="indexwrap">
+        <div class="indexfig">
+          <div class="val num">70<small> / 120</small></div>
+          <div class="sub">2.90 average per statement</div>
+          <div class="bandname" style="color:var(--band-barriers)">Significant systemic barriers</div>
+        </div>
+        <div class="scale">
+          <div class="scale-track" role="img" aria-label="Index 70 of 120, in the band: Significant systemic barriers">
+            <span class="zone-breaking" style="width:24%"></span>
+            <span class="zone-barriers" style="width:24%"></span>
+            <span class="zone-friction" style="width:24%"></span>
+            <span class="zone-healthy"  style="width:28%"></span>
+          </div>
+          <div class="scale-labels">
+            <div style="width:24%"><b>24–47</b>Breaking down</div>
+            <div style="width:24%"><b>48–71</b>Systemic barriers</div>
+            <div style="width:24%"><b>72–95</b>Real friction</div>
+            <div style="width:28%"><b>96–120</b>Healthy</div>
+          </div>
+          <div class="marker" style="left:47.92%"><span class="tag">70</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================== sections -->
+  <section class="sec">
+    <div class="sec-top">
+      <div>
+        <h2>The six sections, strongest to weakest</h2>
+        <p>Converted means on the instrument's own 1–5 scale, so the track starts at 1. The light bar behind each mean is the spread across the 47 leaders. A long bar means they do not agree with each other.</p>
+      </div>
+    </div>
+    <div class="panel ladder" id="ladder"></div>
+  </section>
+
+  <!-- ===================================================== items -->
+  <section class="sec">
+    <div class="sec-top">
+      <div>
+        <h2>Every statement</h2>
+        <p>Each strip is the 47 answers after conversion, so 5 always means healthy whichever way the statement was worded. Hover a segment for its count.</p>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="controls">
+        <div class="chips" id="filters">
+          <button class="chip" data-filter="all" aria-pressed="true">All <span class="n">24</span></button>
+          <button class="chip" data-filter="split" aria-pressed="false">Split opinion <span class="n" id="n-split">0</span></button>
+          <button class="chip" data-filter="attention" aria-pressed="false">Needs attention <span class="n">5</span></button>
+          <button class="chip" data-filter="strength" aria-pressed="false">Strengths <span class="n">5</span></button>
+        </div>
+        <span class="spacer"></span>
+        <label class="legend" for="sort">Sort
+          <select class="sortsel" id="sort">
+            <option value="weakest">Weakest first</option>
+            <option value="strongest">Strongest first</option>
+            <option value="spread">Most disagreement</option>
+            <option value="order">Statement order</option>
+          </select>
+        </label>
+        <button class="chip" id="viewtoggle" aria-pressed="false">Table view</button>
+      </div>
+      <div class="controls" style="border-bottom:1px solid var(--line); padding-top:10px; padding-bottom:10px;">
+        <div class="legend">
+          <span>Converted answer</span>
+          <span class="sw"><i style="background:var(--d1)"></i>1 unhealthy</span>
+          <span class="sw"><i style="background:var(--d2)"></i>2</span>
+          <span class="sw"><i style="background:var(--d3)"></i>3 neither</span>
+          <span class="sw"><i style="background:var(--d4)"></i>4</span>
+          <span class="sw"><i style="background:var(--d5)"></i>5 healthy</span>
+        </div>
+      </div>
+      <div class="items" id="items"></div>
+      <div class="tableview" id="tableview" hidden></div>
+    </div>
+  </section>
+
+  <!-- ===================================================== segments -->
+  <section class="sec">
+    <div class="sec-top">
+      <div>
+        <h2>By department</h2>
+        <p>Section means for each department. A department with fewer than five respondents is not reported: at that size an average is close enough to a quotation to identify who said what.</p>
+      </div>
+    </div>
+    <div class="panel matrix" id="matrix"></div>
+  </section>
+
+  <div class="foot">
+    <p><b>Reading it.</b> Look at the average and the spread together. An item where half the leaders strongly agree and half strongly disagree has the same average as one everybody is lukewarm about, and means something entirely different. It is usually a barrier that one set of functions feels sharply and another cannot see.</p>
+    <p><b>Method.</b> Ten statements are scored as answered; fourteen are worded as problems and converted with 6 − the answer, so a 5 always means healthy. Spread is the standard deviation across respondents. Split opinion flags an item where at least 30% of answers sit at each end of the scale.</p>
+    <p><b>Sample data.</b> Illustrative figures for one leadership group, not results from a real run.</p>
+  </div>
+</div>
+
+<script id="data" type="application/json">{"org":"Acme Pharma","wave":"Wave 1 · September 2026","invited":50,"answered":47,"perItem":2.9,"total":70,"sections":[{"key":"structure","short":"Structure & Goals","mean":3.46,"spread":0.91,"items":null},{"key":"barriers","short":"Collaboration Barriers","mean":3.04,"spread":0.86,"items":null},{"key":"trust","short":"Trust & Safety","mean":2.89,"spread":0.85,"items":null},{"key":"power","short":"Power & Escalation","mean":2.74,"spread":0.98,"items":null},{"key":"pressure","short":"Operational & Compliance","mean":2.84,"spread":1,"items":null},{"key":"levers","short":"Institutional Levers","mean":2.1,"spread":0.75,"items":null}],"items":[{"no":1,"section":"structure","counts":[0,1,22,17,7],"mean":3.64,"sd":0.76,"low":2,"high":51,"split":false},{"no":2,"section":"structure","counts":[0,1,15,28,3],"mean":3.7,"sd":0.62,"low":2,"high":66,"split":false},{"no":3,"section":"structure","counts":[11,12,0,11,13],"mean":3.06,"sd":1.61,"low":49,"high":51,"split":true},{"no":4,"section":"structure","counts":[0,9,22,15,1],"mean":3.17,"sd":0.76,"low":19,"high":34,"split":false},{"no":5,"section":"structure","counts":[0,3,14,22,8],"mean":3.74,"sd":0.82,"low":6,"high":64,"split":false},{"no":6,"section":"barriers","counts":[1,10,22,13,1],"mean":3.06,"sd":0.82,"low":23,"high":30,"split":false},{"no":7,"section":"barriers","counts":[4,14,23,5,1],"mean":2.68,"sd":0.86,"low":38,"high":13,"split":false},{"no":8,"section":"barriers","counts":[0,6,19,16,6],"mean":3.47,"sd":0.88,"low":13,"high":47,"split":false},{"no":9,"section":"barriers","counts":[2,12,22,9,2],"mean":2.94,"sd":0.89,"low":30,"high":23,"split":false},{"no":10,"section":"trust","counts":[1,13,21,11,1],"mean":2.96,"sd":0.83,"low":30,"high":26,"split":false},{"no":11,"section":"trust","counts":[8,16,16,7,0],"mean":2.47,"sd":0.95,"low":51,"high":15,"split":false},{"no":12,"section":"trust","counts":[0,10,21,14,2],"mean":3.17,"sd":0.82,"low":21,"high":34,"split":false},{"no":13,"section":"trust","counts":[0,14,24,7,2],"mean":2.94,"sd":0.79,"low":30,"high":19,"split":false},{"no":14,"section":"power","counts":[15,11,0,13,8],"mean":2.74,"sd":1.57,"low":55,"high":45,"split":true},{"no":15,"section":"power","counts":[2,21,19,5,0],"mean":2.57,"sd":0.74,"low":49,"high":11,"split":false},{"no":16,"section":"power","counts":[1,19,20,7,0],"mean":2.7,"sd":0.75,"low":43,"high":15,"split":false},{"no":17,"section":"power","counts":[2,10,26,7,2],"mean":2.94,"sd":0.84,"low":26,"high":19,"split":false},{"no":18,"section":"pressure","counts":[0,11,23,12,1],"mean":3.06,"sd":0.76,"low":23,"high":28,"split":false},{"no":19,"section":"pressure","counts":[3,15,23,6,0],"mean":2.68,"sd":0.78,"low":38,"high":13,"split":false},{"no":20,"section":"pressure","counts":[12,11,0,12,12],"mean":3.02,"sd":1.61,"low":49,"high":51,"split":true},{"no":21,"section":"pressure","counts":[5,15,21,6,0],"mean":2.6,"sd":0.85,"low":43,"high":13,"split":false},{"no":22,"section":"levers","counts":[10,25,10,2,0],"mean":2.09,"sd":0.78,"low":74,"high":4,"split":false},{"no":23,"section":"levers","counts":[16,21,10,0,0],"mean":1.87,"sd":0.74,"low":79,"high":0,"split":false},{"no":24,"section":"levers","counts":[7,17,23,0,0],"mean":2.34,"sd":0.73,"low":51,"high":0,"split":false}],"segments":[{"name":"Operations","n":14,"by":{"structure":3.5,"barriers":3,"trust":2.6,"power":2.3,"pressure":2.5,"levers":2.1}},{"name":"Quality & QA","n":4,"by":null},{"name":"R&D","n":9,"by":{"structure":3.8,"barriers":3.3,"trust":3.1,"power":3,"pressure":3.2,"levers":2.4}},{"name":"Commercial","n":11,"by":{"structure":3.7,"barriers":3.2,"trust":2.9,"power":2.8,"pressure":3.1,"levers":2.2}},{"name":"Supply chain","n":9,"by":{"structure":3.3,"barriers":2.8,"trust":2.7,"power":2.4,"pressure":2.6,"levers":2}}],"statements":{"1":{"text":"When my department depends on other teams, we have clear shared agreements and enough joint authority to deliver together.","sectionKey":"structure","direction":"direct","section":"Structure & Goals"},"2":{"text":"When another department is late, it directly stops my team from delivering our own results.","sectionKey":"structure","direction":"reverse","section":"Structure & Goals"},"3":{"text":"The way our performance is measured pushes me to protect my own department's targets, even when this creates problems for another department.","sectionKey":"structure","direction":"reverse","section":"Structure & Goals"},"4":{"text":"Work often comes to a standstill because two departments that must work together have completely different priorities.","sectionKey":"structure","direction":"reverse","section":"Structure & Goals"},"5":{"text":"When several departments work on a project, it is clear who has the final say, so decisions do not get stuck.","sectionKey":"structure","direction":"direct","section":"Structure & Goals"},"6":{"text":"Not-Invented-Here: Teams readily adopt proven methods and solutions from other departments, instead of insisting on building their own.","sectionKey":"barriers","direction":"direct","section":"Collaboration Barriers"},"7":{"text":"Hoarding: Important information or expertise is held tightly within certain departments, so other teams are left working with incomplete information.","sectionKey":"barriers","direction":"reverse","section":"Collaboration Barriers"},"8":{"text":"Search: We lose a lot of time simply trying to find the right person or expert in another department to solve an urgent problem.","sectionKey":"barriers","direction":"reverse","section":"Collaboration Barriers"},"9":{"text":"Transfer: We often have to redo work because the handover from one department to the next is poorly managed.","sectionKey":"barriers","direction":"reverse","section":"Collaboration Barriers"},"10":{"text":"To avoid difficult discussions, leaders often pretend to agree in the meeting, but voice their disagreement later, outside the room.","sectionKey":"trust","direction":"reverse","section":"Trust & Safety"},"11":{"text":"When a mistake happens, our first reaction is to fix the real cause, rather than to find someone to blame.","sectionKey":"trust","direction":"direct","section":"Trust & Safety"},"12":{"text":"In meetings with other departments, leaders hold back or carefully filter information to protect themselves or their teams.","sectionKey":"trust","direction":"reverse","section":"Trust & Safety"},"13":{"text":"People feel safe asking other departments for help, without worrying that it will be seen as a sign of weakness.","sectionKey":"trust","direction":"direct","section":"Trust & Safety"},"14":{"text":"When two departments disagree, work comes to a stop until a senior executive steps in to settle it.","sectionKey":"power","direction":"reverse","section":"Power & Escalation"},"15":{"text":"In joint meetings, a leader's rank or influence in the company regularly wins over data, facts, or logic.","sectionKey":"power","direction":"reverse","section":"Power & Escalation"},"16":{"text":"Even junior or less powerful leaders speak up when they see a decision that could put company goals at risk.","sectionKey":"power","direction":"direct","section":"Power & Escalation"},"17":{"text":"We depend heavily on formal, written escalation rules because relationships between colleagues are not strong enough to handle disagreements.","sectionKey":"power","direction":"reverse","section":"Power & Escalation"},"18":{"text":"The strong pressure for “zero errors” makes leaders hide early risks or bad news until they turn into a full crisis.","sectionKey":"pressure","direction":"reverse","section":"Operational & Compliance"},"19":{"text":"Tight production and delivery deadlines regularly force us to cut corners on teamwork and alignment across departments.","sectionKey":"pressure","direction":"reverse","section":"Operational & Compliance"},"20":{"text":"At times, departments use strict regulatory and compliance rules as an excuse to delay or block joint efforts.","sectionKey":"pressure","direction":"reverse","section":"Operational & Compliance"},"21":{"text":"Even under pressure to follow rules and procedures, leaders stay focused on solving problems between departments.","sectionKey":"pressure","direction":"direct","section":"Operational & Compliance"},"22":{"text":"Senior executives consistently set an example of working across departments, even during times of high pressure.","sectionKey":"levers","direction":"direct","section":"Institutional Levers"},"23":{"text":"Our leaders share one clear, common view of what success looks like for the whole company, above their own department targets.","sectionKey":"levers","direction":"direct","section":"Institutional Levers"},"24":{"text":"We clearly reward and promote leaders who help other departments succeed — not only those who meet their own department's targets.","sectionKey":"levers","direction":"direct","section":"Institutional Levers"}}}</script>
+<script>
+const DATA = JSON.parse(document.getElementById('data').textContent);
+const fmt1 = (v) => v.toFixed(1);
+const fmt2 = (v) => v.toFixed(2);
+
+/* ---------------------------------------------------------- turnout */
+const seats = document.getElementById('seats');
+for (let i = 0; i < DATA.invited; i++) {
+  const s = document.createElement('span');
+  s.className = 'seat' + (i < DATA.answered ? ' in' : '');
+  seats.appendChild(s);
+}
+
+/* ------------------------------------------------- section ladder */
+// A 1–5 instrument's track starts at 1: position is (value − 1) / 4.
+const pos = (v) => ((v - 1) / 4) * 100;
+const ladder = document.getElementById('ladder');
+const ranked = [...DATA.sections].sort((a, b) => b.mean - a.mean);
+const strongest = ranked[0], weakest = ranked[ranked.length - 1];
+
+ranked.forEach((s, i) => {
+  const row = document.createElement('div');
+  row.className = 'srow' + (s === strongest ? ' strongest' : '') + (s === weakest ? ' weakest' : '');
+  const lo = Math.max(1, s.mean - s.spread), hi = Math.min(5, s.mean + s.spread);
+  row.innerHTML = `
+    <div class="name">${s.short}<em>${s.items || ''}</em></div>
+    <div class="track" role="img" aria-label="${s.short}: mean ${fmt2(s.mean)} of 5, spread ${fmt2(s.spread)}">
+      <span class="rail"></span>
+      <span class="tick" style="left:25%"></span><span class="tick" style="left:50%"></span><span class="tick" style="left:75%"></span>
+      <span class="whisk" style="left:${pos(lo)}%; width:${pos(hi) - pos(lo)}%"></span>
+      <span class="fill" style="left:0; width:${pos(s.mean)}%; animation-delay:${i * 45}ms"></span>
+    </div>
+    <div class="val num">${fmt2(s.mean)}<em>± ${fmt2(s.spread)}</em></div>`;
+  ladder.appendChild(row);
+});
+
+// the scale the tracks are drawn against, stated once
+const axis = document.createElement('div');
+axis.className = 'axis';
+axis.innerHTML = `<div class="ticks"><b>1</b><span>2</span><span>3</span><span>4</span><b>5</b></div>`;
+ladder.appendChild(axis);
+
+// the gap, drawn where it actually falls on the same scale
+const gap = document.createElement('div');
+gap.className = 'gapline';
+const a = pos(weakest.mean), b = pos(strongest.mean);
+gap.innerHTML = `
+  <div class="caliper">
+    <span class="bar" style="left:${a}%; width:${b - a}%"></span>
+    <span class="lab" style="left:${(a + b) / 2}%">gap ${fmt2(strongest.mean - weakest.mean)}</span>
+  </div>
+  <div class="why">strongest → weakest</div>`;
+ladder.appendChild(gap);
+
+/* ------------------------------------------------------ item field */
+const itemsEl = document.getElementById('items');
+const byMean = [...DATA.items].sort((x, y) => x.mean - y.mean);
+const attention = new Set(byMean.slice(0, 5).map((i) => i.no));
+const strengths = new Set(byMean.slice(-5).map((i) => i.no));
+document.getElementById('n-split').textContent = DATA.items.filter((i) => i.split).length;
+
+const SPLIT_ICON = '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M6 1.5v9M2.5 4 1 6l1.5 2M9.5 4 11 6l-1.5 2"/></svg>';
+
+let state = { filter: 'all', sort: 'weakest' };
+
+function visible() {
+  let list = [...DATA.items];
+  if (state.filter === 'split') list = list.filter((i) => i.split);
+  if (state.filter === 'attention') list = list.filter((i) => attention.has(i.no));
+  if (state.filter === 'strength') list = list.filter((i) => strengths.has(i.no));
+  const by = {
+    weakest: (x, y) => x.mean - y.mean,
+    strongest: (x, y) => y.mean - x.mean,
+    spread: (x, y) => y.sd - x.sd,
+    order: (x, y) => x.no - y.no,
+  }[state.sort];
+  return list.sort(by);
+}
+
+function strip(item) {
+  const total = item.counts.reduce((t, n) => t + n, 0);
+  const cells = item.counts.map((n, i) => {
+    const pct = (n / total) * 100;
+    const label = n && pct > 7 ? n : '';
+    return `<span class="v${i + 1}" style="flex:0 0 ${pct}%" title="${n} answered ${i + 1}">${label}</span>`;
+  }).join('');
+  return `<div class="strip" role="img" aria-label="${item.counts.map((n, i) => `${n} at ${i + 1}`).join(', ')}">${cells}</div>
+    <div class="striplab"><span>${item.low}% at 1–2</span><span>${item.high}% at 4–5</span></div>`;
+}
+
+function render() {
+  const list = visible();
+  itemsEl.innerHTML = list.map((item, idx) => {
+    const meta = DATA.statements[item.no];
+    return `<div class="irow">
+      <div class="no">${String(item.no).padStart(2, '0')}</div>
+      <div>
+        <p class="stmt">${meta.text}</p>
+        <div class="tags">
+          <span class="tag">${meta.section}</span>
+          <span class="tag ${meta.direction === 'reverse' ? 'rev' : ''}">${meta.direction === 'reverse' ? 'Reverse scored' : 'Direct'}</span>
+          ${item.split ? `<span class="tag split">${SPLIT_ICON}Split opinion</span>` : ''}
+        </div>
+      </div>
+      <div class="distcell" style="animation-delay:${idx * 18}ms">${strip(item)}</div>
+      <div class="figs">
+        <div class="m num">${fmt2(item.mean)}</div>
+        <div class="s">spread <b class="num">${fmt2(item.sd)}</b></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('tableview').innerHTML = `<table>
+    <thead><tr><th>#</th><th>Statement</th><th>Type</th><th class="n">Mean</th><th class="n">Spread</th>
+    <th class="n">1</th><th class="n">2</th><th class="n">3</th><th class="n">4</th><th class="n">5</th></tr></thead>
+    <tbody>${list.map((i) => {
+      const m = DATA.statements[i.no];
+      return `<tr><td class="num">${i.no}</td><td>${m.text}</td><td>${m.direction === 'reverse' ? 'R' : 'D'}</td>
+        <td class="n">${fmt2(i.mean)}</td><td class="n">${fmt2(i.sd)}</td>
+        ${i.counts.map((c) => `<td class="n">${c}</td>`).join('')}</tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+document.getElementById('filters').addEventListener('click', (e) => {
+  const btn = e.target.closest('.chip'); if (!btn) return;
+  state.filter = btn.dataset.filter;
+  [...e.currentTarget.children].forEach((c) => c.setAttribute('aria-pressed', String(c === btn)));
+  render();
+});
+document.getElementById('sort').addEventListener('change', (e) => { state.sort = e.target.value; render(); });
+document.getElementById('viewtoggle').addEventListener('click', (e) => {
+  const on = e.currentTarget.getAttribute('aria-pressed') === 'true';
+  e.currentTarget.setAttribute('aria-pressed', String(!on));
+  e.currentTarget.textContent = on ? 'Table view' : 'Chart view';
+  itemsEl.hidden = !on ? true : false;
+  document.getElementById('tableview').hidden = on;
+});
+render();
+
+/* -------------------------------------------------------- segments */
+const matrix = document.getElementById('matrix');
+matrix.innerHTML = `<table>
+  <thead><tr><th>Department</th>${DATA.sections.map((s) => `<th>${s.short}</th>`).join('')}</tr></thead>
+  <tbody>${DATA.segments.map((seg) => {
+    if (!seg.by) {
+      return `<tr><td class="segname">${seg.name}<em>${seg.n} respondents</em></td>
+        <td class="cell suppressed" colspan="${DATA.sections.length}">Not reported. Fewer than 5 respondents, so a departmental average would identify individuals.</td></tr>`;
+    }
+    return `<tr><td class="segname">${seg.name}<em>${seg.n} respondents</em></td>
+      ${DATA.sections.map((s) => {
+        const v = seg.by[s.key];
+        return `<td class="cell"><span class="cellbox"><span class="bar"><i style="width:${pos(v)}%"></i></span>${fmt1(v)}</span></td>`;
+      }).join('')}</tr>`;
+  }).join('')}</tbody></table>`;
+</script>
+</body>
+</html>
