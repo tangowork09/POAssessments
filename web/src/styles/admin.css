@@ -859,8 +859,11 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
 
 /* The map is the context for the comparison, so it is framed like one and
    given a caption rather than floating in the middle of the panel. */
+/* The map is the evidence under the comparison, not the comparison. It sits
+   below the rows and is capped: at a third of the viewport it pushed every
+   number the tab exists to show below the fold. */
 .h2h-map{
-  position:relative; height:clamp(260px, 34vh, 400px); display:flex; min-height:0;
+  position:relative; height:clamp(220px, 26vh, 320px); display:flex; min-height:0;
   border:1px solid var(--line); border-radius:var(--r-3); background:var(--surface-2);
   padding:6px;
 }
@@ -914,14 +917,37 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
   font-size:12.5px; font-weight:600; color:var(--ink);
 }
 .h2h-row dt span{ display:block; font-weight:400; font-size:11px; color:var(--ink-3); }
+/* A value is a bar and a number: the bar answers "which of them", the number
+   is what gets written down afterwards. Scaled to the largest on its own row,
+   so a row of small counts still reads. */
 .h2h-val{
-  margin:0; text-align:right; font-size:14px; font-weight:600; color:var(--ink-2);
-  font-variant-numeric:tabular-nums;
+  margin:0; min-width:0; display:flex; flex-direction:column; gap:5px; align-items:stretch;
+  font-size:14px; font-weight:600; color:var(--ink-2); font-variant-numeric:tabular-nums;
 }
+.h2h-val > b{ font-weight:inherit; text-align:right; line-height:1.1; }
+.h2h-bar{ display:block; height:7px; border-radius:99px; background:var(--line-2); overflow:hidden; }
+.h2h-bar i{ display:block; height:100%; border-radius:99px; min-width:2px; transition:width .18s var(--ease); }
 /* The lead is stated by weight and a mark, never by colour alone. */
 .h2h-val.is-lead{ color:var(--ink); font-weight:750; }
-.h2h-val.is-lead i{ font-style:normal; margin-left:5px; font-size:9px; color:var(--ok, #0E7C5A); }
+.h2h-val.is-lead b i{ font-style:normal; margin-left:5px; font-size:9px; color:var(--ok, #0E7C5A); }
 .h2h-val.is-trail{ color:var(--ink-3); }
+.h2h-val.is-trail .h2h-bar i{ opacity:.55; }
+
+/* The difference, in the measure's own units — the number the comparison was
+   opened to produce, and the one a reader used to have to work out. */
+.h2h-heads-label,
+.h2h-heads-gap{
+  align-self:end; padding-bottom:9px;
+  font-size:10px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--ink-4);
+}
+.h2h-heads-gap{ text-align:right; }
+.h2h-gap{
+  margin:0; text-align:right; font-size:13px; font-weight:700; color:var(--ink);
+  font-variant-numeric:tabular-nums; white-space:nowrap;
+}
+.h2h-gap-arrow{ margin-right:5px; font-size:9px; color:var(--ink-3); }
+.h2h-gap.is-level{ font-weight:500; }
+.h2h-gap-level{ font-size:11.5px; color:var(--ink-4); }
 
 @media (max-width:720px){
   .h2h-pickers{ grid-template-columns:1fr; }

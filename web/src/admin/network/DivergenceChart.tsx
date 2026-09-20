@@ -23,6 +23,7 @@ import { useMemo } from 'react';
 import { POWER_ACCENT } from './ComparePane.js';
 import type { PersonProps } from './InsightsChrome.js';
 import type { LayoutBox } from './layout.js';
+import type { NameMode } from './InsightsChrome.js';
 import {
   cullLabels,
   outerLabels,
@@ -83,6 +84,7 @@ export function DivergenceChart({
   medians,
   activeNo,
   lifted,
+  names,
   nameOf,
   funcOf,
   personProps,
@@ -95,6 +97,14 @@ export function DivergenceChart({
   activeNo: number | null;
   /** A quadrant the reader is pointing at in the sidebar — its band lifts. */
   lifted: Quadrant | null;
+  /**
+   * How much of the plane is named, from the same control as the maps.
+   *
+   * This chart used to decide for itself, which meant a facilitator who had
+   * asked for no names still got sixteen of them on the one picture most
+   * likely to be turned towards the room.
+   */
+  names: NameMode;
   nameOf: (no: number) => string;
   funcOf: (no: number) => string;
   personProps: PersonProps;
@@ -162,7 +172,11 @@ export function DivergenceChart({
     // below it, and kept only if one of the two clears everything already
     // standing. Greedy and order-dependent by design: the outliers are the
     // reason the chart exists, so they get first refusal on the space.
-    const eligible = outerLabels(points, medians, 0.6);
+    // 'key' names the outer six-tenths — the part of the plane with something
+    // to say; 'all' offers everyone a seat and lets the collision solver keep
+    // whoever fits; 'none' offers nobody one.
+    const eligible =
+      names === 'none' ? new Set<number>() : outerLabels(points, medians, names === 'all' ? 1 : 0.6);
     // A seat is only offered if the whole label lands inside the plot: a name
     // hanging off the axis reads as a rendering fault, not as data.
     const inside = (b: LabelBox) =>
@@ -187,7 +201,7 @@ export function DivergenceChart({
       guides,
       named: cullLabels(candidates, reserved, 3),
     };
-  }, [bottom, left, medians, nameOf, points, right, top]);
+  }, [bottom, left, medians, nameOf, names, points, right, top]);
 
   if (!plot) {
     return <p className="hint">Nobody to plot yet — the chart draws itself as the group answers.</p>;

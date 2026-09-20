@@ -2256,6 +2256,12 @@ export interface PairMetric {
   note: string;
   values: (number | null)[];
   texts: string[];
+  /**
+   * The formatter the texts were made with, so a difference between two of
+   * them can be printed in the same units. Without it a comparison has to
+   * guess whether 0.2 is two-tenths of a person or twenty per cent.
+   */
+  fmt: (v: number | null) => string;
 }
 
 /** Who leads a metric: the index, or null for a tie or an unjudgeable one. */
@@ -2332,7 +2338,7 @@ export function comparePeople(
     fmt: (v: number | null) => string,
   ): PairMetric => {
     const values = pick(of);
-    return { key, label, short, better, note, values, texts: values.map(fmt) };
+    return { key, label, short, better, note, values, texts: values.map(fmt), fmt };
   };
 
   return [

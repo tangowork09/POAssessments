@@ -1865,6 +1865,7 @@ export function InsightsView({
                 medians={medians}
                 activeNo={activeNo}
                 lifted={lifted}
+                names={nameMode}
                 nameOf={nameOf}
                 funcOf={funcOf}
                 personProps={personProps}
@@ -2308,6 +2309,16 @@ export function InsightsView({
                       onPick={(no) => setPairB(no)}
                     />
                   </div>
+                  <HeadToHead
+                    sides={compareNos.map((no) => ({
+                      no,
+                      name: nameOf(no),
+                      func: funcOf(no),
+                      color: fillOfFunc(no),
+                    }))}
+                    metrics={pairMetrics}
+                    onPick={setFocusNo}
+                  />
                   <figure className="h2h-map">
                     <InsightGraph
                       nodes={nodes}
@@ -2343,16 +2354,6 @@ export function InsightsView({
                       the rest of the group is left faint behind them.
                     </figcaption>
                   </figure>
-                  <HeadToHead
-                    sides={compareNos.map((no) => ({
-                      no,
-                      name: nameOf(no),
-                      func: funcOf(no),
-                      color: fillOfFunc(no),
-                    }))}
-                    metrics={pairMetrics}
-                    onPick={setFocusNo}
-                  />
                 </div>
               )
             }
