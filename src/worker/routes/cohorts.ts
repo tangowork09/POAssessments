@@ -14,6 +14,7 @@ import { Hono } from 'hono';
 import type { Env } from '../env.js';
 import { baseUrl } from '../env.js';
 import { requireAdmin, type AdminHono } from '../lib/auth.js';
+import { cellAt, readXlsx, sheetWidth, XlsxError, type XlsxSheet } from '../lib/xlsx-read.js';
 import { auditAll, recordBefore } from '../lib/audit.js';
 import { newId } from '../lib/ids.js';
 import { generateToken, hashToken } from '../lib/tokens.js';
@@ -23,7 +24,6 @@ import { dispatch } from '../pipeline.js';
 import { sendMail } from '../lib/mailer.js';
 import { brandingForClient } from '../lib/brand-asset.js';
 import { magicLinkEmail } from '../email/templates.js';
-import ExcelJS from 'exceljs';
 import {
   assignmentsSetSchema,
   cohortCreateSchema,
@@ -848,7 +848,7 @@ cohortRoutes.post('/:id/members/:memberId/restore', async (c) => {
  * paste box. Name, function and email are taken from the first three columns,
  * or from columns whose header says so when the sheet has one.
  */
-interface ParsedWorkbook {
+export interface ParsedWorkbook {
   rows: { name: string; func: string; email: string }[];
   skipped: string[];
   /** Cohort name / organisation found in label rows above the table, or ''. */
@@ -876,12 +876,9 @@ interface ParsedWorkbook {
  * correctly; without one the first three columns are taken in order.
  * Throws CohortError with a message fit to show the operator.
  */
-/** One cell as text, with a mailto: hyperlink flattened to what it shows. */
-function cellString(row: ExcelJS.Row, i: number): string {
-  const v = row.getCell(i).value;
-  if (v === null || v === undefined) return '';
-  if (typeof v === 'object' && 'text' in v) return String((v as { text: unknown }).text ?? '').trim();
-  return String(v).trim();
+/** One cell of a parsed sheet, 1-based, or '' past the end of the row. */
+function cellString(sheet: XlsxSheet, rowNo: number, colNo: number): string {
+  return cellAt(sheet, rowNo, colNo);
 }
 
 /** A rater and one person they are assigned, both as the sheet spells them. */
@@ -901,12 +898,12 @@ export interface AssignmentPair {
  * takes names rather than ids so the same reader serves an upload against a
  * live roster and an import where the roster does not exist yet.
  */
-function readAssignmentSheet(ws: ExcelJS.Worksheet, knows: (name: string) => boolean): AssignmentPair[] {
+function readAssignmentSheet(ws: XlsxSheet, knows: (name: string) => boolean): AssignmentPair[] {
   const pairs: AssignmentPair[] = [];
-  const head = ws.getRow(1);
+  const width = Math.min(sheetWidth(ws), 201);
   const headNames: string[] = [];
-  for (let i = 2; i <= Math.min(head.cellCount, 201); i++) {
-    const t = cellString(head, i);
+  for (let i = 2; i <= width; i++) {
+    const t = cellString(ws, 1, i);
     if (t) headNames.push(t);
   }
   const hits = headNames.filter((t) => knows(t)).length;
@@ -914,47 +911,50 @@ function readAssignmentSheet(ws: ExcelJS.Worksheet, knows: (name: string) => boo
 
   if (isMatrix) {
     const targetOfCol = new Map<number, string>();
-    for (let i = 2; i <= Math.min(head.cellCount, 201); i++) {
-      const t = cellString(head, i);
+    for (let i = 2; i <= width; i++) {
+      const t = cellString(ws, 1, i);
       if (t) targetOfCol.set(i, t);
     }
-    ws.eachRow((row, rowNo) => {
-      if (rowNo === 1) return;
-      const rater = cellString(row, 1);
-      if (!rater) return;
+    for (let rowNo = 2; rowNo <= ws.rows.length; rowNo++) {
+      const rater = cellString(ws, rowNo, 1);
+      if (!rater) continue;
       for (const [col, target] of targetOfCol) {
-        if (cellString(row, col)) pairs.push({ rater, target });
+        if (cellString(ws, rowNo, col)) pairs.push({ rater, target });
       }
-    });
+    }
     return pairs;
   }
 
-  ws.eachRow((row, rowNo) => {
-    const first = cellString(row, 1);
+  for (let rowNo = 1; rowNo <= ws.rows.length; rowNo++) {
+    const first = cellString(ws, rowNo, 1);
     // A header like "Leader | Rates" is skipped, not treated as a person.
-    if (rowNo === 1 && /^(name|leader|person|rater)s?\b/i.test(first) && !knows(first)) return;
-    if (!first) return;
-    for (let i = 2; i <= Math.min(row.cellCount, 201); i++) {
-      const t = cellString(row, i);
+    if (rowNo === 1 && /^(name|leader|person|rater)s?\b/i.test(first) && !knows(first)) continue;
+    if (!first) continue;
+    for (let i = 2; i <= width; i++) {
+      const t = cellString(ws, rowNo, i);
       if (t) pairs.push({ rater: first, target: t });
     }
-  });
+  }
   return pairs;
 }
 
 /** Sheets that exist for the reader, never for the importer. */
 const GUIDANCE_SHEET = /^(how to use|guide|guidance|instructions?|notes?|readme)\b/i;
 
-async function readRosterWorkbook(bytes: Uint8Array): Promise<ParsedWorkbook> {
+export async function readRosterWorkbook(bytes: Uint8Array): Promise<ParsedWorkbook> {
   const rows: { name: string; func: string; email: string }[] = [];
   const skipped: string[] = [];
   const meta = { name: '', organisation: '' };
 
-  const wb = new ExcelJS.Workbook();
+  let book: XlsxSheet[];
   try {
-    await wb.xlsx.load(bytes.buffer as ArrayBuffer);
-  } catch {
-    throw new CohortError('That file is not a readable .xlsx workbook. Export it as Excel and try again.');
+    book = await readXlsx(bytes);
+  } catch (err) {
+    throw new CohortError(
+      err instanceof XlsxError
+        ? err.message
+        : 'That file is not a readable .xlsx workbook. Export it as Excel and try again.',
+    );
   }
   // One workbook, one upload. A client filling this in should not have to send
   // three files and remember which screen each belongs to, so the roster and
@@ -962,61 +962,143 @@ async function readRosterWorkbook(bytes: Uint8Array): Promise<ParsedWorkbook> {
   //
   // Named sheets win; otherwise the first sheet that is not guidance is the
   // roster, which is what every workbook written before this looked like.
-  const sheets = wb.worksheets.filter((w) => !GUIDANCE_SHEET.test(w.name.trim()));
+  const sheets = book.filter((w) => !GUIDANCE_SHEET.test(w.name.trim()));
   if (sheets.length === 0) throw new CohortError('That workbook has no sheets to read.');
   const named = (re: RegExp) => sheets.find((w) => re.test(w.name.trim()));
-  const assignSheet = named(/assign|who rates|rates whom|mapping|matrix/i) ?? null;
+  // Not /matrix/: the client's own instrument calls its questionnaire tab
+  // "Rating Matrix", and reading that as a map of who rates whom turned the
+  // sheet's prose into a list of people nobody could find.
+  const assignSheet = named(/assign|who rates|rates whom|rating map|mapping/i) ?? null;
   const ws = named(/roster|people|leaders?|members?|participants?/i)
     ?? sheets.find((w) => w !== assignSheet)
     ?? sheets[0]!;
 
-  const cellText = cellString;
+  const cellText = (rowNo: number, i: number): string => cellString(ws, rowNo, i);
 
-  // Label rows first, from the top, stopping at the first row that is neither
-  // label. "Cohort name" starts with "Cohort", so the label test runs before
-  // the header test ever sees the row.
+  // Where the table actually starts.
+  //
+  // A workbook a person designed rather than exported does not begin at A1. The
+  // client's own instrument has an empty spacer column, a title, a note and a
+  // blank row above its header — and taking row 1 / column A on faith read
+  // fifty leaders as fifty blanks. So the sheet is scanned for its table
+  // rather than assumed to be one.
+  const width = Math.min(40, Math.max(3, sheetWidth(ws)));
+  const rowIsEmpty = (rowNo: number): boolean => {
+    for (let i = 1; i <= width; i++) if (cellText(rowNo, i)) return false;
+    return true;
+  };
+
+  // Label rows, from the first row that says anything, stopping at the first
+  // row that is neither a label nor blank. "Cohort name" starts with "Cohort",
+  // so the label test runs before the header test ever sees the row.
   let scanRow = 1;
-  for (; scanRow <= 10; scanRow++) {
-    const row = ws.getRow(scanRow);
-    const first = cellText(row, 1);
+  for (; scanRow <= 12 && scanRow <= ws.rows.length; scanRow++) {
+    if (rowIsEmpty(scanRow)) continue;
+    let first = '';
+    for (let i = 1; i <= width && !first; i++) first = cellText(scanRow, i);
     const isCohort = /^(cohort|group|team)\b/i.test(first);
     const isOrg = /^(organisation|organization|company|org)\b/i.test(first);
     if (!isCohort && !isOrg) break;
     // The value sits beside the label, or after a colon inside it.
     let value = '';
-    for (let i = 2; i <= 6 && !value; i++) value = cellText(row, i);
+    for (let i = 1; i <= width; i++) {
+      const t = cellText(scanRow, i);
+      if (t && t !== first) { value = t; break; }
+    }
     if (!value) value = first.split(':').slice(1).join(':').trim();
     if (isCohort && !meta.name) meta.name = value;
     if (isOrg && !meta.organisation) meta.organisation = value;
   }
 
-  let nameCol = 1;
-  let funcCol = 2;
-  let mailCol = 3;
-  let firstDataRow = scanRow;
+  /**
+   * Which of the three columns a heading names, if any.
+   *
+   * Order matters: "Leader name" is a name before it is anything else, and an
+   * address column headed "Email" must not be read as a function because the
+   * word "mail" appears nowhere in "department".
+   */
+  const roleOf = (text: string): 'name' | 'func' | 'mail' | null => {
+    const t = text.toLowerCase();
+    if (!t) return null;
+    if (/name|leader|person|participant|member/.test(t)) return 'name';
+    if (/mail/.test(t)) return 'mail';
+    if (/function|department|dept|role|team|division|unit/.test(t)) return 'func';
+    return null;
+  };
 
-  const header = ws.getRow(scanRow);
-  const headerText = (i: number): string => String(header.getCell(i).value ?? '').trim().toLowerCase();
-  const looksLikeHeader = /name|leader|person/.test(headerText(1));
-  if (looksLikeHeader) {
-    firstDataRow = scanRow + 1;
-    for (let i = 1; i <= Math.min(12, header.cellCount); i++) {
-      const t = headerText(i);
-      if (/name|leader|person/.test(t)) nameCol = i;
-      else if (/function|department|dept|role|team/.test(t)) funcCol = i;
-      else if (/mail/.test(t)) mailCol = i;
+  /**
+   * The header row, chosen by how much of a header it looks like rather than
+   * by position.
+   *
+   * A title row saying "Leader Roster" names one column by accident; the real
+   * header two rows below names three on purpose. Scoring both and taking the
+   * better one is what tells them apart — and an address in the row vetoes it
+   * outright, because that is a person, not a heading.
+   */
+  let headerRow = 0;
+  let headerScore = 0;
+  const columnsOf = new Map<number, 'name' | 'func' | 'mail'>();
+  for (let rowNo = scanRow; rowNo <= Math.min(scanRow + 14, ws.rows.length); rowNo++) {
+    if (rowIsEmpty(rowNo)) continue;
+    const found = new Map<number, 'name' | 'func' | 'mail'>();
+    const seen = new Set<string>();
+    let hasAddress = false;
+    for (let i = 1; i <= width; i++) {
+      const text = cellText(rowNo, i);
+      if (text.includes('@')) hasAddress = true;
+      const role = roleOf(text);
+      if (!role || seen.has(role)) continue;
+      seen.add(role);
+      found.set(i, role);
+    }
+    if (hasAddress) continue;
+    if (seen.size > headerScore) {
+      headerScore = seen.size;
+      headerRow = rowNo;
+      columnsOf.clear();
+      for (const [col, role] of found) columnsOf.set(col, role);
     }
   }
 
-  ws.eachRow((row, rowNo) => {
-    if (rowNo < firstDataRow) return;
-    const name = cellText(row, nameCol);
-    if (!name) {
-      if (cellText(row, funcCol) || cellText(row, mailCol)) skipped.push(`Row ${rowNo}: no name`);
-      return;
+  let nameCol = 0;
+  let funcCol = 0;
+  let mailCol = 0;
+  let firstDataRow = scanRow;
+
+  if (headerScore >= 2 || (headerScore === 1 && columnsOf.values().next().value === 'name')) {
+    firstDataRow = headerRow + 1;
+    for (const [col, role] of columnsOf) {
+      if (role === 'name') nameCol = col;
+      else if (role === 'func') funcCol = col;
+      else mailCol = col;
     }
-    rows.push({ name, func: cellText(row, funcCol), email: cellText(row, mailCol).toLowerCase() });
-  });
+  }
+
+  // No header, or one that only named some of the columns: fall back to the
+  // first columns that actually carry data, so a sheet with a spacer column
+  // still lines up.
+  if (nameCol === 0) {
+    while (firstDataRow <= ws.rows.length && rowIsEmpty(firstDataRow)) firstDataRow += 1;
+    const used: number[] = [];
+    for (let i = 1; i <= width && used.length < 3; i++) {
+      for (let rowNo = firstDataRow; rowNo <= Math.min(firstDataRow + 30, ws.rows.length); rowNo++) {
+        if (cellText(rowNo, i)) { used.push(i); break; }
+      }
+    }
+    nameCol = used[0] ?? 1;
+    if (funcCol === 0) funcCol = used[1] ?? 0;
+    if (mailCol === 0) mailCol = used[2] ?? 0;
+  }
+
+  const at = (rowNo: number, col: number): string => (col > 0 ? cellText(rowNo, col) : '');
+  for (let rowNo = firstDataRow; rowNo <= ws.rows.length; rowNo++) {
+    const name = at(rowNo, nameCol);
+    if (!name) {
+      if (at(rowNo, funcCol) || at(rowNo, mailCol)) skipped.push(`Row ${rowNo}: no name`);
+      continue;
+    }
+    rows.push({ name, func: at(rowNo, funcCol), email: at(rowNo, mailCol).toLowerCase() });
+  }
 
   // Read after the roster, so the shape test can ask whether a name in the
   // assignment sheet's header row is somebody the roster actually names.
@@ -1187,7 +1269,14 @@ cohortRoutes.post('/import', async (c) => {
       // Absent assignments are the full matrix, so the console can say which
       // of the two a cohort arrived as rather than leaving the reader to open
       // the Access tab and count.
-      assignments: { raters: mapped.size, pairs, unmatched: [...unmatched].slice(0, 30) },
+      // Nothing resolved means the sheet was not a rating map at all, and
+      // reporting its prose as "names we could not find" reads as a fault in
+      // the roster rather than as the absence of a map.
+      assignments: {
+        raters: mapped.size,
+        pairs,
+        unmatched: mapped.size === 0 ? [] : [...unmatched].slice(0, 30),
+      },
     },
     201,
   );
@@ -1496,13 +1585,11 @@ cohortRoutes.post('/:id/assignments/upload', async (c) => {
   };
 
   try {
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(bytes.buffer as ArrayBuffer);
     // The same sheet rules as a full import, so a client can send the one
     // workbook here too and have only its rating map read.
-    const sheets = wb.worksheets.filter((w) => !GUIDANCE_SHEET.test(w.name.trim()));
+    const sheets = (await readXlsx(bytes)).filter((w) => !GUIDANCE_SHEET.test(w.name.trim()));
     const ws =
-      sheets.find((w) => /assign|who rates|rates whom|mapping|matrix/i.test(w.name.trim())) ?? sheets[0];
+      sheets.find((w) => /assign|who rates|rates whom|rating map|mapping/i.test(w.name.trim())) ?? sheets[0];
     if (!ws) return c.json({ error: 'That workbook has no sheets.' }, 400);
 
     for (const { rater, target } of readAssignmentSheet(ws, (n) => byName.has(n.trim().toLowerCase()))) {
