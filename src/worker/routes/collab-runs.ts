@@ -25,7 +25,7 @@ import { auditAll } from '../lib/audit.js';
 import { newId } from '../lib/ids.js';
 import { generateToken, hashToken } from '../lib/tokens.js';
 import { ASSESSMENT_ID } from '../../shared/assessments.js';
-import { COLLAB_ITEM_COUNT, COLLAB_SECTIONS } from '../../shared/collab.js';
+import { COLLAB_ITEMS, COLLAB_ITEM_COUNT, COLLAB_SECTIONS, COLLAB_SECTION_BY_KEY } from '../../shared/collab.js';
 import { COLLAB_BANDS } from '../../shared/collab-scoring.js';
 import {
   CollabRunError,
@@ -397,10 +397,22 @@ collabRunRoutes.get('/:id/results', async (c) => {
     throw err;
   }
 
+  /*
+   * The statements travel with the figures. A results screen that has a mean
+   * for item 14 and has to look up what item 14 says is one refactor away from
+   * showing the right number against the wrong statement, and the reader has
+   * no way to catch it.
+   */
   return c.json({
     run: { id: run.id, name: run.name, organisation: run.organisation, anonymous: run.anonymous === 1 },
     wave,
     minSegment: run.min_segment,
+    statements: COLLAB_ITEMS.map((item) => ({
+      no: item.no,
+      text: item.text,
+      direction: item.direction,
+      section: COLLAB_SECTION_BY_KEY.get(item.sectionKey)?.short ?? '',
+    })),
     ...scores,
   });
 });

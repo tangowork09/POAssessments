@@ -8,12 +8,14 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Link, Navigate, Route, Routes } from 'react-router-dom';
 import '../styles/base.css';
 import '../styles/admin.css';
+import '../styles/collab.css';
 import { api } from '../lib/api.js';
 import { Login } from './Login.js';
 import { AdminShell } from './AdminShell.js';
 import { Dashboard } from './Dashboard.js';
 import { Assessments } from './Assessments.js';
 import { Cohorts } from './Cohorts.js';
+import { CollabTests } from './collab/CollabTests.js';
 import { Candidates } from './Candidates.js';
 import { Invites } from './Invites.js';
 import { AssessmentLinks } from './AssessmentLinks.js';
@@ -70,6 +72,10 @@ function App() {
         <Route path="/admin" element={gate('dashboard', <Dashboard />)} />
         <Route path="/admin/assessments" element={gate('assessments', <Assessments />)} />
         <Route path="/admin/cohorts" element={gate('cohorts', <Cohorts />)} />
+        {/* Diagnostic runs are cohorts underneath, and the same people manage
+            both, so they sit behind the cohorts gate rather than a new role. */}
+        <Route path="/admin/collaboration-tests" element={gate('cohorts', <CollabTests />)} />
+        <Route path="/admin/collaboration-tests/:runId" element={gate('cohorts', <CollabTests />)} />
         <Route path="/admin/candidates" element={gate('candidates', <Candidates />)} />
         <Route path="/admin/invites" element={gate('invites', <Invites />)} />
         <Route path="/admin/links" element={gate('links', <AssessmentLinks />)} />
