@@ -22,7 +22,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '../../lib/api.js';
-import { ErrorState, Loading } from '../ui.js';
+import { EmptyState, ErrorState, Loading } from '../ui.js';
 import type { ItemStat, RunResults as Results, SectionScore } from './types.js';
 
 /** A value's place on the instrument's own 1..5 scale. */
@@ -43,6 +43,10 @@ type SortKey = 'weakest' | 'strongest' | 'spread' | 'order';
 export function RunResults({ runId, wave }: { runId: string; wave?: number }) {
   const [data, setData] = useState<Results | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 409 here is "nobody has answered yet", which is where every run starts.
+  // Reporting it as a load failure tells a facilitator something is broken on
+  // the day they set the run up.
+  const [empty, setEmpty] = useState(false);
   const [filter, setFilter] = useState<FilterKey>('all');
   const [sort, setSort] = useState<SortKey>('weakest');
   const [tableView, setTableView] = useState(false);
@@ -51,11 +55,16 @@ export function RunResults({ runId, wave }: { runId: string; wave?: number }) {
     let live = true;
     setData(null);
     setError(null);
+    setEmpty(false);
     api
       .get<Results>(`/api/admin/collab-runs/${runId}/results${wave ? `?wave=${wave}` : ''}`)
       .then((r) => live && setData(r))
       .catch((err: unknown) => {
         if (!live) return;
+        if (err instanceof ApiError && err.status === 409) {
+          setEmpty(true);
+          return;
+        }
         setError(err instanceof ApiError ? err.message : 'Could not load these results.');
       });
     return () => {
@@ -92,6 +101,14 @@ export function RunResults({ runId, wave }: { runId: string; wave?: number }) {
   }, [data, filter, sort]);
 
   if (error) return <ErrorState message={error} />;
+  if (empty) {
+    return (
+      <EmptyState
+        title="Nothing to read yet"
+        body="This wave has no completed responses. Open the run, issue its link, and the figures appear as leaders finish."
+      />
+    );
+  }
   if (!data) return <Loading label="Scoring this wave…" />;
 
   const { group, turnout } = data;

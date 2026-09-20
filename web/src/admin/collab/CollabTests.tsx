@@ -11,6 +11,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { api, ApiError } from '../../lib/api.js';
 import { CardHead, EmptyState, ErrorState, Head, Loading, formatDate, Toast, useToast } from '../ui.js';
 import { RunResults } from './RunResults.js';
+import { FacetEditor } from './FacetEditor.js';
 import type { RunListItem } from './types.js';
 
 interface RunDetail {
@@ -277,7 +278,7 @@ function RunDetailView({
         />
         <div className="card-body cd-actions">
           {detail.run.status !== 'open' && (
-            <button className="btn btn-sm" type="button" onClick={() => setStatus('open')}>
+            <button className="btn btn-primary btn-sm" type="button" onClick={() => setStatus('open')}>
               Open the run
             </button>
           )}
@@ -291,6 +292,14 @@ function RunDetailView({
               </button>
             </>
           )}
+          {/* A plain link, not a fetch: the browser saves the file itself and
+              the session cookie goes with it. */}
+          <a
+            className="btn btn-secondary btn-sm"
+            href={`/api/admin/collab-runs/${runId}/xlsx${wave ? `?wave=${wave}` : ''}`}
+          >
+            Download workbook
+          </a>
           {detail.waves.length > 1 && (
             <label className="cd-inline">
               <span className="hint">Wave</span>
@@ -317,11 +326,23 @@ function RunDetailView({
         )}
 
         <p className="hint card-body">
-          {detail.facets.length === 0
-            ? 'This run collects no cuts, so results cannot be broken down by department.'
-            : `Cuts collected: ${detail.facets.map((f) => f.label).join(', ')}.`}{' '}
-          {detail.run.anonymous ? 'Responses are anonymous.' : 'Responses are named.'}
+          {detail.run.anonymous ? 'Responses are anonymous.' : 'Responses are named.'} Departments with
+          fewer than {detail.run.min_segment} respondents are not reported.
         </p>
+      </section>
+
+      <section className="card mb-5">
+        <CardHead
+          title="What this run collects"
+          sub="The cuts results can be broken down by. Respondents pick from these lists rather than typing their own."
+        />
+        <FacetEditor
+          runId={runId}
+          facets={detail.facets}
+          locked={(detail.turnout?.started ?? 0) > 0}
+          onSaved={load}
+          say={say}
+        />
       </section>
 
       <RunResults runId={runId} wave={wave} />

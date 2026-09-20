@@ -234,3 +234,14 @@
 .cd-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .cd-inline { display: inline-flex; align-items: center; gap: 8px; }
 .cd-control-sm { height: 30px; padding-block: 0; font-size: 13px; }
+
+/* --------------------------------------------------------- cut editor */
+.cd-facets { display: flex; flex-direction: column; gap: 16px; margin-bottom: 14px; }
+.cd-facet { border: 1px solid var(--line); border-radius: var(--r-3); padding: 14px; background: var(--surface-2); }
+.cd-facet-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }
+.cd-facet-row .control { flex: 1 1 260px; }
+.cd-facet-options { width: 100%; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; resize: vertical; }
+.cd-facet-read { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
+.cd-facet-read li { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.cd-facet-read b { font-weight: 620; font-size: 13.5px; }
+.cd-facet-read span { font-size: 13px; color: var(--ink-3); }

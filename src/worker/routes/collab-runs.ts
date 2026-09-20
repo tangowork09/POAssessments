@@ -33,6 +33,7 @@ import {
   scoreRun,
   type CollabRunScores,
 } from '../lib/collab-run.js';
+import { buildCollabWorkbook } from '../lib/collab-workbook.js';
 import {
   collabFacetsSchema,
   collabRunCreateSchema,
@@ -414,6 +415,60 @@ collabRunRoutes.get('/:id/results', async (c) => {
       section: COLLAB_SECTION_BY_KEY.get(item.sectionKey)?.short ?? '',
     })),
     ...scores,
+  });
+});
+
+/**
+ * The wave as a workbook.
+ *
+ * A facilitator argues with a diagnostic after the debrief: re-cutting a
+ * department, checking whether a bad-looking item is one people disagreed
+ * about, pasting a section into a slide. That needs the numbers, not a picture
+ * of the screen.
+ */
+collabRunRoutes.get('/:id/xlsx', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+
+  const requested = c.req.query('wave');
+  let wave = requested ? Number(requested) : null;
+  if (wave !== null && (!Number.isInteger(wave) || wave < 1)) {
+    return c.json({ error: 'That is not a wave number.' }, 400);
+  }
+  const waveRow = await c.env.DB.prepare(
+    wave === null
+      ? 'SELECT no, label FROM cohort_rounds WHERE cohort_id = ?1 ORDER BY (closed_at IS NULL) DESC, no DESC LIMIT 1'
+      : 'SELECT no, label FROM cohort_rounds WHERE cohort_id = ?1 AND no = ?2',
+  )
+    .bind(...(wave === null ? [run.id] : [run.id, wave]))
+    .first<{ no: number; label: string }>();
+  if (!waveRow) return c.json({ error: 'That wave does not exist.' }, 404);
+  wave = waveRow.no;
+
+  let scores: CollabRunScores;
+  try {
+    scores = await scoreRun(c.env, { id: run.id, min_segment: run.min_segment }, wave);
+  } catch (err) {
+    if (err instanceof CollabRunError) return c.json({ error: err.message, wave }, 409);
+    throw err;
+  }
+
+  const buffer = await buildCollabWorkbook({
+    runName: run.name,
+    organisation: run.organisation,
+    waveNo: wave,
+    waveName: waveRow.label.trim() || `Wave ${wave}`,
+    anonymous: run.anonymous === 1,
+    minSegment: run.min_segment,
+    scores,
+  });
+
+  const slug = run.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'run';
+  return new Response(buffer, {
+    headers: {
+      'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'content-disposition': `attachment; filename="${slug}-wave-${wave}.xlsx"`,
+    },
   });
 });
 
