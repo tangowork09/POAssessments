@@ -2359,8 +2359,37 @@ interface MemberLinkRow {
   name: string;
   email: string;
   url: string | null;
-  status: 'issued' | 'already' | 'no_email';
-  sent: boolean;
+  /** When it stops working, or null when it does not. */
+  expiresAt?: string | null;
+  /** Issued before links were kept readable: it works, it cannot be shown. */
+  opaque?: boolean;
+  /** The last time this address was sent one, from the mail log. */
+  emailedAt?: string | null;
+  status: 'issued' | 'already' | 'no_email' | 'ready' | 'none';
+  sent?: boolean;
+}
+
+/** The choices the expiry dropdown offers, in days. Zero is never. */
+const LINK_TTL_CHOICES: readonly { days: number; label: string }[] = [
+  { days: 7, label: '1 week' },
+  { days: 14, label: '2 weeks' },
+  { days: 21, label: '3 weeks' },
+  { days: 28, label: '4 weeks' },
+  { days: 0, label: 'No expiry' },
+];
+
+/** "in 12 days", "yesterday", "3 Oct" — whichever a reader can act on. */
+function whenText(at: string | null | undefined): string {
+  if (!at) return '';
+  const t = Date.parse(at.includes('T') ? at : `${at.replace(' ', 'T')}Z`);
+  if (!Number.isFinite(t)) return '';
+  const days = Math.round((t - Date.now()) / 86_400_000);
+  if (days < -1) return `${Math.abs(days)} days ago`;
+  if (days === -1) return 'yesterday';
+  if (days === 0) return 'today';
+  if (days === 1) return 'tomorrow';
+  if (days <= 31) return `in ${days} days`;
+  return new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 
 /**
@@ -2380,6 +2409,57 @@ function MemberLinksPanel({
 }) {
   const [links, setLinks] = useState<MemberLinkRow[] | null>(null);
   const [confirmRegen, setConfirmRegen] = useState(false);
+  const [ttl, setTtl] = useState<number>(cohort.linkTtlDays ?? 14);
+  const [customTtl, setCustomTtl] = useState(false);
+
+  /**
+   * The table answers a question rather than recording an act: it is loaded on
+   * arrival, so a facilitator who comes back tomorrow still has every link.
+   */
+  const load = useCallback(async () => {
+    const res = await api
+      .get<{ links: MemberLinkRow[]; ttlDays: number }>(`/api/admin/cohorts/${cohort.id}/member-links`)
+      .catch(() => null);
+    if (res) {
+      setLinks(res.links);
+      setTtl(res.ttlDays);
+      setCustomTtl(!LINK_TTL_CHOICES.some((c) => c.days === res.ttlDays));
+    }
+  }, [cohort.id]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function setExpiry(days: number): Promise<void> {
+    setTtl(days);
+    await onRun(
+      () => api.patchJson(`/api/admin/cohorts/${cohort.id}`, { linkTtlDays: days }),
+      days === 0
+        ? 'Personal links will not expire. Links already issued keep the date they were given.'
+        : `Personal links will last ${days} days from when they are issued. Links already issued keep the date they were given.`,
+    );
+  }
+
+  /** One person: issue if they have none, and email it to them. */
+  async function emailOne(row: MemberLinkRow, regenerate: boolean): Promise<void> {
+    const res = await onRun(
+      () =>
+        api.post<{ name: string; url: string; sent: boolean }>(
+          `/api/admin/cohorts/${cohort.id}/member-links/${row.memberId}`,
+          { send: true, regenerate },
+        ),
+      undefined,
+    );
+    if (res) {
+      await load();
+      await onRun(
+        async () => undefined,
+        regenerate
+          ? `${res.name} has a new link, emailed to them. Their previous one no longer works.`
+          : `${res.name}'s link is on its way to them.`,
+      );
+    }
+  }
 
   async function issue(opts: { send: boolean; regenerate?: boolean }): Promise<void> {
     setConfirmRegen(false);
@@ -2393,6 +2473,7 @@ function MemberLinksPanel({
     );
     if (res) {
       setLinks(res.links);
+      void load();
       const bits = [`${res.issued} issued`];
       if (res.already) bits.push(`${res.already} already had one`);
       if (res.noEmail) bits.push(`${res.noEmail} without an email`);
@@ -2411,8 +2492,53 @@ function MemberLinksPanel({
       />
       <div className="card-body">
         <div className="notice" role="note">
-          Freshly minted links are shown below <b>once</b>, so copy or email them before you leave this
-          panel. Regenerating kills every link already in someone's inbox.
+          Every link stays readable here for as long as it is valid, so you can copy or re-send one
+          whenever somebody says they never got it. Regenerating kills the link already in that
+          person's inbox.
+        </div>
+
+        <div className="link-ttl">
+          <label htmlFor="link-ttl">How long a new link lasts</label>
+          <select
+            id="link-ttl"
+            className="control control-sm"
+            value={customTtl ? 'custom' : String(ttl)}
+            disabled={busy}
+            onChange={(e) => {
+              if (e.target.value === 'custom') {
+                setCustomTtl(true);
+                return;
+              }
+              setCustomTtl(false);
+              void setExpiry(Number(e.target.value));
+            }}
+          >
+            {LINK_TTL_CHOICES.map((c) => (
+              <option key={c.days} value={c.days}>
+                {c.label}
+              </option>
+            ))}
+            <option value="custom">Custom…</option>
+          </select>
+          {customTtl ? (
+            <span className="link-ttl-custom">
+              <input
+                type="number"
+                className="control control-sm"
+                min={0}
+                max={730}
+                value={ttl}
+                disabled={busy}
+                onChange={(e) => setTtl(Number(e.target.value))}
+                onBlur={() => void setExpiry(Math.max(0, Math.min(730, Math.round(ttl))))}
+                aria-label="Days a personal link lasts"
+              />
+              <span>days</span>
+            </span>
+          ) : null}
+          <span className="cell-sub">
+            Applies to links issued from now on. Links already out keep the date they were given.
+          </span>
         </div>
 
         <div className="btn-row btn-row-first">
@@ -2454,32 +2580,57 @@ function MemberLinksPanel({
               },
               {
                 key: 'status',
-                header: 'Status',
-                width: '130px',
+                header: 'Link',
+                width: '132px',
                 value: (l) => l.status,
                 cell: (l) =>
-                  l.status === 'issued' ? (
-                    <span className="pill pill-ok">fresh link</span>
-                  ) : l.status === 'already' ? (
-                    <span className="pill pill-neutral">already has one</span>
-                  ) : (
+                  l.status === 'no_email' ? (
                     <span className="pill pill-plain">no email</span>
+                  ) : l.url || l.opaque ? (
+                    <span className="pill pill-ok">issued</span>
+                  ) : (
+                    <span className="pill pill-neutral">none yet</span>
                   ),
+              },
+              {
+                key: 'expires',
+                header: 'Expires',
+                width: '116px',
+                value: (l) => l.expiresAt ?? '',
+                cell: (l) => {
+                  if (!l.url && !l.opaque) return <span className="cell-sub">—</span>;
+                  if (!l.expiresAt) return <span className="cell-sub">never</span>;
+                  const gone = Date.parse(`${l.expiresAt.replace(' ', 'T')}Z`) <= Date.now();
+                  return (
+                    <span className={gone ? 'cell-sub danger' : 'cell-sub'} title={l.expiresAt}>
+                      {gone ? 'expired' : whenText(l.expiresAt)}
+                    </span>
+                  );
+                },
               },
               {
                 key: 'sent',
                 header: 'Emailed',
-                width: '84px',
-                value: (l) => (l.sent ? 'yes' : ''),
-                cell: (l) => (l.sent ? 'Yes' : '—'),
+                width: '104px',
+                value: (l) => l.emailedAt ?? (l.sent ? 'yes' : ''),
+                cell: (l) =>
+                  l.emailedAt ? (
+                    <span className="cell-sub" title={l.emailedAt}>
+                      {whenText(l.emailedAt)}
+                    </span>
+                  ) : l.sent ? (
+                    'Yes'
+                  ) : (
+                    <span className="cell-sub">—</span>
+                  ),
               },
               {
                 key: 'url',
-                header: 'Link (shown once)',
+                header: 'Personal link',
                 cell: (l) =>
                   l.url ? (
                     <span className="mlink">
-                      <code>{l.url.replace(/^https?:\/\//, '').slice(0, 34)}…</code>
+                      <code>{l.url.replace(/^https?:\/\//, '').slice(0, 30)}…</code>
                       <button
                         className="btn btn-ghost btn-sm"
                         onClick={() => void navigator.clipboard?.writeText(l.url!)}
@@ -2487,8 +2638,44 @@ function MemberLinksPanel({
                         Copy
                       </button>
                     </span>
+                  ) : l.opaque ? (
+                    <span className="cell-sub">
+                      issued before links were kept — still works, regenerate to see it
+                    </span>
                   ) : (
                     <span className="cell-sub">—</span>
+                  ),
+              },
+              {
+                // The reason this panel could only ever act on everybody: one
+                // person missing their mail meant regenerating the cohort.
+                key: 'send',
+                header: 'Send',
+                width: '150px',
+                cell: (l) =>
+                  l.status === 'no_email' ? (
+                    <span className="cell-sub">—</span>
+                  ) : (
+                    <span className="mlink">
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        disabled={busy}
+                        onClick={() => void emailOne(l, false)}
+                        title={`Email ${l.name} their personal link`}
+                      >
+                        Email link
+                      </button>
+                      {l.url || l.opaque ? (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          disabled={busy}
+                          onClick={() => void emailOne(l, true)}
+                          title={`Issue ${l.name} a new link — their current one stops working`}
+                        >
+                          New
+                        </button>
+                      ) : null}
+                    </span>
                   ),
               },
             ]}

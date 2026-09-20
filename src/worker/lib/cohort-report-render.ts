@@ -9,7 +9,7 @@
 
 import type { Env } from '../env.js';
 import { getBranding } from './settings.js';
-import { groupPayload, memberPayload, type CohortRow, type MemberScores } from './cohort.js';
+import { groupPayload, memberPayload, type CohortRow, type MemberScores, DEFAULT_LINK_TTL_DAYS } from './cohort.js';
 import { decodeImageDataUrl } from '../pdf/image.js';
 import { renderCohortReportPdf } from '../pdf/socio-report.js';
 import type { SocioGroupResult } from '../../shared/socio-scoring.js';
@@ -67,6 +67,9 @@ function cohortOf(row: CohortReportRow): CohortRow {
     organisation: row.organisation,
     status: row.status,
     min_raters: row.min_raters,
+    // Likewise not selected: how long a participant's link lasts has nothing
+    // to do with what a finished report says.
+    link_ttl_days: DEFAULT_LINK_TTL_DAYS,
     // Not selected by the report query and not read by rendering: how someone
     // proved who they were on the way in, and whether the completion screen
     // promises a report, have no bearing on what the report says.

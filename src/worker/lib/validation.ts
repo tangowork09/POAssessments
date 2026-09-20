@@ -195,6 +195,13 @@ const cohortFields = {
   slugActive: z.boolean(),
   organisation: trimmed(160),
   minRaters: z.number().int().min(1).max(50),
+  /**
+   * How long a personal link lasts, in days. Zero is "never expires", which is
+   * a real choice for a cohort that runs over a quarter, and is stored rather
+   * than inferred so that never is something somebody picked. Capped at two
+   * years: past that the number is a typo, not a policy.
+   */
+  linkTtlDays: z.number().int().min(0).max(730),
   tieThreshold: z.number().int().min(1).max(5),
   minRatedTargets: z.number().int().min(0).max(200),
   /** Whether participants are promised their own report. See migration 0015. */

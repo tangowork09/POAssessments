@@ -41,6 +41,12 @@ import type {
 
 export class CohortError extends Error {}
 
+/**
+ * How long a personal link lasts by default: a fortnight, which is what the
+ * instrument's own instructions tell participants. Zero means never expires.
+ */
+export const DEFAULT_LINK_TTL_DAYS = 14;
+
 export interface CohortRow {
   id: string;
   assessment_id: string;
@@ -50,6 +56,8 @@ export interface CohortRow {
   min_raters: number;
   tie_threshold: number;
   min_rated_targets: number;
+  /** Days a personal link lasts. 0 = never expires. See migration 0020. */
+  link_ttl_days: number;
   /**
    * Whether participants are told a personal report is coming. Off by default:
    * whether anyone in this group ever receives their own profile is the
@@ -141,7 +149,7 @@ export const SOCIO_ITEM_INFO: SocioItemInfo[] = SOCIO_ITEMS.map((i) => ({
 
 export async function loadCohort(env: Env, cohortId: string): Promise<CohortRow | null> {
   return env.DB.prepare(
-    `SELECT id, assessment_id, name, organisation, status, min_raters, tie_threshold,
+    `SELECT id, assessment_id, name, organisation, status, min_raters, tie_threshold, link_ttl_days,
             min_rated_targets, share_reports, otp_required, link_only_identity,
             created_at, closed_at
        FROM cohorts WHERE id = ?1`,

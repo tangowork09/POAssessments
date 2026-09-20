@@ -58,6 +58,8 @@ interface LinkRow {
   max_answer: number;
   /** Set only for a cohort instrument's link. */
   cohort_id: string | null;
+  /** When the link stops working, or null when it does not. */
+  expires_at: string | null;
   /** Which wave of rating this link belongs to. 1 for everything else. */
   round_no: number;
 }
@@ -85,21 +87,47 @@ function scaleForLink(link: LinkRow): ScaleInfo {
   return { min: link.min_answer, max: link.max_answer, labels, shortLabels: labels };
 }
 
+/** Past its date. Compared in UTC, which is how the column is written. */
+function linkExpired(link: { expires_at: string | null }): boolean {
+  if (!link.expires_at) return false;
+  const at = Date.parse(`${link.expires_at.replace(' ', 'T')}Z`);
+  return Number.isFinite(at) && at <= Date.now();
+}
+
+/**
+ * What to tell somebody whose link will not open, or null when it will.
+ *
+ * Said in terms of what they can do next: a link that has run out is a thing
+ * to ask for again, and the facilitator can re-send one in a click.
+ */
+export function linkRefusal(link: { active: number; expires_at: string | null }): string | null {
+  if (!link.active) return 'This link has been deactivated by the administrator.';
+  if (linkExpired(link)) {
+    return 'This link has expired. Ask the person running the exercise to send you a new one — it takes them a moment.';
+  }
+  return null;
+}
+
 function configForLink(link: LinkRow) {
   const kind = kindForAssessment(link.assessment_id);
   return kind ? ASSESSMENTS[kind] : null;
 }
 
 /**
- * Resolves an opaque token to its link row. Links never expire; the only
- * negative outcome besides "unknown" is an administrator having deactivated it.
+ * Resolves an opaque token to its link row.
+ *
+ * A link can now be past its date as well as switched off, and the two are
+ * kept apart: "this closed on the 4th" is something a participant can act on
+ * by asking for another, where "deactivated" is a decision somebody made about
+ * them. Expiry is read here rather than filtered in SQL so the caller can say
+ * which of the two happened.
  */
 async function resolveLink(env: Env, token: string): Promise<LinkRow | null> {
   if (!looksLikeToken(token)) return null;
   const hash = await hashToken(token, env.LINK_TOKEN_SECRET);
   return env.DB.prepare(
     `SELECT l.id AS link_id, l.kind, l.active, l.assessment_id, l.candidate_id, l.cohort_id,
-            l.round_no,
+            l.round_no, l.expires_at,
             a.slug, a.name, a.description, a.status, a.question_count, a.per_page,
             a.min_answer, a.max_answer
        FROM links l
@@ -236,9 +264,8 @@ candidateRoutes.get('/session/:token', async (c) => {
 
   const link = await resolveLink(c.env, token);
   if (!link) return c.json({ error: 'This link was not recognised.' }, 404);
-  if (!link.active) {
-    return c.json({ error: 'This link has been deactivated by the administrator.' }, 403);
-  }
+  const refusal = linkRefusal(link);
+  if (refusal) return c.json({ error: refusal }, 403);
   if (link.status !== 'live') {
     return c.json({ error: 'This assessment is not currently open.' }, 403);
   }
@@ -361,9 +388,8 @@ candidateRoutes.get('/session/:token/state', async (c) => {
 
   const link = await resolveLink(c.env, c.req.param('token'));
   if (!link) return c.json({ error: 'This link was not recognised.' }, 404);
-  if (!link.active) {
-    return c.json({ error: 'This link has been deactivated by the administrator.' }, 403);
-  }
+  const refusal = linkRefusal(link);
+  if (refusal) return c.json({ error: refusal }, 403);
   if (link.status !== 'live') {
     return c.json({ error: 'This assessment is not currently open.' }, 403);
   }
@@ -398,7 +424,7 @@ candidateRoutes.post('/start/:token', async (c) => {
   if (!rl.allowed) return c.json({ error: 'Too many attempts. Try again shortly.' }, 429);
 
   const link = await resolveLink(c.env, token);
-  if (!link || !link.active || link.status !== 'live') {
+  if (!link || linkRefusal(link) || link.status !== 'live') {
     return c.json({ error: 'This link is not available.' }, 404);
   }
 
@@ -760,7 +786,7 @@ async function cohortBoundsFor(
  */
 candidateRoutes.post('/answers/:token', async (c) => {
   const link = await resolveLink(c.env, c.req.param('token'));
-  if (!link || !link.active) return c.json({ error: 'This link is not available.' }, 404);
+  if (!link || linkRefusal(link)) return c.json({ error: 'This link is not available.' }, 404);
 
   const rl = await rateLimit(c.env, `ans:${clientKey(c.req.raw)}`, 600, 60);
   if (!rl.allowed) return c.json({ error: 'Too many requests' }, 429);
@@ -852,7 +878,7 @@ candidateRoutes.post('/answers/:token', async (c) => {
  */
 candidateRoutes.post('/answers/:token/clear', async (c) => {
   const link = await resolveLink(c.env, c.req.param('token'));
-  if (!link || !link.active) return c.json({ error: 'This link is not available.' }, 404);
+  if (!link || linkRefusal(link)) return c.json({ error: 'This link is not available.' }, 404);
   if (!isCohortKind(kindForAssessment(link.assessment_id))) {
     return c.json({ error: 'This assessment has no rows to clear.' }, 400);
   }
@@ -916,7 +942,7 @@ const OTP_MAX_ATTEMPTS = 5;
  */
 candidateRoutes.post('/otp/:token', async (c) => {
   const link = await resolveLink(c.env, c.req.param('token'));
-  if (!link || !link.active || link.status !== 'live') {
+  if (!link || linkRefusal(link) || link.status !== 'live') {
     return c.json({ error: 'This link is not available.' }, 404);
   }
   if (!isCohortKind(kindForAssessment(link.assessment_id))) {
@@ -1033,7 +1059,7 @@ const submitSchema = z.object({ responseId: z.string().min(1) });
 
 candidateRoutes.post('/submit/:token', async (c) => {
   const link = await resolveLink(c.env, c.req.param('token'));
-  if (!link || !link.active) return c.json({ error: 'This link is not available.' }, 404);
+  if (!link || linkRefusal(link)) return c.json({ error: 'This link is not available.' }, 404);
 
   const rl = await rateLimit(c.env, `submit:${clientKey(c.req.raw)}`, 30, 300);
   if (!rl.allowed) return c.json({ error: 'Too many attempts. Try again shortly.' }, 429);

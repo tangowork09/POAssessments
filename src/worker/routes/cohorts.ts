@@ -38,6 +38,7 @@ import {
   rosterUploadSchema,
 } from '../lib/validation.js';
 import {
+  DEFAULT_LINK_TTL_DAYS,
   CohortError,
   type CohortRow,
   currentRound,
@@ -139,6 +140,7 @@ function toSummary(row: CohortListRow): CohortSummary {
     minRaters: row.min_raters,
     tieThreshold: row.tie_threshold,
     minRatedTargets: row.min_rated_targets,
+    linkTtlDays: row.link_ttl_days ?? DEFAULT_LINK_TTL_DAYS,
     shareReports: row.share_reports === 1,
     otpRequired: row.otp_required === 1,
     linkOnlyIdentity: row.link_only_identity === 1,
@@ -380,6 +382,7 @@ cohortRoutes.patch('/:id', async (c) => {
             -- personal links says nothing about the code requirement, so the
             -- stored one is still there to come back to. See migration 0019.
             link_only_identity = COALESCE(?12, link_only_identity),
+            link_ttl_days     = COALESCE(?13, link_ttl_days),
             closed_at         = CASE WHEN ?4 = 'closed' THEN datetime('now')
                                      WHEN ?4 IS NOT NULL THEN NULL
                                      ELSE closed_at END
@@ -398,6 +401,7 @@ cohortRoutes.patch('/:id', async (c) => {
       d.shareReports === undefined ? null : d.shareReports ? 1 : 0,
       d.otpRequired === undefined ? null : d.otpRequired ? 1 : 0,
       d.linkOnlyIdentity === undefined ? null : d.linkOnlyIdentity ? 1 : 0,
+      d.linkTtlDays ?? null,
     )
     .run();
 
@@ -1625,6 +1629,57 @@ cohortRoutes.post('/:id/assignments/upload', async (c) => {
 // ---------------------------------------------------------------- magic links
 
 /**
+ * One person's link, issued if needed and emailed to them.
+ *
+ * The Access tab could only ever act on everybody at once: somebody who never
+ * received their mail meant regenerating the whole cohort, which invalidates
+ * the links of everyone who did get theirs and had already started. This is
+ * the same act aimed at one row.
+ */
+cohortRoutes.post('/:id/member-links/:memberId', async (c) => {
+  const id = c.req.param('id');
+  const memberId = c.req.param('memberId');
+  const cohort = await loadCohort(c.env, id);
+  if (!cohort) return c.json({ error: 'Cohort not found' }, 404);
+  const round = await currentRound(c.env, id);
+  if (!round) return c.json({ error: 'This cohort has no round yet.' }, 400);
+
+  const body = (await c.req.json().catch(() => ({}))) as { send?: boolean; regenerate?: boolean };
+  const member = (await loadRoster(c.env, id)).find((m) => m.id === memberId);
+  if (!member) return c.json({ error: 'That person is not on this roster.' }, 404);
+  if (!member.email.trim()) {
+    return c.json({ error: `${member.name} has no email address. Add one on the Roster tab first.` }, 400);
+  }
+
+  const link = await personalLinkFor(c.env, cohort, round.no, member, { regenerate: body.regenerate === true });
+  if (!link.token) return c.json({ error: 'That link could not be issued.' }, 400);
+  const url = `${baseUrl(c.env, c.req.raw)}/t/${link.token}`;
+
+  let sent = false;
+  if (body.send !== false) {
+    sent = await mailPersonalLink(c.env, {
+      branding: brandingForClient(await getBranding(c.env)),
+      logoUrl: `${baseUrl(c.env, c.req.raw)}/api/logo`,
+      cohort,
+      member,
+      email: member.email.trim().toLowerCase(),
+      url,
+    });
+    if (!sent) return c.json({ error: `The mail to ${member.name} could not be sent.`, url }, 502);
+  }
+
+  return c.json({
+    memberId,
+    name: member.name,
+    email: member.email.trim().toLowerCase(),
+    url,
+    expiresAt: link.expiresAt,
+    regenerated: link.fresh,
+    sent,
+  });
+});
+
+/**
  * Issues each roster member their own personal link — the strongest identity
  * the platform has: an unguessable token already bound to one person, with
  * nothing to type and nobody to impersonate.
@@ -1636,6 +1691,179 @@ cohortRoutes.post('/:id/assignments/upload', async (c) => {
  * to the wrong people. `send` emails each newly minted link to its owner.
  * Tokens are returned once, for the operator copying them out by hand.
  */
+/**
+ * When a personal link minted now should stop working, or null for never.
+ *
+ * Zero days is the facilitator choosing "no expiry", which is a real choice —
+ * a cohort that runs over a quarter should not have its links die mid-way —
+ * and is stored as a zero rather than as a null so that "never" is something
+ * somebody picked rather than something nobody set.
+ */
+function linkExpiryFor(cohort: CohortRow): string | null {
+  const days = cohort.link_ttl_days ?? DEFAULT_LINK_TTL_DAYS;
+  if (!Number.isFinite(days) || days <= 0) return null;
+  const at = new Date(Date.now() + days * 86_400_000);
+  return at.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+/**
+ * One member's personal link: minted if they have none, re-read if they have.
+ *
+ * `token_plain` is kept alongside the hash so the Access tab can show the link
+ * again tomorrow. It was hash-only, which meant the link existed in exactly one
+ * HTTP response and a facilitator who closed the tab had no way to help
+ * somebody who never received the mail except to regenerate everybody's — and
+ * that invalidates the links of the people who did.
+ */
+async function personalLinkFor(
+  env: Env,
+  cohort: CohortRow,
+  roundNo: number,
+  member: { id: string; name: string; email: string },
+  opts: { regenerate?: boolean } = {},
+): Promise<{ url: string | null; token: string | null; expiresAt: string | null; fresh: boolean }> {
+  const email = member.email.trim().toLowerCase();
+  if (!email) return { url: null, token: null, expiresAt: null, fresh: false };
+
+  let cand = await env.DB.prepare('SELECT id FROM candidates WHERE email = ?1')
+    .bind(email)
+    .first<{ id: string }>();
+  if (!cand) {
+    const parts = member.name.trim().split(/\s+/);
+    cand = { id: newId('cand') };
+    await env.DB.prepare(
+      `INSERT INTO candidates (id, email, first_name, last_name, organisation)
+       VALUES (?1, ?2, ?3, ?4, ?5)`,
+    )
+      .bind(cand.id, email, parts[0] ?? member.name, parts.slice(1).join(' '), cohort.organisation)
+      .run();
+  }
+
+  const existing = await env.DB.prepare(
+    `SELECT id, token_plain, expires_at FROM links
+      WHERE kind = 'personal' AND assessment_id = ?1 AND candidate_id = ?2
+        AND cohort_id = ?3 AND round_no = ?4`,
+  )
+    .bind(cohort.assessment_id, cand.id, cohort.id, roundNo)
+    .first<{ id: string; token_plain: string | null; expires_at: string | null }>();
+
+  // A link that is still readable and still in date is handed back as it is:
+  // re-minting would break the copy already sitting in somebody's inbox.
+  if (existing && !opts.regenerate && existing.token_plain) {
+    return { url: null, token: existing.token_plain, expiresAt: existing.expires_at, fresh: false };
+  }
+
+  const token = generateToken();
+  const hash = await hashToken(token, env.LINK_TOKEN_SECRET);
+  const expiresAt = linkExpiryFor(cohort);
+  if (existing) {
+    await env.DB.prepare(
+      'UPDATE links SET token_hash = ?2, token_plain = ?3, expires_at = ?4, active = 1 WHERE id = ?1',
+    )
+      .bind(existing.id, hash, token, expiresAt)
+      .run();
+  } else {
+    await env.DB.prepare(
+      `INSERT INTO links (id, token_hash, token_plain, kind, assessment_id, candidate_id, cohort_id, round_no, active, expires_at)
+       VALUES (?1, ?2, ?3, 'personal', ?4, ?5, ?6, ?7, 1, ?8)`,
+    )
+      .bind(newId('link'), hash, token, cohort.assessment_id, cand.id, cohort.id, roundNo, expiresAt)
+      .run();
+  }
+  return { url: null, token, expiresAt, fresh: true };
+}
+
+/** One magic-link email. Shared, so a single send and a bulk send agree. */
+async function mailPersonalLink(
+  env: Env,
+  args: {
+    branding: ReturnType<typeof brandingForClient>;
+    logoUrl: string;
+    cohort: CohortRow;
+    member: { name: string };
+    email: string;
+    url: string;
+  },
+): Promise<boolean> {
+  const mail = magicLinkEmail({
+    branding: args.branding,
+    logoUrl: args.logoUrl,
+    name: args.member.name,
+    cohortName: args.cohort.name,
+    organisation: args.cohort.organisation,
+    link: args.url,
+  });
+  const res = await sendMail(env, {
+    to: args.email,
+    subject: mail.subject,
+    html: mail.html,
+    text: mail.text,
+    kind: 'cohort_magic_link',
+  });
+  return res.status !== 'failed';
+}
+
+/**
+ * Who has a link, what it is, and when it runs out.
+ *
+ * The table used to be filled only by the act of issuing: the tokens existed
+ * in one HTTP response and nowhere else, so a reload emptied it and a
+ * facilitator who wanted to re-send somebody their link had no link to send.
+ * Now it is a question that can be asked at any time.
+ */
+cohortRoutes.get('/:id/member-links', async (c) => {
+  const id = c.req.param('id');
+  const cohort = await loadCohort(c.env, id);
+  if (!cohort) return c.json({ error: 'Cohort not found' }, 404);
+  const round = await currentRound(c.env, id);
+  if (!round) return c.json({ links: [], ttlDays: cohort.link_ttl_days ?? DEFAULT_LINK_TTL_DAYS });
+
+  const roster = await loadRoster(c.env, id);
+  const origin = baseUrl(c.env, c.req.raw);
+
+  const { results: rows } = await c.env.DB.prepare(
+    `SELECT c.email AS email, l.token_plain AS token, l.expires_at AS expires_at, l.active AS active
+       FROM links l
+       JOIN candidates c ON c.id = l.candidate_id
+      WHERE l.kind = 'personal' AND l.cohort_id = ?1 AND l.round_no = ?2`,
+  )
+    .bind(id, round.no)
+    .all<{ email: string; token: string | null; expires_at: string | null; active: number }>();
+  const linkOf = new Map((rows ?? []).map((r) => [r.email.trim().toLowerCase(), r]));
+
+  // The last time each address was sent one of these, so the column says what
+  // actually happened rather than only what happened in this browser tab.
+  const { results: mails } = await c.env.DB.prepare(
+    `SELECT to_email AS email, MAX(COALESCE(sent_at, created_at)) AS at
+       FROM mail_outbox
+      WHERE kind = 'cohort_magic_link' AND status IN ('sent','logged')
+      GROUP BY to_email`,
+  ).all<{ email: string; at: string | null }>();
+  const mailedAt = new Map((mails ?? []).map((m) => [m.email.trim().toLowerCase(), m.at]));
+
+  return c.json({
+    ttlDays: cohort.link_ttl_days ?? DEFAULT_LINK_TTL_DAYS,
+    links: roster.map((m) => {
+      const email = m.email.trim().toLowerCase();
+      const row = email ? linkOf.get(email) : undefined;
+      return {
+        memberId: m.id,
+        name: m.name,
+        email,
+        url: row?.token ? `${origin}/t/${row.token}` : null,
+        expiresAt: row?.expires_at ?? null,
+        active: row ? row.active === 1 : false,
+        // A link issued before this cohort kept readable copies: it still
+        // works, it simply cannot be shown again. Saying so is better than an
+        // empty cell that looks like nothing was ever issued.
+        opaque: !!row && !row.token,
+        emailedAt: email ? mailedAt.get(email) ?? null : null,
+        status: !email ? 'no_email' : row ? 'ready' : 'none',
+      };
+    }),
+  });
+});
+
 cohortRoutes.post('/:id/member-links', async (c) => {
   const id = c.req.param('id');
   const cohort = await loadCohort(c.env, id);
@@ -1657,6 +1885,7 @@ cohortRoutes.post('/:id/member-links', async (c) => {
     name: string;
     email: string;
     url: string | null;
+    expiresAt?: string | null;
     status: 'issued' | 'already' | 'no_email';
     sent: boolean;
   }[] = [];
@@ -1668,71 +1897,25 @@ cohortRoutes.post('/:id/member-links', async (c) => {
       continue;
     }
 
-    // The candidate row this member answers as, created if they have not
-    // touched the platform before.
-    let cand = await c.env.DB.prepare('SELECT id FROM candidates WHERE email = ?1')
-      .bind(email)
-      .first<{ id: string }>();
-    if (!cand) {
-      const parts = m.name.trim().split(/\s+/);
-      cand = { id: newId('cand') };
-      await c.env.DB.prepare(
-        `INSERT INTO candidates (id, email, first_name, last_name, organisation)
-         VALUES (?1, ?2, ?3, ?4, ?5)`,
-      )
-        .bind(cand.id, email, parts[0] ?? m.name, parts.slice(1).join(' '), cohort.organisation)
-        .run();
-    }
-
-    const existing = await c.env.DB.prepare(
-      `SELECT id FROM links
-        WHERE kind = 'personal' AND assessment_id = ?1 AND candidate_id = ?2
-          AND cohort_id = ?3 AND round_no = ?4`,
-    )
-      .bind(cohort.assessment_id, cand.id, id, round.no)
-      .first<{ id: string }>();
-
-    if (existing && !regenerate) {
-      out.push({ memberId: m.id, name: m.name, email, url: null, status: 'already', sent: false });
+    const link = await personalLinkFor(c.env, cohort, round.no, m, { regenerate });
+    if (!link.token) {
+      out.push({ memberId: m.id, name: m.name, email, url: null, status: 'no_email', sent: false });
       continue;
     }
-
-    const token = generateToken();
-    const hash = await hashToken(token, c.env.LINK_TOKEN_SECRET);
-    if (existing) {
-      await c.env.DB.prepare('UPDATE links SET token_hash = ?2, active = 1 WHERE id = ?1')
-        .bind(existing.id, hash)
-        .run();
-    } else {
-      await c.env.DB.prepare(
-        `INSERT INTO links (id, token_hash, kind, assessment_id, candidate_id, cohort_id, round_no, active)
-         VALUES (?1, ?2, 'personal', ?3, ?4, ?5, ?6, 1)`,
-      )
-        .bind(newId('link'), hash, cohort.assessment_id, cand.id, id, round.no)
-        .run();
-    }
-
-    const url = `${origin}/t/${token}`;
+    const url = `${origin}/t/${link.token}`;
     let sent = false;
     if (send) {
-      const mail = magicLinkEmail({
-        branding,
-        logoUrl,
-        name: m.name,
-        cohortName: cohort.name,
-        organisation: cohort.organisation,
-        link: url,
-      });
-      const res = await sendMail(c.env, {
-        to: email,
-        subject: mail.subject,
-        html: mail.html,
-        text: mail.text,
-        kind: 'cohort_magic_link',
-      });
-      sent = res.status !== 'failed';
+      sent = await mailPersonalLink(c.env, { branding, logoUrl, cohort, member: m, email, url });
     }
-    out.push({ memberId: m.id, name: m.name, email, url, status: 'issued', sent });
+    out.push({
+      memberId: m.id,
+      name: m.name,
+      email,
+      url,
+      expiresAt: link.expiresAt,
+      status: link.fresh ? 'issued' : 'already',
+      sent,
+    });
   }
 
   return c.json({

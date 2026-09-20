@@ -408,6 +408,11 @@ export interface CohortSummary {
   tieThreshold: number;
   minRatedTargets: number;
   /**
+   * How long a personal link lasts, in days. Zero means it never expires.
+   * Fourteen by default, which is what the instrument tells participants.
+   */
+  linkTtlDays: number;
+  /**
    * Whether participants are told, on finishing, that their own report is
    * coming. Off by default; the completion screen promises nothing until the
    * facilitator turns this on.
