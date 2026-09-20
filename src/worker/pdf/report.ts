@@ -69,6 +69,8 @@ const HEADER_BOTTOM = M.top + 48;
 const BODY = { size: 9.8, leading: 15.4 } as const;
 
 /** Ratio of the house lockup, in its own 331 x 140 design space. */
+/** Below this the tagline is dropped rather than printed as mush. */
+const TAGLINE_MIN_SIZE = 3.6;
 const LOGO_W = 331;
 const LOGO_H = 140;
 /** The ribbon mark alone occupies the first 160 units of that design space. */
@@ -1481,16 +1483,30 @@ export function drawLogoLockup(doc: PdfDoc, x: number, y: number, height: number
   });
 
   // Tagline in letterspaced caps, tracked out to the wordmark's width.
+  //
+  // Sized to FIT that width first, then tracked. It used to be sized off the
+  // lockup height alone and tracked by whatever was left over, which at every
+  // size this is ever drawn at was a negative number — twenty-four letters
+  // asked to fit a space about two-thirds as wide, printed on top of one
+  // another. Below the legibility floor the line is dropped instead: a mark
+  // with no tagline reads as a mark, and one with unreadable mush under it
+  // reads as a fault.
   const tagline = BRAND_TAGLINE.toUpperCase();
-  const tagSize = Math.max(3.4, 13 * s);
-  const natural = measure(tagline, 'Helvetica-Bold', tagSize);
-  const tracking = tagline.length > 0 ? (wordW - natural) / tagline.length : 0;
-  doc.text(tagline, wordX, y + 112 * s - tagSize, {
-    font: 'Helvetica-Bold',
-    size: tagSize,
-    color: T.logoInk,
-    charSpacing: tracking,
-  });
+  const perPoint = measure(tagline, 'Helvetica-Bold', 1);
+  const tagSize = perPoint > 0 ? Math.min(13 * s, wordW / perPoint) : 0;
+  if (tagSize >= TAGLINE_MIN_SIZE) {
+    const natural = measure(tagline, 'Helvetica-Bold', tagSize);
+    // Spread over the gaps BETWEEN letters, so the last glyph's right edge
+    // lands on the wordmark's, and never inward.
+    const gaps = Math.max(1, tagline.length - 1);
+    const tracking = Math.max(0, (wordW - natural) / gaps);
+    doc.text(tagline, wordX, y + 112 * s - tagSize, {
+      font: 'Helvetica-Bold',
+      size: tagSize,
+      color: T.logoInk,
+      charSpacing: tracking,
+    });
+  }
 
   return LOGO_W * s;
 }

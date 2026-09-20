@@ -2803,6 +2803,23 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
 .ins-scope-switch-text span{ font-size:11px; line-height:1.45; color:var(--ink-3); text-wrap:pretty; }
 @media (prefers-reduced-motion:reduce){ .ins-scope-switch-track,.ins-scope-switch-track::after{ transition:none; } }
 
+/* ---------- names on the map ----------
+   Three states, not a switch: "off" used to still name the notable few, which
+   is what the map wants and not what a switch appears to promise. The middle
+   option is the default and the one the questions are built around; the ends
+   are the two real needs — a map for a room, and a map for a facilitator. */
+.ins-names{ margin-top:8px; padding:9px 10px; border:1px solid var(--line); border-radius:var(--r-3); background:var(--surface-2); }
+.ins-names-head{ margin:0 0 7px; font-size:12.5px; font-weight:620; color:var(--ink); }
+.ins-names-seg{ display:grid; grid-template-columns:repeat(3,1fr); gap:3px; padding:3px; background:var(--line-2); border-radius:var(--r-2); }
+.ins-names-opt{
+  border:0; background:none; font:inherit; font-size:11.5px; font-weight:560; color:var(--ink-2);
+  padding:5px 4px; border-radius:calc(var(--r-2) - 2px); cursor:pointer; white-space:nowrap;
+}
+.ins-names-opt:hover{ color:var(--ink); }
+.ins-names-opt.is-on{ background:var(--surface); color:var(--ink); font-weight:640; box-shadow:var(--shadow-1); }
+.ins-names-opt:focus-visible{ outline:2px solid var(--accent); outline-offset:1px; }
+.ins-names-note{ margin:7px 0 0; font-size:11px; line-height:1.45; color:var(--ink-3); text-wrap:pretty; }
+
 /* ---------- theatre ----------
    Present mode is the picture, full screen, with the readings as a panel the
    presenter folds away and brings back. The detail table goes with it: on a

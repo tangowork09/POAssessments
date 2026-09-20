@@ -11,7 +11,6 @@
 
 import { BRAND_COMPANY_NAME } from '../../shared/brand.js';
 import type { EmbeddedImage } from './image.js';
-import { drawLogoLockup } from './report.js';
 import { A4, PdfDoc, measure, wrap, type StdFont } from './writer.js';
 
 export interface InsightExportColumn {
@@ -102,11 +101,26 @@ export function renderInsightExportPdf(
   return doc.build();
 }
 
+/** The brand mark at a given height, in its own aspect ratio. Returns its width. */
+function drawLogo(doc: PdfDoc, logo: EmbeddedImage, x: number, y: number, height: number): number {
+  const w = height * (logo.width / logo.height);
+  doc.image(logo, x, y, w, height);
+  return w;
+}
+
 function header(doc: PdfDoc, p: InsightExportPayload, logo: EmbeddedImage | null): number {
   // The lockup owns the top line on its own: crowding a cohort name against it
   // is how the two ended up printed over each other.
-  if (logo) drawLogoLockup(doc, M.left, M.top - 14, 20);
-  doc.text(p.cohortName, logo ? M.left + 96 : M.left, M.top, {
+  //
+  // The real logo, not the vector re-creation of it: this used to check that a
+  // logo had been decoded and then draw the fallback anyway, so every insight
+  // export carried an approximation of the brand with its tagline letters
+  // printed on top of one another.
+  // Height first, then the name is placed after whatever width that produced,
+  // rather than at a fixed offset guessed for a different mark.
+  const logoH = 22;
+  const logoW = logo ? drawLogo(doc, logo, M.left, M.top - 15, logoH) : 0;
+  doc.text(p.cohortName, logo ? M.left + logoW + 14 : M.left, M.top, {
     font: 'Helvetica-Bold',
     size: 11,
     color: T.ink,

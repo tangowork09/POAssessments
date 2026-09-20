@@ -54,6 +54,21 @@ export interface TabGroupDef {
  * leaves the room: how much of the page to take, and whether the people on it
  * are named. Defaults are the safe ones — the picture alone, names off.
  */
+/** How much of the map carries a name. */
+export type NameMode = 'none' | 'key' | 'all';
+
+const NAME_MODES: readonly (readonly [NameMode, string])[] = [
+  ['none', 'None'],
+  ['key', 'Key people'],
+  ['all', 'Everyone'],
+];
+
+const NAME_MODE_NOTE: Record<NameMode, string> = {
+  none: 'Nobody is named. The shape of the group without saying whose it is — the version to put on a screen in front of the group itself.',
+  key: 'Only the people this question is about. The rest appear on hover, focus or search.',
+  all: 'Every name that can be placed without covering somebody else. Where the map is tightest a few still give way — hover or search for those.',
+};
+
 function ExportButton({ onExport }: { onExport: (o: ExportOptions) => void | Promise<void> }) {
   const [open, setOpen] = useState(false);
   const [format, setFormat] = useState<ExportOptions['format']>('png');
@@ -1019,8 +1034,8 @@ export function ScopePicker({
   total,
   compare,
   onToggleCompare,
-  allNames,
-  onToggleAllNames,
+  nameMode,
+  onNameMode,
 }: {
   funcs: readonly ScopeChip[];
   tenures: readonly ScopeChip[];
@@ -1035,9 +1050,9 @@ export function ScopePicker({
   /** Side-by-side reading of the chosen departments. */
   compare: boolean;
   onToggleCompare: (on: boolean) => void;
-  /** Name every person on the map, not only the notable few. */
-  allNames: boolean;
-  onToggleAllNames: (on: boolean) => void;
+  /** How much of the map is named. */
+  nameMode: NameMode;
+  onNameMode: (mode: NameMode) => void;
 }) {
   const whole = activeFuncs.size === 0 && activeTenures.size === 0;
   const canCompare = activeFuncs.size >= 2;
@@ -1200,22 +1215,23 @@ export function ScopePicker({
           ) : null}
           {/* Not a filter, but it belongs to the same question — what the map
               is showing — and this is where the reader already is. */}
-          <label className="ins-scope-switch">
-            <input
-              type="checkbox"
-              checked={allNames}
-              onChange={(e) => onToggleAllNames(e.target.checked)}
-            />
-            <span className="ins-scope-switch-track" aria-hidden="true" />
-            <span className="ins-scope-switch-text">
-              <b>Show every name</b>
-              <span>
-                {allNames
-                  ? 'Every name that can be placed without covering somebody else. Where the map is tightest a few still give way — hover or search for those.'
-                  : 'Only the notable few are named; the rest appear on hover, focus or search.'}
-              </span>
-            </span>
-          </label>
+          <div className="ins-names">
+            <p className="ins-names-head">Names on the map</p>
+            <div className="ins-names-seg" role="group" aria-label="Names on the map">
+              {NAME_MODES.map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`ins-names-opt${nameMode === mode ? ' is-on' : ''}`}
+                  aria-pressed={nameMode === mode}
+                  onClick={() => onNameMode(mode)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="ins-names-note">{NAME_MODE_NOTE[nameMode]}</p>
+          </div>
           <p className="ins-scope-pop-foot">Departments and tenure combine: Sales + 3–7y is the Sales people with three to seven years.</p>
         </div>
       ) : null}

@@ -79,6 +79,7 @@ import {
   Panel,
   LineKey,
   RingKey,
+  type NameMode,
   type ExportOptions,
   ScopePicker,
   Suppressed,
@@ -226,6 +227,9 @@ const SILOS_FLOOR = 3;
 const STRUCT_ACCENT = RANK_RING_COLOR;
 /** The colour a flag wears — an isolate's ring, and nothing else. */
 const FLAG_COLOR = '#B54708';
+
+/** Nobody named. Frozen and shared so it never invalidates a memo. */
+const NO_NAMES: ReadonlySet<number> = new Set();
 
 const GROUPS: readonly TabGroupDef[] = [
   { no: 1, name: 'Individual' },
@@ -424,15 +428,26 @@ export function InsightsView({
       return true;
     }
   });
-  // Naming everyone is a reading choice the facilitator makes once and keeps,
-  // so it is remembered per browser like the rail and the details panel.
-  const [allNames, setAllNames] = useState<boolean>(() => {
+  /**
+   * How much of the map is named. A reading choice the facilitator makes once
+   * and keeps, so it is remembered per browser like the rail and the details.
+   *
+   * Three states rather than two. It used to be a single "show every name"
+   * switch, and turning it off still named the notable few — which is what the
+   * map wants, but not what the switch appeared to promise. "None" is a real
+   * need: a map on a screen in front of the group itself should not be able to
+   * say who was rated how.
+   */
+  const [nameMode, setNameMode] = useState<NameMode>(() => {
     try {
-      return localStorage.getItem('admin.insights.names') === 'all';
+      const saved = localStorage.getItem('admin.insights.names');
+      // 'few' is the old off-state, and it meant what 'key' means now.
+      return saved === 'all' ? 'all' : saved === 'none' ? 'none' : 'key';
     } catch {
-      return false;
+      return 'key';
     }
   });
+  const allNames = nameMode === 'all';
   // Which layers the anchors map is drawing. Not persisted: hiding a lens is a
   // thing you do for a moment while reading, not a standing preference.
   const [shownLayers, setShownLayers] = useState({
@@ -446,10 +461,10 @@ export function InsightsView({
     [],
   );
 
-  const toggleAllNames = useCallback((on: boolean) => {
-    setAllNames(on);
+  const chooseNameMode = useCallback((mode: NameMode) => {
+    setNameMode(mode);
     try {
-      localStorage.setItem('admin.insights.names', on ? 'all' : 'few');
+      localStorage.setItem('admin.insights.names', mode);
     } catch {
       /* private mode */
     }
@@ -569,8 +584,9 @@ export function InsightsView({
    * have when a facilitator is looking for one person in the room.
    */
   const namesFor = useCallback(
-    (few: ReadonlySet<number>) => (allNames ? allVisible : few),
-    [allNames, allVisible],
+    (few: ReadonlySet<number>) =>
+      nameMode === 'all' ? allVisible : nameMode === 'key' ? few : NO_NAMES,
+    [allVisible, nameMode],
   );
   const trustTies = useMemo(() => positiveTies(edges, TRUST_LENS, cut), [cut, edges]);
   const trustEdges = useMemo(
@@ -1561,8 +1577,8 @@ export function InsightsView({
             total={net.nodes.length}
             compare={!!scope.compare}
             onToggleCompare={(on) => setScope((cur) => ({ ...cur, compare: on }))}
-            allNames={allNames}
-            onToggleAllNames={toggleAllNames}
+            nameMode={nameMode}
+            onNameMode={chooseNameMode}
           />
         }
         search={

@@ -52,7 +52,7 @@ export function downloadInsightHtml(
   filename: string,
   subtitle: string,
 ): void {
-  const picture = svg ? svg.outerHTML : '<p>No picture on this question.</p>';
+  const picture = svg ? portableSvg(svg) : '<p>No picture on this question.</p>';
   const head = payload.columns.map((c) => `<th${c.right ? ' class="r"' : ''}>${esc(c.head)}</th>`).join('');
   const body = payload.rows
     .map(
@@ -98,13 +98,20 @@ export function downloadInsightHtml(
   td.r,th.r{ text-align:right; font-variant-numeric:tabular-nums; }
   tbody tr:hover{ background:var(--surface); }
   footer{ max-width:1100px; margin:22px auto 0; color:var(--ink3); font-size:11px; }
-  /* The map keeps its hover: every node carries its own title. */
-  svg [data-name]:hover{ opacity:1 !important; }
+  /* The map keeps its hover: every node carries a <title>, which the browser
+     shows by itself. The invisible tie hit-targets are switched off — they
+     exist to catch a click the live console handles, and here they would only
+     sit between the pointer and the people. */
+  svg .ins-graph-tie-hit{ pointer-events:none; }
+  svg [role="img"]{ cursor:default; }
   @media print{ body{ padding:0; } .pic{ break-inside:avoid; } }
 </style>
 <header>
   <h1>${esc(payload.tabTitle)}</h1>
-  <p class="sub">${esc(subtitle)}${payload.round ? ` · ${esc(payload.round)}` : ''} · ${esc(payload.question)}</p>
+  <p class="sub">${[subtitle, payload.round === subtitle ? '' : payload.round, payload.question]
+    .filter(Boolean)
+    .map(esc)
+    .join(' · ')}</p>
   <p class="finding">${esc(payload.finding)}</p>
 </header>
 <main>
@@ -116,6 +123,47 @@ export function downloadInsightHtml(
 </html>`;
 
   save(new Blob([html], { type: 'text/html;charset=utf-8' }), `${filename}.html`);
+}
+
+/**
+ * The live SVG, made to stand on its own.
+ *
+ * Three things the markup cannot carry by itself:
+ *
+ *  - Anything hidden by a stylesheet is still IN the markup. The console hides
+ *    the names for an unnamed export with a class, which works for a picture
+ *    because the picture is of the painted page — but a copy of the markup
+ *    brought every name back, in a file whose whole point is that it leaves
+ *    the building. Hidden elements are removed rather than trusted to a class
+ *    the saved file does not have.
+ *  - Hover. The live map hovers in React, which does not come with it. Each
+ *    node already describes itself for screen readers, so that description
+ *    becomes a <title> the browser shows on its own, with no script at all.
+ *  - The theme tokens the SVG refers to, which the page's own :root supplies.
+ */
+function portableSvg(svg: SVGSVGElement): string {
+  const hidden: Element[] = [];
+  for (const el of Array.from(svg.querySelectorAll('*'))) {
+    const style = getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') {
+      el.setAttribute('data-export-drop', '');
+      hidden.push(el);
+    }
+  }
+  const clone = svg.cloneNode(true) as SVGSVGElement;
+  for (const el of hidden) el.removeAttribute('data-export-drop');
+  for (const el of Array.from(clone.querySelectorAll('[data-export-drop]'))) el.remove();
+
+  for (const el of Array.from(clone.querySelectorAll('[aria-label]'))) {
+    // The <svg> element's own label belongs to the figure, not to a node.
+    if (el === (clone as Element)) continue;
+    const label = el.getAttribute('aria-label');
+    if (!label || el.querySelector(':scope > title')) continue;
+    const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    title.textContent = label;
+    el.insertBefore(title, el.firstChild);
+  }
+  return clone.outerHTML;
 }
 
 function save(blob: Blob, name: string): void {
