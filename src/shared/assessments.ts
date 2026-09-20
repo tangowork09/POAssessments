@@ -16,6 +16,13 @@ import {
   EGO_SCALE_LABELS,
 } from './ego-scoring.js';
 import {
+  COLLAB_ITEM_COUNT,
+  COLLAB_MAX_ANSWER,
+  COLLAB_MIN_ANSWER,
+  COLLAB_SCALE_LABELS,
+  COLLAB_SCALE_SHORT_LABELS,
+} from './collab.js';
+import {
   SOCIO_ITEM_COUNT,
   SOCIO_MAX_ANSWER,
   SOCIO_MIN_ANSWER,
@@ -24,18 +31,20 @@ import {
 } from './socio.js';
 
 /** Which scoring engine and which report shape an assessment uses. */
-export type AssessmentKind = 'isi' | 'ego' | 'socio';
+export type AssessmentKind = 'isi' | 'ego' | 'socio' | 'collab';
 
 export const ASSESSMENT_ID = {
   isi: 'asm_influencing_style',
   ego: 'asm_ta_ego_states',
   socio: 'asm_sociometry',
+  collab: 'asm_collaboration_diagnostic',
 } as const satisfies Record<AssessmentKind, string>;
 
 const KIND_BY_ID: Record<string, AssessmentKind> = {
   [ASSESSMENT_ID.isi]: 'isi',
   [ASSESSMENT_ID.ego]: 'ego',
   [ASSESSMENT_ID.socio]: 'socio',
+  [ASSESSMENT_ID.collab]: 'collab',
 };
 
 /**
@@ -228,6 +237,56 @@ export const ASSESSMENTS: Readonly<Record<AssessmentKind, AssessmentConfig>> = {
       ],
       emphasis:
         'Your own name is left out automatically. Your progress saves itself, so you can stop at any point and pick up exactly where you left off.',
+      cta: 'Begin',
+      ctaResume: 'Continue where I left off',
+    },
+  },
+
+  /**
+   * A third shape. ISI and the Ego States Scale report on the person who
+   * answered; Sociometry reports on a group by having its members rate each
+   * other. This one is a self-report *about the organisation*: every leader
+   * answers the same 24 statements about the company, and the finding only
+   * exists once the whole group's answers are averaged. So the candidate flow
+   * is an ordinary self-rating — no roster, no matrix, `cohortBased` false —
+   * while the report belongs to the run rather than to any respondent.
+   *
+   * Note what the intro does *not* carry: section titles. The master copy's
+   * participant version is the instructions, the scale and the 24 statements,
+   * in that order and nothing else. A leader who can see that a statement sits
+   * under "Trust & Safety" answers it differently, so section membership stays
+   * facilitator-side (src/shared/collab.ts) and never reaches this payload.
+   */
+  collab: {
+    kind: 'collab',
+    id: ASSESSMENT_ID.collab,
+    slug: 'collaboration-diagnostic',
+    name: 'Collaboration Diagnostic',
+    questionCount: COLLAB_ITEM_COUNT,
+    scale: {
+      min: COLLAB_MIN_ANSWER,
+      max: COLLAB_MAX_ANSWER,
+      labels: COLLAB_SCALE_LABELS,
+      shortLabels: COLLAB_SCALE_SHORT_LABELS,
+    },
+    intro: {
+      eyebrow: '24 statements · about 8 minutes',
+      confidentiality:
+        'Your individual answers are seen only by the facilitation team and are never shown to anyone in your organisation. Results are reported for the leadership group as a whole, and any department too small to stay anonymous is left out of the breakdown rather than reported.',
+      title: 'Collaboration Diagnostic',
+      lede: 'Twenty-four short statements about how work gets done between departments here. You are not being assessed: the questions are about the organisation, and your answers join everyone else\'s to show where collaboration is strong and where it is under strain.',
+      instructionsTitle: 'Rate each statement from 1 to 5',
+      // The master copy's own scale, verbatim.
+      instructions: [
+        '1 = Strongly Disagree',
+        '2 = Disagree',
+        '3 = Neither agree nor disagree',
+        '4 = Agree',
+        '5 = Strongly Agree',
+      ],
+      instructionBadges: ['1', '2', '3', '4', '5'],
+      emphasis:
+        'Some statements describe good practice and others describe problems, so read each one before answering. Answer for how things actually are, not how they should be. Your progress saves itself, so you can stop at any point and pick up exactly where you left off.',
       cta: 'Begin',
       ctaResume: 'Continue where I left off',
     },
