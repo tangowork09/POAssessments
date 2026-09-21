@@ -185,4 +185,22 @@ describe('the facilitator report', () => {
     const text = textOf(renderCollabReportPdf(payload([sheet(3), sheet(3)], { incomplete: 2 })));
     expect(text).toContain('left unfinished');
   });
+
+  it('does not name two sections as the extremes when every section tied', () => {
+    // Everyone answering 3 throughout puts all six sections on 3.00. The
+    // ranking still has a first and a last entry, and printing them as the
+    // strongest and the weakest invents a finding the data does not contain.
+    const text = textOf(renderCollabReportPdf(payload([sheet(3), sheet(3), sheet(3)])));
+    expect(text).toContain('No section stands apart');
+    expect(text).not.toContain('0.00 between');
+  });
+
+  it('still names the ends when there is a real gap', () => {
+    const uneven: Record<number, number>[] = [sheet(2), sheet(5), sheet(3)];
+    uneven[0]![1] = 1;
+    uneven[1]![1] = 1;
+    const text = textOf(renderCollabReportPdf(payload(uneven)));
+    expect(text).toContain('between Structure & Goals and Institutional Levers');
+    expect(text).not.toContain('No section stands apart');
+  });
 });

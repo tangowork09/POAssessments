@@ -542,8 +542,18 @@ function drawSections(ctx: Ctx): void {
       color: T.ink4,
       charSpacing: 1.1,
     });
+    /*
+     * A gap of zero has no ends to name.
+     *
+     * The line reads "0.00 between Collaboration Barriers and Trust & Safety",
+     * which says those two sections are the extremes when in fact every
+     * section tied. The sort picked them; the data did not.
+     */
+    const flat = gap.value === 0;
     doc(ctx).text(
-      `${gap.value.toFixed(2)} between ${gap.strongest} and ${gap.weakest}`,
+      flat
+        ? `No section stands apart \u2014 all ${ranked.length} sit at ${ranked[0]!.mean.toFixed(2)}`
+        : `${gap.value.toFixed(2)} between ${gap.strongest} and ${gap.weakest}`,
       M.left + 14,
       ctx.y + 26,
       { font: 'Helvetica-Bold', size: 10.4, color: T.ink },
@@ -551,9 +561,13 @@ function drawSections(ctx: Ctx): void {
   });
   ctx.y = paragraph(
     ctx,
-    'The distance between the strongest and weakest section is usually the clearest signal of where ' +
-      'the system is under strain. Compare the sections against each other rather than judging any ' +
-      'one of them in isolation.',
+    gap.value === 0
+      ? 'Every section came out at the same mean, which is unusual enough to be worth checking ' +
+        'before it is read as a finding: with few respondents, or answers that barely vary, the ' +
+        'sections have nothing to separate them. Read the individual statements below instead.'
+      : 'The distance between the strongest and weakest section is usually the clearest signal of where ' +
+        'the system is under strain. Compare the sections against each other rather than judging any ' +
+        'one of them in isolation.',
     ctx.y + 8,
     { size: 8.6, leading: 13.5, color: T.ink3 },
   );
