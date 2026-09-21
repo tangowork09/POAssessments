@@ -294,3 +294,30 @@ describe('segments', () => {
     expect(segment.suppressed).toBe(true);
   });
 });
+
+describe('the reporting floor', () => {
+  it('reports every segment when the floor is one', () => {
+    // What a facilitator running twenty leaders usually wants: a four-person
+    // Operations is the finding, not a privacy problem to be hidden.
+    const [tiny, small] = segmentCollab(
+      [
+        { name: 'Quality & QA', responses: [flat(4)] },
+        { name: 'Operations', responses: [flat(2), flat(2), flat(2), flat(2)] },
+      ],
+      1,
+    );
+    expect(tiny!.suppressed).toBe(false);
+    expect(tiny!.n).toBe(1);
+    expect(tiny!.perItem).not.toBeNull();
+    expect(small!.suppressed).toBe(false);
+    expect(small!.sections).not.toBeNull();
+  });
+
+  it('still reports nobody as nobody', () => {
+    // An empty segment has no figures at any floor: there is nothing to average.
+    const [empty] = segmentCollab([{ name: 'R&D', responses: [] }], 1);
+    expect(empty!.n).toBe(0);
+    expect(empty!.suppressed).toBe(true);
+    expect(empty!.sections).toBeNull();
+  });
+});

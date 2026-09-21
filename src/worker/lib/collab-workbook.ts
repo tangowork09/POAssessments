@@ -213,7 +213,9 @@ function methodSheet(wb: ExcelJS.Workbook, input: CollabWorkbookInput): void {
     ],
     [
       'The floor',
-      `Segments with fewer than ${input.minSegment} respondents are not reported. At that size an average is close enough to a quotation to identify who said what, which would break the confidentiality the diagnostic was answered under.`,
+      input.minSegment <= 1
+        ? 'Every segment is reported however small, which is what this run was set to do and what its respondents were told. A segment of one or two people should be read as those people rather than as a department.'
+        : `Segments with fewer than ${input.minSegment} respondents are not reported. At that size an average is close enough to a quotation to identify who said what, which would break the confidentiality the diagnostic was answered under.`,
     ],
     [
       'The bands',

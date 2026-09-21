@@ -323,9 +323,10 @@ export function RunResults({ runId, wave }: { runId: string; wave?: number }) {
           <div className="cd-sec-head">
             <h3>By {cut.label.toLowerCase()}</h3>
             <p>
-              Section means for each {cut.label.toLowerCase()}. Anything with fewer than {data.minSegment}{' '}
-              respondents is not reported: at that size an average is close enough to a quotation to
-              identify who said what.
+              Section means for each {cut.label.toLowerCase()}.{' '}
+              {data.minSegment <= 1
+                ? 'Every group is reported, however few people are in it.'
+                : `Anything with fewer than ${data.minSegment} respondents is not reported: at that size an average is close enough to a quotation to identify who said what.`}
             </p>
           </div>
           <div className="cd-panel cd-matrix">

@@ -132,6 +132,35 @@ export function RunSetup({
           </label>
 
           <label className="cd-setting">
+            <span className="cd-setting-label">Report a group of at least</span>
+            <select
+              className="control control-sm"
+              value={settings.minSegment}
+              disabled={busy}
+              onChange={(e) =>
+                patch(
+                  { minSegment: Number(e.target.value) },
+                  Number(e.target.value) === 1
+                    ? 'Every group is reported, however small.'
+                    : `Groups under ${e.target.value} are left out of the breakdown.`,
+                )
+              }
+            >
+              <option value={1}>1 — report every group, however small</option>
+              {[2, 3, 4, 5, 6, 8, 10].map((n) => (
+                <option key={n} value={n}>
+                  {n} people
+                </option>
+              ))}
+            </select>
+            <em>
+              {settings.minSegment <= 1
+                ? 'Every department appears in the breakdown, including one of four people or one of one. With a very small group, its average is close to quoting the people in it — respondents are told this before they answer.'
+                : `A department with fewer than ${settings.minSegment} respondents is left out of the breakdown rather than reported, because at that size an average is close to a quotation.`}
+            </em>
+          </label>
+
+          <label className="cd-setting">
             <span className="cd-setting-label">Chase whoever has not finished</span>
             <select
               className="control control-sm"

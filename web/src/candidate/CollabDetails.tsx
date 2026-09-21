@@ -67,11 +67,7 @@ export function CollabDetails({
     <form className="card formcard rise" onSubmit={submit} noValidate>
       <p className="step-pill">Step 1 of 2</p>
       <h1 className="formcard-title">{nothingToAsk ? 'Ready when you are' : 'One or two things first'}</h1>
-      <p className="formcard-lede">
-        {run.anonymous
-          ? 'Your answers are stored separately from you: nobody, including the facilitation team, can see which answers are yours.'
-          : 'Your individual answers are seen only by the facilitation team and are never shown to anyone in your organisation.'}
-      </p>
+      <p className="formcard-lede">{run.groupingNote}</p>
 
       <div className="fieldset">
         {needsEmail && (
@@ -118,9 +114,7 @@ export function CollabDetails({
               ))}
             </div>
             <span className="field-hint">
-              {facet.required
-                ? 'Used only to compare groups. Any group too small to stay anonymous is left out of the results.'
-                : 'You may leave this blank.'}
+              {facet.required ? 'Used only to compare groups.' : 'You may leave this blank.'}
             </span>
           </fieldset>
         ))}

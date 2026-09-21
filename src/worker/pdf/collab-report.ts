@@ -774,9 +774,13 @@ function drawSegments(ctx: Ctx): void {
     heading(ctx, `By ${cut.label.toLowerCase()}`);
     ctx.y = paragraph(
       ctx,
-      `Average per statement for each ${cut.label.toLowerCase()}. Anything with fewer than ` +
-        `${report.minSegment} respondents is not reported: at that size an average is close enough to a ` +
-        'quotation to identify who said what, which would break the confidentiality this was answered under.',
+      report.minSegment <= 1
+        ? `Average per statement for each ${cut.label.toLowerCase()}. Every group is reported here, ` +
+          'however few people are in it, which is what this run was set to do. Read a group of two or ' +
+          'three as those people rather than as a department.'
+        : `Average per statement for each ${cut.label.toLowerCase()}. Anything with fewer than ` +
+          `${report.minSegment} respondents is not reported: at that size an average is close enough to a ` +
+          'quotation to identify who said what, which would break the confidentiality this was answered under.',
       ctx.y,
       { size: 8.6, leading: 13.5, color: T.ink3 },
     );
@@ -849,13 +853,15 @@ function drawMethod(ctx: Ctx): void {
     ],
     [
       'Confidentiality',
-      report.anonymous
-        ? `Responses were collected anonymously and are stored detached from the people who gave them. Any ` +
-          `group of fewer than ${report.minSegment} respondents is withheld from the breakdowns rather than ` +
-          `reported, because at that size an average identifies individuals.`
-        : `Individual responses are seen only by the facilitation team and are never reported. Any group of ` +
-          `fewer than ${report.minSegment} respondents is withheld from the breakdowns rather than reported, ` +
-          `because at that size an average identifies individuals.`,
+      (report.anonymous
+        ? 'Responses were collected anonymously and are stored detached from the people who gave them. '
+        : 'Individual responses are seen only by the facilitation team and are never reported. ') +
+        (report.minSegment <= 1
+          ? 'Every group is reported in the breakdowns however small, which this run chose and which its ' +
+            'respondents were told before they answered. A group of one or two should be read as those ' +
+            'people rather than as a department.'
+          : `Any group of fewer than ${report.minSegment} respondents is withheld from the breakdowns ` +
+            'rather than reported, because at that size an average identifies individuals.'),
     ],
     [
       'What this is not',

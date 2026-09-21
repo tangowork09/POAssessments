@@ -225,11 +225,16 @@ const cohortFields = {
  */
 const collabFields = {
   /**
-   * Fewest respondents in a segment before that segment is reported on. The
-   * floor may be raised but never dropped below two: at one respondent a
-   * "departmental average" is that person's answers, republished.
+   * Fewest respondents in a segment before that segment is reported on.
+   *
+   * 1 reports every department however small, which is what a facilitator
+   * running a twenty-person leadership team usually wants: with four people in
+   * Operations, withholding Operations withholds the finding. It is the
+   * facilitator's call, and the consequence is stated rather than prevented —
+   * at one or two respondents a departmental average is close to quoting those
+   * people, so the respondent is told which floor applies before they answer.
    */
-  minSegment: z.number().int().min(2).max(50),
+  minSegment: z.number().int().min(1).max(50),
   /**
    * Whether responses are detached from the people who gave them. See
    * migration 0022 — this is where the answers are stored, not what the

@@ -27,6 +27,8 @@ export interface CollabRunForCandidate {
   anonymous: boolean;
   /** An optional free-text question asked after the statements; '' for none. */
   openQuestion: string;
+  /** What this run does with a small group, in words the respondent reads. */
+  groupingNote: string;
   /** What this respondent has already typed there. */
   openAnswer: string;
   facets: CollabFacet[];

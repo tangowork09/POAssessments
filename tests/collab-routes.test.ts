@@ -23,9 +23,14 @@ describe('creating a run', () => {
     expect(parsed.organisation).toBe('');
   });
 
-  it('refuses a floor that would report one person as a department', () => {
-    expect(collabRunCreateSchema.safeParse({ name: 'Acme', minSegment: 1 }).success).toBe(false);
-    expect(collabRunCreateSchema.safeParse({ name: 'Acme', minSegment: 2 }).success).toBe(true);
+  it('lets a facilitator report every group, however small', () => {
+    // A floor of 1 is a legitimate choice, and the commonest one for a twenty
+    // person leadership team: withholding a four-person Operations withholds
+    // the finding. The consequence is stated to respondents, not prevented.
+    expect(collabRunCreateSchema.parse({ name: 'Acme', minSegment: 1 }).minSegment).toBe(1);
+    expect(collabRunCreateSchema.parse({ name: 'Acme' }).minSegment).toBe(5);
+    expect(collabRunCreateSchema.safeParse({ name: 'Acme', minSegment: 0 }).success).toBe(false);
+    expect(collabRunCreateSchema.safeParse({ name: 'Acme', minSegment: 51 }).success).toBe(false);
   });
 
   it('needs a name', () => {

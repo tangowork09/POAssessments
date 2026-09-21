@@ -271,8 +271,14 @@ export const ASSESSMENTS: Readonly<Record<AssessmentKind, AssessmentConfig>> = {
     },
     intro: {
       eyebrow: '24 statements · about 8 minutes',
+      /*
+       * The general promise only. What happens to a small department depends
+       * on the floor this particular run is set to, so that sentence is built
+       * per run in collab-candidate.ts rather than promised here for every
+       * run in advance.
+       */
       confidentiality:
-        'Your individual answers are seen only by the facilitation team and are never shown to anyone in your organisation. Results are reported for the leadership group as a whole, and any department too small to stay anonymous is left out of the breakdown rather than reported.',
+        'Your individual answers are seen only by the facilitation team and are never shown to anyone in your organisation. Results are reported for the leadership group as a whole.',
       title: 'Collaboration Diagnostic',
       lede: 'Twenty-four short statements about how work gets done between departments here. You are not being assessed: the questions are about the organisation, and your answers join everyone else\'s to show where collaboration is strong and where it is under strain.',
       instructionsTitle: 'Rate each statement from 1 to 5',

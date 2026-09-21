@@ -334,8 +334,11 @@ function RunPage({ runId }: { runId: string }) {
           </h2>
           <p className="hint">
             {detail.run.organisation || 'No organisation'} ·{' '}
-            {detail.run.anonymous ? 'Anonymous' : 'Named'} · departments under {detail.run.min_segment}{' '}
-            not reported ·{' '}
+            {detail.run.anonymous ? 'Anonymous' : 'Named'} ·{' '}
+            {detail.run.min_segment <= 1
+              ? 'every group reported'
+              : `groups under ${detail.run.min_segment} not reported`}{' '}
+            ·{' '}
             {detail.waves.length > 1 ? `${detail.waves.length} waves` : 'one wave'}
           </p>
         </div>

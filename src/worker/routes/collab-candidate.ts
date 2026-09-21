@@ -54,6 +54,7 @@ interface RunRow {
   status: 'draft' | 'open' | 'closed';
   anonymous: number;
   open_question: string;
+  min_segment: number;
 }
 
 /**
@@ -72,7 +73,7 @@ export async function runForLink(
   if (!link.cohort_id) return { error: 'This link is not attached to a run.', code: 404 };
 
   const run = await env.DB.prepare(
-    `SELECT id, organisation, status, anonymous, open_question
+    `SELECT id, organisation, status, anonymous, open_question, min_segment
        FROM cohorts WHERE id = ?1 AND assessment_id = ?2`,
   )
     .bind(link.cohort_id, ASSESSMENT_ID.collab)
@@ -99,6 +100,20 @@ export async function runForLink(
   }
 
   return { run, waveNo: wave.no, waveLabel: wave.label };
+}
+
+/** How this run's floor reads to the person about to answer. */
+export function groupingNote(minSegment: number, anonymous: boolean): string {
+  const base = anonymous
+    ? 'Your answers are stored separately from you, so nobody can tell which are yours.'
+    : 'Your individual answers are seen only by the facilitation team.';
+  if (minSegment <= 1) {
+    return `${base} Results are reported for the group and broken down by the background questions below, including groups with only one or two people in them — so a very small group's answers may be close to your own.`;
+  }
+  if (minSegment === 2) {
+    return `${base} Results are broken down by the background questions below, and a group of one person is not reported separately.`;
+  }
+  return `${base} Results are broken down by the background questions below, and any group with fewer than ${minSegment} people is left out of that breakdown rather than reported.`;
 }
 
 export function waveName(no: number, label: string): string {
@@ -190,6 +205,14 @@ export async function collabSessionFor(
      * the instrument has 24 statements and this is not a 25th.
      */
     openQuestion: resolved.run.open_question,
+    /**
+     * What this run actually does with a small department, said before anybody
+     * answers. A run reporting every group however small is a legitimate
+     * choice — with four people in Operations, withholding Operations
+     * withholds the finding — but it is not the choice the respondent will
+     * assume, so it is spelled out rather than left to be discovered.
+     */
+    groupingNote: groupingNote(resolved.run.min_segment, resolved.run.anonymous === 1),
     openAnswer: responseId ? await loadOpenAnswer(env, responseId) : '',
     facets: await loadFacets(env, resolved.run.id),
     chosen: {
