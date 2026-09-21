@@ -989,6 +989,137 @@ collabRunRoutes.post('/:id/duplicate', async (c) => {
   return c.json({ id }, 201);
 });
 
+// -------------------------------------------------------------- responses
+
+/**
+ * Every response in a wave, in full, with nobody's name on it.
+ *
+ * An anonymous run has no roster to open, and a facilitator was being shown a
+ * blank tab — which reads as "this tool is hiding something" rather than "this
+ * data has no identity in it". Both are wrong. The answers exist and are worth
+ * reading; what does not exist is any way to attach them to a person.
+ *
+ * So this returns the complete set, numbered rather than named, in the order
+ * they were completed. The numbering is presentational and deliberately says
+ * nothing: response 4 is the fourth sheet finished, not the fourth person on
+ * any list, and there is no list.
+ */
+collabRunRoutes.get('/:id/responses', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+
+  const wave = Number(c.req.query('wave')) || (await currentWaveNo(c.env, run.id));
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT r.id, r.status, r.answered_count, r.completed_at, r.anonymous
+       FROM responses r
+      WHERE r.cohort_id = ?1 AND r.round_no = ?2
+      ORDER BY COALESCE(r.completed_at, r.invited_at)`,
+  )
+    .bind(run.id, wave)
+    .all<{ id: string; status: string; answered_count: number; completed_at: string | null; anonymous: number }>();
+
+  const rows = results ?? [];
+  const facets = await c.env.DB.prepare(
+    `SELECT f.response_id, f.key, f.value
+       FROM response_facets f JOIN responses r ON r.id = f.response_id
+      WHERE r.cohort_id = ?1 AND r.round_no = ?2`,
+  )
+    .bind(run.id, wave)
+    .all<{ response_id: string; key: string; value: string }>();
+
+  const byResponse = new Map<string, Record<string, string>>();
+  for (const row of facets.results ?? []) {
+    let bag = byResponse.get(row.response_id);
+    if (!bag) byResponse.set(row.response_id, (bag = {}));
+    bag[row.key] = row.value;
+  }
+
+  return c.json({
+    wave,
+    anonymous: run.anonymous === 1,
+    responses: rows.map((row, i) => ({
+      responseId: row.id,
+      // Presentational only: the order these were finished in, which is not
+      // the order of any list of people, because there is no such list.
+      label: `Response ${i + 1}`,
+      status: row.status,
+      answered: row.answered_count,
+      completedAt: row.completed_at,
+      facets: byResponse.get(row.id) ?? {},
+    })),
+  });
+});
+
+/** One response, in full, against the group. Carries no identity either. */
+collabRunRoutes.get('/:id/responses/:responseId/answers', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+
+  const row = await c.env.DB.prepare(
+    `SELECT id, status, round_no FROM responses WHERE id = ?1 AND cohort_id = ?2`,
+  )
+    .bind(c.req.param('responseId'), run.id)
+    .first<{ id: string; status: string; round_no: number }>();
+  if (!row) return c.json({ error: 'That response is not part of this run.' }, 404);
+  if (row.status !== 'completed') return c.json({ status: row.status, answers: null });
+
+  const { results } = await c.env.DB.prepare(
+    'SELECT no, value FROM answers WHERE response_id = ?1 ORDER BY no',
+  )
+    .bind(row.id)
+    .all<{ no: number; value: number }>();
+
+  const raw: Record<number, number> = {};
+  for (const answer of results ?? []) raw[answer.no] = answer.value;
+
+  let scored;
+  try {
+    scored = scoreCollabResponse(raw);
+  } catch {
+    return c.json({ status: row.status, answers: null });
+  }
+
+  let groupItem = new Map<number, number>();
+  let groupN = 0;
+  try {
+    const group = await scoreRun(c.env, { id: run.id, min_segment: run.min_segment }, row.round_no);
+    groupItem = new Map(group.group.items.map((i) => [i.no, i.mean]));
+    groupN = group.group.n;
+  } catch {
+    // A wave with nothing complete has no group to compare against.
+  }
+
+  /*
+   * Logged like the named read. Nothing here identifies anybody, but a record
+   * of who opened what is how a facilitation team stays able to say, later and
+   * truthfully, what was looked at.
+   */
+  await writeAudit(c.env, c.get('admin') ?? null, c.req.raw, 200, {
+    action: 'collab.response.answers.read',
+    entity: 'collab_run',
+    entityId: run.id,
+    summary: `Read one anonymous response for ${run.name}`,
+  });
+
+  return c.json({
+    status: row.status,
+    groupN,
+    total: scored.total,
+    perItem: scored.perItem,
+    sections: scored.sections.map((s) => ({ key: s.key, short: s.short, mean: s.mean })),
+    answers: COLLAB_ITEMS.map((item) => ({
+      no: item.no,
+      text: item.text,
+      section: COLLAB_SECTION_BY_KEY.get(item.sectionKey)?.short ?? '',
+      direction: item.direction,
+      chose: raw[item.no] ?? null,
+      converted: scored.converted[item.no] ?? null,
+      group: groupItem.get(item.no) ?? null,
+    })),
+  });
+});
+
 // ---------------------------------------------------------- participants
 
 /**

@@ -6,13 +6,13 @@
  * who can see that one leader marked Trust two points below everyone else can
  * go and have that conversation.
  *
- * It is not available for an anonymous run, and cannot be: the response was
- * stored detached from the person. The panel says so rather than offering a
- * control that would fail.
+ * An anonymous run reaches the same table by a different door: its responses
+ * are all readable too, and only the identity is missing — because none was
+ * ever stored. What changes is the heading, not the access.
  *
- * Every open is written to the activity log by name. A facilitator is allowed
- * to look; nobody should be able to look without it being visible that they
- * did, so the panel says that out loud rather than logging quietly.
+ * Every open is written to the activity log. A facilitator is allowed to look;
+ * nobody should be able to look without it being visible that they did, so the
+ * panel says that out loud rather than logging quietly.
  */
 
 import { useEffect, useState } from 'react';
@@ -30,7 +30,7 @@ interface Answer {
 }
 
 interface Detail {
-  email: string;
+  email?: string;
   status: string;
   wave?: number;
   groupN?: number;
@@ -43,13 +43,25 @@ interface Detail {
 const SCALE = ['Strongly disagree', 'Disagree', 'Neither', 'Agree', 'Strongly agree'];
 
 export function PersonAnswers({ runId, linkId }: { runId: string; linkId: string }) {
+  return <AnswerSheet path={`/api/admin/collab-runs/${runId}/participants/${linkId}/answers`} />;
+}
+
+/**
+ * One completed sheet, against the group.
+ *
+ * Takes a path rather than an identity, because it serves both readings: a
+ * named person opened from the roster, and an anonymous response opened from
+ * the responses list. The table is the same; what differs is whether anything
+ * upstream knows whose it is.
+ */
+export function AnswerSheet({ path }: { path: string }) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
     api
-      .get<Detail>(`/api/admin/collab-runs/${runId}/participants/${linkId}/answers`)
+      .get<Detail>(path)
       .then((d) => live && setDetail(d))
       .catch((err: unknown) => {
         if (!live) return;
@@ -58,7 +70,7 @@ export function PersonAnswers({ runId, linkId }: { runId: string; linkId: string
     return () => {
       live = false;
     };
-  }, [runId, linkId]);
+  }, [path]);
 
   if (error) {
     return (
@@ -84,8 +96,8 @@ export function PersonAnswers({ runId, linkId }: { runId: string; linkId: string
   return (
     <div className="cd-answers">
       <p className="cd-answers-note">
-        Their own answers, against the group ({detail.groupN ?? 0} people). Opening this is recorded in
-        the activity log.
+        {detail.email ? 'Their own answers' : 'This response'}, against the group (
+        {detail.groupN ?? 0} people). Opening this is recorded in the activity log.
       </p>
 
       {detail.sections && (

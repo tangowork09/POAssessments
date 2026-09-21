@@ -51,6 +51,9 @@ function prefersReducedMotion(): boolean {
 }
 
 export function QuestionPage({
+  openQuestion,
+  openAnswer,
+  onOpenAnswer,
   questions,
   scale,
   perPage,
@@ -76,6 +79,13 @@ export function QuestionPage({
   onAnswer: (no: number, value: number) => void;
   onPage: (page: number) => void;
   onSubmit: () => void;
+  /**
+   * The Collaboration Diagnostic's one optional free-text question, shown on
+   * the last statement. Absent for every other instrument, which asks none.
+   */
+  openQuestion?: string;
+  openAnswer?: string;
+  onOpenAnswer?: (text: string) => void;
 }) {
   const [index, setIndex] = useState(() => resolveStart(questions, answers, page, perPage));
   const [nudge, setNudge] = useState(false);
@@ -324,6 +334,30 @@ export function QuestionPage({
             <p className="qnudge" role="alert">
               Pick a number from {scale.min} to {scale.max} to carry on.
             </p>
+          ) : null}
+
+          {/* The one free-text question, on the last statement and only when
+              the facilitator asked one. Optional, and said to be optional:
+              a required essay at the end of 24 ratings is how a response is
+              abandoned on the last screen. */}
+          {isLast && openQuestion && onOpenAnswer ? (
+            <div className="qopen">
+              <label className="qopen-label" htmlFor="q-open">
+                {openQuestion}
+              </label>
+              <textarea
+                id="q-open"
+                className="qopen-input"
+                rows={3}
+                maxLength={2000}
+                value={openAnswer ?? ''}
+                placeholder="In your own words, if you would like to."
+                onChange={(e) => onOpenAnswer(e.target.value)}
+              />
+              <p className="qopen-hint">
+                Optional. This is not scored, and it is quoted without your name beside it.
+              </p>
+            </div>
           ) : null}
 
           <div className="qfoot">

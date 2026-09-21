@@ -14,6 +14,7 @@ import { Autosave, type SaveState } from '../lib/autosave.js';
 import { Centered, DEFAULT_BRANDING, LogoSlot, Shell, useAccent } from './Shell.js';
 import { ScreenSkeleton } from './Skeleton.js';
 import { DetailsForm } from './DetailsForm.js';
+import { CollabDetails } from './CollabDetails.js';
 import { IdentityForm } from './IdentityForm.js';
 import { QuestionPage } from './QuestionPage.js';
 import { MatrixPage } from './MatrixPage.js';
@@ -47,6 +48,8 @@ export function AssessmentPage() {
    * known, since the respondent's own row has to be absent from the list.
    */
   const [cohort, setCohort] = useState<CandidateCohort | null>(null);
+  const [run, setRun] = useState<CandidateSession['run']>(null);
+  const [openAnswer, setOpenAnswer] = useState('');
 
   const autosave = useRef<Autosave | null>(null);
   // Read by the watch below. Held in refs so that a change to either does not
@@ -68,6 +71,8 @@ export function AssessmentPage() {
   const applySession = useCallback((s: CandidateSession) => {
     setSession(s);
     setCohort(s.cohort);
+    setRun(s.run);
+    if (s.run?.openAnswer) setOpenAnswer(s.run.openAnswer);
     setLoadError(null);
 
     if (s.response) {
@@ -235,7 +240,7 @@ export function AssessmentPage() {
     // Intentionally keyed on the response only: re-running on every answer
     // would tear the engine down mid-flush.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [responseId, token]);
+  }, [openAnswer, responseId, token]);
 
   const branding = session?.branding ?? DEFAULT_BRANDING;
   useAccent(branding);
@@ -288,6 +293,34 @@ export function AssessmentPage() {
     autosave.current?.setPage(next);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
+
+  /**
+   * Starting a Collaboration Diagnostic.
+   *
+   * It posts the background answers and, on a named run reached by a shared
+   * link, an email. It does not post a name, an age band, years of experience
+   * or a gender, because the diagnostic never asks for them.
+   */
+  const handleCollabStart = useCallback(
+    async (input: { email: string; facets: Record<string, string> }) => {
+      const res = await api.post<{ responseId: string; personalToken: string | null }>(
+        `/api/candidate/start/${encodeURIComponent(token)}`,
+        input,
+      );
+      setResponseId(res.responseId);
+      autosave.current?.setResponseId(res.responseId);
+      if (res.personalToken) {
+        try {
+          localStorage.setItem(`ap:plink:${token}`, res.personalToken);
+        } catch {
+          /* fine — a reload just asks again */
+        }
+        window.history.replaceState(null, '', `/t/${res.personalToken}`);
+      }
+      setStep('questions');
+    },
+    [token],
+  );
 
   const handleDetails = useCallback(
     async (details: CandidateDetails) => {
@@ -393,7 +426,9 @@ export function AssessmentPage() {
       await autosave.current?.flush();
       const res = await api.post<{ completed: boolean; reportToken?: string }>(
         `/api/candidate/submit/${encodeURIComponent(token)}`,
-        { responseId },
+        // The open answer rides with the submission rather than autosaving: it
+        // is not a rating, and it is written once when the sheet is finished.
+        openAnswer.trim() === '' ? { responseId } : { responseId, openAnswer: openAnswer.trim() },
       );
       autosave.current?.clearLocal();
       setReportReady(Boolean(res.reportToken));
@@ -454,7 +489,18 @@ export function AssessmentPage() {
         />
       )}
 
+      {step === 'details' && run && (
+        <CollabDetails
+          run={run}
+          needsEmail={!run.anonymous && session.linkKind === 'generic'}
+          initialEmail={session.response?.details?.email ?? ''}
+          onSubmit={handleCollabStart}
+          onBack={() => setStep('begin')}
+        />
+      )}
+
       {step === 'details' &&
+        !run &&
         (cohort ? (
           <IdentityForm
             cohort={cohort}
@@ -496,6 +542,9 @@ export function AssessmentPage() {
           />
         ) : (
           <QuestionPage
+            openQuestion={run?.openQuestion || undefined}
+            openAnswer={openAnswer}
+            onOpenAnswer={setOpenAnswer}
             questions={questions}
             scale={session.scale}
             perPage={perPage}

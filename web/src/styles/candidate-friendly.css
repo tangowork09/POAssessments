@@ -2734,3 +2734,27 @@ body.fb-body {
 }
 .fb .review-state.is-complete { color: var(--ok); }
 .fb .review-state.is-partial { color: var(--warn); }
+
+/* ============================================================
+   THE DIAGNOSTIC'S ONE OPEN QUESTION
+   Shown on the last statement, optional, and never scored.
+   ============================================================ */
+.qopen{ margin-top:22px; padding-top:18px; border-top:1px solid var(--line); text-align:left; }
+.qopen-label{ display:block; font-size:15px; font-weight:600; color:var(--ink); margin-bottom:8px; }
+.qopen-input{
+  width:100%; border:1px solid var(--line-2); border-radius:var(--r-3);
+  padding:10px 12px; font:inherit; font-size:15px; line-height:1.5; color:var(--ink);
+  background:var(--surface); resize:vertical; min-height:76px;
+}
+.qopen-input:focus{ outline:2px solid var(--accent); outline-offset:1px; }
+.qopen-hint{ margin-top:6px; font-size:13px; color:var(--ink-3); }
+
+/* The background questions, as pickable chips rather than a select. */
+.choice-row{ display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; }
+.choice{
+  padding:9px 14px; border:1px solid var(--line-2); border-radius:999px;
+  background:var(--surface); font-size:15px; color:var(--ink-2); cursor:pointer;
+  transition:background-color .12s ease-out, border-color .12s ease-out, color .12s ease-out;
+}
+.choice:hover{ background:var(--surface-2); }
+.choice[aria-pressed="true"]{ background:var(--accent); border-color:var(--accent); color:#fff; }

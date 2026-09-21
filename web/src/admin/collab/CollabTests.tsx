@@ -29,6 +29,7 @@ import { RunResults } from './RunResults.js';
 import { RunSetup } from './RunSetup.js';
 import { RunTrend } from './RunTrend.js';
 import { RosterPanel } from './RosterPanel.js';
+import { ResponsesPanel } from './ResponsesPanel.js';
 import type { RunListItem } from './types.js';
 
 interface RunDetail {
@@ -473,20 +474,7 @@ function RunPage({ runId }: { runId: string }) {
 
       {tab === 'people' &&
         (detail.run.anonymous ? (
-          <section className="card">
-            <CardHead
-              title="Responses are anonymous"
-              sub="Nobody to list, which is the point of an anonymous run."
-            />
-            <div className="card-body">
-              <p className="hint">
-                {detail.turnout?.completed ?? 0} answered so far. Answers are stored detached from the
-                people who gave them, so this run cannot send personal links, chase individuals, or
-                show what any one person said. Share the run&rsquo;s link with the group again to nudge
-                it.
-              </p>
-            </div>
-          </section>
+          <ResponsesPanel runId={runId} facetKeys={detail.facets.map((f) => f.key)} />
         ) : (
           <RosterPanel runId={runId} status={detail.run.status} say={say} onChanged={load} />
         ))}
