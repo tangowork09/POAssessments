@@ -12,12 +12,16 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../../lib/api.js';
 import { CardHead, formatDate } from '../ui.js';
+import { PersonAnswers } from './PersonAnswers.js';
 
 interface Participant {
   linkId: string;
   email: string;
+  name: string;
+  department: string;
   invitedAt: string;
   openedAt: string | null;
   status: 'invited' | 'in_progress' | 'completed' | string;
@@ -43,6 +47,21 @@ export function InvitePanel({
   onChanged: () => void;
 }) {
   const [people, setPeople] = useState<Participant[] | null>(null);
+  /*
+   * Whose answers are open lives in the URL. A facilitator reading one
+   * person's sheet during a debrief wants that view to survive a refresh, and
+   * to be the thing they can send to a colleague who is also in the room.
+   */
+  const [params, setParams] = useSearchParams();
+  const open = params.get('person');
+  const setOpen = (linkId: string | null) => {
+    const next = new URLSearchParams(params);
+    if (linkId) next.set('person', linkId);
+    else next.delete('person');
+    setParams(next, { replace: true });
+  };
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState<{ name: string; department: string }>({ name: '', department: '' });
   const [addresses, setAddresses] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,10 +75,23 @@ export function InvitePanel({
 
   useEffect(load, [load]);
 
-  const emails = addresses
-    .split(/[\n,;]+/)
-    .map((v) => v.trim())
-    .filter((v) => v !== '');
+  /*
+   * One person per line: an address on its own, or "Name, email, Department".
+   * Facilitators arrive with a spreadsheet column, and retyping it into three
+   * separate boxes fifty times is the kind of friction that ends with the
+   * whole thing being done by hand outside the tool.
+   */
+  const people_in = addresses
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+    .map((line) => {
+      const parts = line.split(/[,;\t]+/).map((p) => p.trim());
+      const email = parts.find((p) => p.includes('@')) ?? '';
+      const rest = parts.filter((p) => p !== email && p !== '');
+      return { email, name: rest[0] ?? '', department: rest[1] ?? '' };
+    })
+    .filter((p) => p.email !== '');
 
   async function run<T>(work: () => Promise<T>, done: (result: T) => string): Promise<void> {
     setBusy(true);
@@ -77,7 +109,10 @@ export function InvitePanel({
 
   const invite = () =>
     run(
-      () => api.post<{ sent: number; skipped: number }>(`/api/admin/collab-runs/${runId}/invites`, { emails }),
+      () =>
+        api.post<{ sent: number; skipped: number }>(`/api/admin/collab-runs/${runId}/invites`, {
+          people: people_in,
+        }),
       (r) => {
         setAddresses('');
         return r.skipped > 0
@@ -96,6 +131,21 @@ export function InvitePanel({
     run(
       () => api.post<{ email: string }>(`/api/admin/collab-runs/${runId}/participants/${p.linkId}/resend`, {}),
       (r) => `A fresh link is on its way to ${r.email}.`,
+    );
+
+  const save = (p: Participant) =>
+    run(
+      () =>
+        api.patchJson<{ appliesToAnswers: boolean }>(
+          `/api/admin/collab-runs/${runId}/participants/${p.linkId}`,
+          draft,
+        ),
+      (r) => {
+        setEditing(null);
+        return r.appliesToAnswers
+          ? 'Saved.'
+          : 'Saved. They have already answered, so their response keeps the department it was given under.';
+      },
     );
 
   const remove = (p: Participant) =>
@@ -127,36 +177,103 @@ export function InvitePanel({
           {people.map((p) => {
             const state = stateOf(p);
             return (
-              <div className="cd-person" key={p.linkId}>
-                <span className="cd-person-email">
-                  {p.email}
-                  <em>invited {formatDate(p.invitedAt)}</em>
-                </span>
-                <span className={state.className}>{state.label}</span>
-                <span className="cd-person-actions">
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => resend(p)}
-                    disabled={busy || p.status === 'completed'}
-                    title={
-                      p.status === 'completed'
-                        ? 'They have already finished'
-                        : 'Send this person their link again'
-                    }
-                  >
-                    Resend
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => remove(p)}
-                    disabled={busy}
-                    title="Stop their link working. Answers they have already given stay in the results."
-                  >
-                    Remove
-                  </button>
-                </span>
+              <div key={p.linkId}>
+                <div className="cd-person">
+                  {editing === p.linkId ? (
+                    <span className="cd-person-edit">
+                      <input
+                        className="control"
+                        value={draft.name}
+                        placeholder="Name"
+                        onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                      />
+                      <input
+                        className="control"
+                        value={draft.department}
+                        placeholder="Department"
+                        onChange={(e) => setDraft({ ...draft, department: e.target.value })}
+                      />
+                      <span className="hint">{p.email}</span>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="cd-person-email cd-person-open"
+                      onClick={() => setOpen(open === p.linkId ? null : p.linkId)}
+                      title={
+                        p.status === 'completed'
+                          ? 'See what they answered'
+                          : 'They have not finished yet'
+                      }
+                    >
+                      {p.name || p.email}
+                      <em>
+                        {p.department ? `${p.department} · ` : ''}
+                        {p.name ? `${p.email} · ` : ''}
+                        invited {formatDate(p.invitedAt)}
+                      </em>
+                    </button>
+                  )}
+                  <span className={state.className}>{state.label}</span>
+                  <span className="cd-person-actions">
+                    {editing === p.linkId ? (
+                      <>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => save(p)}
+                          disabled={busy}
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => setEditing(null)}
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => {
+                            setEditing(p.linkId);
+                            setDraft({ name: p.name, department: p.department });
+                          }}
+                          disabled={busy}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => resend(p)}
+                          disabled={busy || p.status === 'completed'}
+                          title={
+                            p.status === 'completed'
+                              ? 'They have already finished'
+                              : 'Send this person their link again'
+                          }
+                        >
+                          Resend
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => remove(p)}
+                          disabled={busy}
+                          title="Stop their link working. Answers they have already given stay in the results."
+                        >
+                          Remove
+                        </button>
+                      </>
+                    )}
+                  </span>
+                </div>
+                {open === p.linkId && <PersonAnswers runId={runId} linkId={p.linkId} />}
               </div>
             );
           })}
@@ -169,7 +286,11 @@ export function InvitePanel({
             className="control"
             rows={3}
             value={addresses}
-            placeholder={'One address per line\nanita@acmepharma.com\njoseph@acmepharma.com'}
+            placeholder={
+              'One person per line. An address is enough, or add a name and department:\n' +
+              'Anita Rao, anita@acmepharma.com, Operations\n' +
+              'joseph@acmepharma.com'
+            }
             onChange={(e) => setAddresses(e.target.value)}
           />
           <div className="cd-actions">
@@ -177,9 +298,9 @@ export function InvitePanel({
               type="button"
               className="btn btn-primary btn-sm"
               onClick={invite}
-              disabled={busy || emails.length === 0 || status !== 'open'}
+              disabled={busy || people_in.length === 0 || status !== 'open'}
             >
-              {busy ? 'Working…' : emails.length > 0 ? `Invite ${emails.length}` : 'Invite'}
+              {busy ? 'Working…' : people_in.length > 0 ? `Invite ${people_in.length}` : 'Invite'}
             </button>
             <button
               type="button"

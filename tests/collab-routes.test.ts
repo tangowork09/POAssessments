@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   collabFacetSchema,
+  collabInviteSchema,
+  collabPersonUpdateSchema,
   collabRunCreateSchema,
   collabRunUpdateSchema,
 } from '../src/worker/lib/validation.js';
@@ -74,5 +76,44 @@ describe('declaring a cut', () => {
   it('trims what a facilitator types, so a stray space is not a second department', () => {
     const parsed = collabFacetSchema.parse({ ...base, options: ['  Operations  ', 'R&D'] });
     expect(parsed.options[0]).toBe('Operations');
+  });
+});
+
+describe('adding people to a run', () => {
+  it('takes an address on its own', () => {
+    const parsed = collabInviteSchema.parse({ people: [{ email: 'Anita@Acme.test' }] });
+    expect(parsed.people[0]).toEqual({ email: 'anita@acme.test', name: '', department: '' });
+  });
+
+  it('keeps one person when the same address arrives twice in different case', () => {
+    const parsed = collabInviteSchema.parse({
+      people: [
+        { email: 'a@acme.test', name: 'First' },
+        { email: 'A@ACME.TEST', name: 'Second' },
+      ],
+    });
+    // Two invitations to one inbox is two half-finished sheets.
+    expect(parsed.people).toHaveLength(1);
+    expect(parsed.people[0]!.name).toBe('First');
+  });
+
+  it('refuses something that is not an address', () => {
+    expect(collabInviteSchema.safeParse({ people: [{ email: 'anita' }] }).success).toBe(false);
+    expect(collabInviteSchema.safeParse({ people: [] }).success).toBe(false);
+  });
+});
+
+describe('editing somebody on the roster', () => {
+  it('changes only what was sent', () => {
+    expect(collabPersonUpdateSchema.parse({ department: 'R&D' })).toEqual({ department: 'R&D' });
+    expect(collabPersonUpdateSchema.parse({}).name).toBeUndefined();
+  });
+
+  it('does not accept a new address: that is a different person', () => {
+    const parsed = collabPersonUpdateSchema.parse({
+      name: 'Sam',
+      email: 'someone-else@acme.test',
+    } as Record<string, unknown>);
+    expect('email' in parsed).toBe(false);
   });
 });

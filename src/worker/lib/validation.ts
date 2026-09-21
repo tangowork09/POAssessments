@@ -274,12 +274,36 @@ export const collabFacetsSchema = z.object({
  * here rather than at the call site, because "A@x.com" and "a@x.com" are one
  * person with two invitations and two half-finished sheets.
  */
+export const collabPersonSchema = z.object({
+  email: z.string().trim().toLowerCase().email('That is not an email address.').max(200),
+  /** Optional: the facilitator often has the list before the names. */
+  name: z.string().trim().max(120).default(''),
+  /**
+   * The department this person belongs to. When the facilitator records it,
+   * the respondent is not asked for it — one less question, and one fewer
+   * chance for the same department to arrive under two spellings.
+   */
+  department: z.string().trim().max(80).default(''),
+});
+
 export const collabInviteSchema = z.object({
-  emails: z
-    .array(z.string().trim().toLowerCase().email('That is not an email address.').max(200))
-    .min(1, 'Add at least one address.')
+  people: z
+    .array(collabPersonSchema)
+    .min(1, 'Add at least one person.')
     .max(200)
-    .transform((list) => [...new Set(list)]),
+    .transform((list) => {
+      // One address is one person, whatever case it arrived in.
+      const seen = new Map<string, (typeof list)[number]>();
+      for (const person of list) if (!seen.has(person.email)) seen.set(person.email, person);
+      return [...seen.values()];
+    }),
+});
+
+/** Editing somebody already on the roster. The address is their identity and
+ *  is not editable here: a different address is a different person, invited. */
+export const collabPersonUpdateSchema = z.object({
+  name: z.string().trim().max(120).optional(),
+  department: z.string().trim().max(80).optional(),
 });
 
 export const collabRunCreateSchema = z.object({

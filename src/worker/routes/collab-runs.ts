@@ -12,21 +12,24 @@
  * every route, and the branch that gets forgotten is the one that serves a
  * member report for an instrument that has no members.
  *
- * Nothing here returns an individual's answers. There is no route for it — not
- * a guarded one, not an admin-only one. A diagnostic with fifty respondents is
- * answered honestly because nobody can be read individually, and the cheapest
- * way to keep that true is to never build the endpoint.
+ * One route reads an individual's answers, and the shape of that permission is
+ * the important part. It serves a *named* run only, because the people in one
+ * agreed to exactly this: answers seen by the facilitation team and never
+ * shown to anyone in their organisation. It cannot serve an anonymous run even
+ * in principle — the response was stored detached from the person, so no query
+ * would answer the question — and it writes every read to the audit log by
+ * name. A facilitator may look; nobody may look invisibly.
  */
 
 import { Hono } from 'hono';
 import type { Env } from '../env.js';
 import { requireAdmin, type AdminHono } from '../lib/auth.js';
-import { auditAll } from '../lib/audit.js';
+import { auditAll, writeAudit } from '../lib/audit.js';
 import { newId } from '../lib/ids.js';
 import { generateToken, hashToken } from '../lib/tokens.js';
 import { ASSESSMENT_ID } from '../../shared/assessments.js';
 import { COLLAB_ITEMS, COLLAB_ITEM_COUNT, COLLAB_SECTIONS, COLLAB_SECTION_BY_KEY } from '../../shared/collab.js';
-import { COLLAB_BANDS } from '../../shared/collab-scoring.js';
+import { COLLAB_BANDS, scoreCollabResponse } from '../../shared/collab-scoring.js';
 import {
   CollabRunError,
   runTurnout,
@@ -45,6 +48,7 @@ import { brandingFrom, getSettings } from '../lib/settings.js';
 import {
   collabFacetsSchema,
   collabInviteSchema,
+  collabPersonUpdateSchema,
   collabRunCreateSchema,
   collabRunUpdateSchema,
   fieldErrors,
@@ -675,7 +679,9 @@ collabRunRoutes.get('/:id/participants', async (c) => {
   if (!wave) return c.json({ participants: [], anonymous: false });
 
   const { results } = await c.env.DB.prepare(
-    `SELECT l.id AS link_id, cd.email, l.created_at, l.last_seen_at, l.expires_at,
+    `SELECT l.id AS link_id, cd.email, cd.first_name AS name, l.created_at, l.last_seen_at, l.expires_at,
+            (SELECT m.function FROM cohort_members m
+              WHERE m.cohort_id = l.cohort_id AND m.email = cd.email AND m.active = 1 LIMIT 1) AS department,
             (SELECT r.status FROM responses r WHERE r.link_id = l.id ORDER BY r.invited_at DESC LIMIT 1) AS status,
             (SELECT r.answered_count FROM responses r WHERE r.link_id = l.id ORDER BY r.invited_at DESC LIMIT 1) AS answered
        FROM links l
@@ -688,6 +694,8 @@ collabRunRoutes.get('/:id/participants', async (c) => {
     .all<{
       link_id: string;
       email: string;
+      name: string;
+      department: string | null;
       created_at: string;
       last_seen_at: string | null;
       expires_at: string | null;
@@ -701,12 +709,169 @@ collabRunRoutes.get('/:id/participants', async (c) => {
     participants: (results ?? []).map((row) => ({
       linkId: row.link_id,
       email: row.email,
+      name: row.name ?? '',
+      department: row.department ?? '',
       invitedAt: row.created_at,
       openedAt: row.last_seen_at,
       status: row.status ?? 'invited',
       answered: row.answered ?? 0,
     })),
   });
+});
+
+/**
+ * What one named respondent answered.
+ *
+ * This is the only place in the diagnostic where an individual's answers are
+ * readable, and it exists because the facilitation team runs the debrief: a
+ * facilitator who can see that one leader marked Trust two points below
+ * everybody else can go and have that conversation. The confidentiality line
+ * these respondents agreed to says their answers are seen only by the
+ * facilitation team and are never shown to anyone in their organisation,
+ * which is exactly this and no more.
+ *
+ * Two limits hold it to that.
+ *
+ * An anonymous run is refused, and cannot be served even in principle: the
+ * response was stored detached from the person, so there is no query that
+ * would answer this question. That refusal is the promise working, not a
+ * missing feature.
+ *
+ * And every read is written to the audit log by name — who looked, at whom,
+ * when. A facilitator is allowed to look; nobody should be able to look
+ * without it being visible that they did.
+ */
+collabRunRoutes.get('/:id/participants/:linkId/answers', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+  if (run.anonymous === 1) {
+    return c.json(
+      {
+        error:
+          'This run is anonymous. Responses are stored detached from the people who gave them, so there is no way to look up what any one person answered.',
+      },
+      409,
+    );
+  }
+
+  const person = await c.env.DB.prepare(
+    `SELECT l.id, cd.email,
+            (SELECT r.id FROM responses r WHERE r.link_id = l.id ORDER BY r.invited_at DESC LIMIT 1) AS response_id,
+            (SELECT r.status FROM responses r WHERE r.link_id = l.id ORDER BY r.invited_at DESC LIMIT 1) AS status,
+            (SELECT r.round_no FROM responses r WHERE r.link_id = l.id ORDER BY r.invited_at DESC LIMIT 1) AS round_no
+       FROM links l JOIN candidates cd ON cd.id = l.candidate_id
+      WHERE l.id = ?1 AND l.cohort_id = ?2 AND l.kind = 'personal' AND l.self_issued = 0`,
+  )
+    .bind(c.req.param('linkId'), run.id)
+    .first<{ id: string; email: string; response_id: string | null; status: string | null; round_no: number | null }>();
+
+  if (!person) return c.json({ error: 'That person is not on this run.' }, 404);
+  if (!person.response_id || person.status !== 'completed') {
+    return c.json({ email: person.email, status: person.status ?? 'invited', answers: null });
+  }
+
+  const { results } = await c.env.DB.prepare(
+    'SELECT no, value FROM answers WHERE response_id = ?1 ORDER BY no',
+  )
+    .bind(person.response_id)
+    .all<{ no: number; value: number }>();
+
+  const raw: Record<number, number> = {};
+  for (const row of results ?? []) raw[row.no] = row.value;
+
+  let scored;
+  try {
+    scored = scoreCollabResponse(raw);
+  } catch {
+    return c.json({ email: person.email, status: person.status, answers: null });
+  }
+
+  // The group, so a single answer can be read against something. One person's
+  // 2 means nothing until you know the room said 4.
+  let groupItem = new Map<number, number>();
+  let groupN = 0;
+  try {
+    const group = await scoreRun(c.env, { id: run.id, min_segment: run.min_segment }, person.round_no ?? 1);
+    groupItem = new Map(group.group.items.map((i) => [i.no, i.mean]));
+    groupN = group.group.n;
+  } catch {
+    // A wave with nothing complete in it has no group to compare against.
+  }
+
+  await writeAudit(c.env, c.get('admin') ?? null, c.req.raw, 200, {
+    action: 'collab.participant.answers.read',
+    entity: 'collab_run',
+    entityId: run.id,
+    summary: `Read ${person.email}'s individual answers for ${run.name}`,
+  });
+
+  return c.json({
+    email: person.email,
+    status: person.status,
+    wave: person.round_no ?? 1,
+    groupN,
+    total: scored.total,
+    perItem: scored.perItem,
+    sections: scored.sections.map((section) => ({ key: section.key, short: section.short, mean: section.mean })),
+    answers: COLLAB_ITEMS.map((item) => ({
+      no: item.no,
+      text: item.text,
+      section: COLLAB_SECTION_BY_KEY.get(item.sectionKey)?.short ?? '',
+      direction: item.direction,
+      chose: raw[item.no] ?? null,
+      converted: scored.converted[item.no] ?? null,
+      group: groupItem.get(item.no) ?? null,
+    })),
+  });
+});
+
+/** Corrects who somebody is, or which department they answer for. */
+collabRunRoutes.patch('/:id/participants/:linkId', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+
+  const parsed = collabPersonUpdateSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: 'Please check the highlighted fields.', details: fieldErrors(parsed.error) }, 400);
+  }
+
+  const person = await c.env.DB.prepare(
+    `SELECT l.id, cd.id AS candidate_id, cd.email, cd.first_name AS name
+       FROM links l JOIN candidates cd ON cd.id = l.candidate_id
+      WHERE l.id = ?1 AND l.cohort_id = ?2 AND l.kind = 'personal' AND l.self_issued = 0`,
+  )
+    .bind(c.req.param('linkId'), run.id)
+    .first<{ id: string; candidate_id: string; email: string; name: string }>();
+  if (!person) return c.json({ error: 'That person is not on this run.' }, 404);
+
+  if (parsed.data.name !== undefined) {
+    await c.env.DB.prepare('UPDATE candidates SET first_name = ?2 WHERE id = ?1')
+      .bind(person.candidate_id, parsed.data.name)
+      .run();
+  }
+
+  /*
+   * A department change reaches the results only for people who have not yet
+   * answered. Once somebody has submitted, the department stamped on their
+   * response is where they were when they answered it, and editing the roster
+   * must not quietly move their answers into another department's average
+   * after the facilitator has read it.
+   */
+  const answered = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM responses WHERE link_id = ?1 AND status = 'completed'`,
+  )
+    .bind(person.id)
+    .first<{ n: number }>();
+
+  await upsertMember(
+    c.env,
+    run.id,
+    person.email,
+    parsed.data.name ?? person.name,
+    parsed.data.department,
+  );
+
+  return c.json({ ok: true, appliesToAnswers: (answered?.n ?? 0) === 0 });
 });
 
 /**
@@ -824,7 +989,8 @@ collabRunRoutes.post('/:id/invites', async (c) => {
   const sent: string[] = [];
   const skipped: string[] = [];
 
-  for (const email of parsed.data.emails) {
+  for (const person of parsed.data.people) {
+    const email = person.email;
     // Already invited to this wave: the link they hold still works, and a
     // second one would silently retire it mid-exercise.
     const existing = await c.env.DB.prepare(
@@ -847,12 +1013,24 @@ collabRunRoutes.post('/:id/invites', async (c) => {
       const id = newId('cand');
       await c.env.DB.prepare(
         `INSERT INTO candidates (id, email, first_name, last_name, organisation)
-         VALUES (?1, ?2, '', '', ?3)`,
+         VALUES (?1, ?2, ?3, '', ?4)`,
       )
-        .bind(id, email, run.organisation)
+        .bind(id, email, person.name, run.organisation)
         .run();
       candidate = { id };
+    } else if (person.name !== '') {
+      await c.env.DB.prepare('UPDATE candidates SET first_name = ?2 WHERE id = ?1')
+        .bind(candidate.id, person.name)
+        .run();
     }
+
+    /*
+     * The run's own roster row: who this person is *here*. Their department
+     * belongs to the run rather than to the person — someone can move between
+     * departments, and last year's wave should keep saying where they were
+     * when they answered it.
+     */
+    await upsertMember(c.env, run.id, email, person.name, person.department);
 
     const token = generateToken();
     await c.env.DB.prepare(
@@ -972,6 +1150,54 @@ collabRunRoutes.post('/:id/remind', async (c) => {
 
   return c.json({ reminded: outstanding.length, wave: wave.no });
 });
+
+/**
+ * The run's roster row for one address, created or corrected.
+ *
+ * `cohort_members` already models "a person in this group" — sociometry uses
+ * `no` as a rating address, which this instrument never does, so the row here
+ * is just a name, a department and an email scoped to the run.
+ */
+async function upsertMember(
+  env: Env,
+  cohortId: string,
+  email: string,
+  name: string,
+  department: string | undefined,
+): Promise<void> {
+  const existing = await env.DB.prepare(
+    'SELECT id FROM cohort_members WHERE cohort_id = ?1 AND email = ?2',
+  )
+    .bind(cohortId, email)
+    .first<{ id: string }>();
+
+  if (existing) {
+    if (name !== '') {
+      await env.DB.prepare('UPDATE cohort_members SET name = ?2 WHERE id = ?1')
+        .bind(existing.id, name)
+        .run();
+    }
+    if (department !== undefined) {
+      await env.DB.prepare('UPDATE cohort_members SET function = ?2 WHERE id = ?1')
+        .bind(existing.id, department)
+        .run();
+    }
+    return;
+  }
+
+  const next = await env.DB.prepare(
+    'SELECT COALESCE(MAX(no), 0) + 1 AS no FROM cohort_members WHERE cohort_id = ?1',
+  )
+    .bind(cohortId)
+    .first<{ no: number }>();
+
+  await env.DB.prepare(
+    `INSERT INTO cohort_members (id, cohort_id, no, name, function, email, active)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)`,
+  )
+    .bind(newId('mem'), cohortId, next?.no ?? 1, name || email, department ?? '', email)
+    .run();
+}
 
 function safeOptions(json: string): string[] {
   try {

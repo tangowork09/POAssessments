@@ -148,8 +148,38 @@ export async function collabSessionFor(
     waveName: waveName(resolved.waveNo, resolved.waveLabel),
     anonymous: resolved.run.anonymous === 1,
     facets: await loadFacets(env, resolved.run.id),
-    chosen: responseId ? await loadChosenFacets(env, responseId) : {},
+    chosen: {
+      // Anything the facilitator already recorded about this person is not
+      // asked again: they wrote "Operations" on the roster, so the respondent
+      // is not invited to type a third spelling of it.
+      ...(await rosterFacets(env, resolved.run.id, link)),
+      ...(responseId ? await loadChosenFacets(env, responseId) : {}),
+    },
   };
+}
+
+/**
+ * What the run's roster already knows about the person holding this link.
+ *
+ * Only for a personal link in a named run: a shared link has no idea who is
+ * on the other end, which is exactly what it is for.
+ */
+export async function rosterFacets(
+  env: Env,
+  cohortId: string,
+  link: CollabLink,
+): Promise<Record<string, string>> {
+  if (link.kind !== 'personal' || !link.candidate_id) return {};
+
+  const row = await env.DB.prepare(
+    `SELECT m.function FROM cohort_members m
+       JOIN candidates cd ON cd.email = m.email
+      WHERE m.cohort_id = ?1 AND cd.id = ?2 AND m.active = 1 AND m.function <> ''`,
+  )
+    .bind(cohortId, link.candidate_id)
+    .first<{ function: string }>();
+
+  return row?.function ? { department: row.function } : {};
 }
 
 export interface StartCollabBody {
@@ -183,7 +213,10 @@ export async function startCollabResponse(
   const body = (await c.req.json().catch(() => ({}))) as StartCollabBody;
 
   const facets = await loadFacets(c.env, run.id);
-  const chosen = validateFacets(facets, body.facets);
+  const known = await rosterFacets(c.env, run.id, link);
+  // The roster's answer wins over anything the client sends for the same
+  // question: the facilitator's spelling is the one the results are cut by.
+  const chosen = validateFacets(facets, { ...(asRecord(body.facets) ?? {}), ...known });
   if ('error' in chosen) return c.json({ error: chosen.error, field: chosen.field }, 400);
 
   let candidateId: string;
@@ -385,6 +418,12 @@ export function validateFacets(
   }
 
   return { values };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function parseOptions(json: string): string[] {
