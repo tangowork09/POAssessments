@@ -296,6 +296,12 @@ function RunDetailView({
               the session cookie goes with it. */}
           <a
             className="btn btn-secondary btn-sm"
+            href={`/api/admin/collab-runs/${runId}/pdf${wave ? `?wave=${wave}` : ''}`}
+          >
+            Download report
+          </a>
+          <a
+            className="btn btn-secondary btn-sm"
             href={`/api/admin/collab-runs/${runId}/xlsx${wave ? `?wave=${wave}` : ''}`}
           >
             Download workbook

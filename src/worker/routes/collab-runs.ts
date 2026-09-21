@@ -34,6 +34,9 @@ import {
   type CollabRunScores,
 } from '../lib/collab-run.js';
 import { buildCollabWorkbook } from '../lib/collab-workbook.js';
+import { renderCollabReportPdf } from '../pdf/collab-report.js';
+import { decodeImageDataUrl } from '../pdf/image.js';
+import { brandingFrom, getSettings } from '../lib/settings.js';
 import {
   collabFacetsSchema,
   collabRunCreateSchema,
@@ -468,6 +471,86 @@ collabRunRoutes.get('/:id/xlsx', async (c) => {
     headers: {
       'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'content-disposition': `attachment; filename="${slug}-wave-${wave}.xlsx"`,
+    },
+  });
+});
+
+/**
+ * The wave as the report a client is handed.
+ *
+ * Generated on demand rather than stored. A diagnostic report is read against
+ * the responses that existed when it was asked for, and a stored PDF quietly
+ * becomes a claim about a wave that has since taken more answers.
+ */
+collabRunRoutes.get('/:id/pdf', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+
+  const requested = c.req.query('wave');
+  if (requested && (!Number.isInteger(Number(requested)) || Number(requested) < 1)) {
+    return c.json({ error: 'That is not a wave number.' }, 400);
+  }
+  const waveRow = await c.env.DB.prepare(
+    requested
+      ? 'SELECT no, label FROM cohort_rounds WHERE cohort_id = ?1 AND no = ?2'
+      : 'SELECT no, label FROM cohort_rounds WHERE cohort_id = ?1 ORDER BY (closed_at IS NULL) DESC, no DESC LIMIT 1',
+  )
+    .bind(...(requested ? [run.id, Number(requested)] : [run.id]))
+    .first<{ no: number; label: string }>();
+  if (!waveRow) return c.json({ error: 'That wave does not exist.' }, 404);
+
+  let scores: CollabRunScores;
+  try {
+    scores = await scoreRun(c.env, { id: run.id, min_segment: run.min_segment }, waveRow.no);
+  } catch (err) {
+    if (err instanceof CollabRunError) return c.json({ error: err.message, wave: waveRow.no }, 409);
+    throw err;
+  }
+
+  const branding = brandingFrom(await getSettings(c.env));
+  const logo = await decodeImageDataUrl(branding.logoDataUrl);
+
+  const strongest = COLLAB_SECTION_BY_KEY.get(scores.group.gap.strongestKey)?.short ?? '';
+  const weakest = COLLAB_SECTION_BY_KEY.get(scores.group.gap.weakestKey)?.short ?? '';
+
+  const bytes = renderCollabReportPdf(
+    {
+      runName: run.name,
+      organisation: run.organisation,
+      waveName: waveRow.label.trim() || `Wave ${waveRow.no}`,
+      n: scores.group.n,
+      incomplete: scores.group.incomplete,
+      invited: scores.turnout.invited,
+      anonymous: run.anonymous === 1,
+      minSegment: run.min_segment,
+      total: scores.group.total,
+      perItem: scores.group.perItem,
+      bandKey: scores.group.band.key,
+      bandName: scores.group.band.name,
+      bandReading: scores.group.band.reading,
+      sections: scores.group.sections.map((s) => ({
+        key: s.key,
+        short: s.short,
+        mean: s.mean,
+        spread: s.spread,
+      })),
+      items: scores.group.items,
+      gap: { strongest, weakest, value: scores.group.gap.value },
+      attention: scores.group.attention,
+      strengths: scores.group.strengths,
+      split: scores.group.split,
+      cuts: scores.cuts.map((cut) => ({ label: cut.label, segments: cut.segments })),
+      branding,
+      generatedAt: new Date().toISOString().slice(0, 10),
+    },
+    logo,
+  );
+
+  const slug = run.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'run';
+  return new Response(bytes, {
+    headers: {
+      'content-type': 'application/pdf',
+      'content-disposition': `attachment; filename="${slug}-wave-${waveRow.no}-report.pdf"`,
     },
   });
 });
