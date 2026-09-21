@@ -11,6 +11,7 @@
  */
 
 import type { Env } from '../env.js';
+import { ASSESSMENT_ID } from '../../shared/assessments.js';
 import { newId } from './ids.js';
 import { generateToken, hashToken } from './tokens.js';
 import {
@@ -147,14 +148,28 @@ export const SOCIO_ITEM_INFO: SocioItemInfo[] = SOCIO_ITEMS.map((i) => ({
 
 // ------------------------------------------------------------------ loading
 
+/**
+ * One sociometry cohort.
+ *
+ * Scoped to this instrument on purpose. A Collaboration Diagnostic run is also
+ * a row in `cohorts` — that reuse is what gives it rounds, links and an audit
+ * trail for free — but it has no roster positions, no rater floor and no tie
+ * threshold, and every caller of this function reads at least one of those.
+ * Without the filter a diagnostic run opened here renders as a cohort whose
+ * numbers are all meaningless: a list that counts its responses and a detail
+ * page that counts the ones attributed to a rater, which is none of them.
+ *
+ * So it is refused at the door instead, and all twenty-odd cohort routes
+ * answer "not found" rather than half-answering about the wrong instrument.
+ */
 export async function loadCohort(env: Env, cohortId: string): Promise<CohortRow | null> {
   return env.DB.prepare(
     `SELECT id, assessment_id, name, organisation, status, min_raters, tie_threshold, link_ttl_days,
             min_rated_targets, share_reports, otp_required, link_only_identity,
             created_at, closed_at
-       FROM cohorts WHERE id = ?1`,
+       FROM cohorts WHERE id = ?1 AND assessment_id = ?2`,
   )
-    .bind(cohortId)
+    .bind(cohortId, ASSESSMENT_ID.socio)
     .first<CohortRow>();
 }
 

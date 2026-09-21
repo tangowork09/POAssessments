@@ -128,7 +128,8 @@ const LIST_SELECT = `
            WHERE cr.cohort_id = co.id AND cr.scope = 'member' AND cr.suppressed = 1
              AND cr.round_no = COALESCE(${CURRENT_ROUND}, 1)) AS suppressed_reports
     FROM cohorts co
-`;
+   WHERE co.assessment_id = '{SOCIO}'
+`.replace('{SOCIO}', ASSESSMENT_ID.socio);
 
 function toSummary(row: CohortListRow): CohortSummary {
   return {
@@ -229,7 +230,7 @@ cohortRoutes.get('/', async (c) => {
 });
 
 cohortRoutes.get('/:id', async (c) => {
-  const row = await c.env.DB.prepare(`${LIST_SELECT} WHERE co.id = ?1`)
+  const row = await c.env.DB.prepare(`${LIST_SELECT} AND co.id = ?1`)
     .bind(c.req.param('id'))
     .first<CohortListRow>();
   if (!row) return c.json({ error: 'Cohort not found' }, 404);
