@@ -24,6 +24,7 @@ interface RunDetail {
     status: 'draft' | 'open' | 'closed';
     min_segment: number;
     anonymous: boolean;
+    shareSheets: boolean;
     otpRequired: boolean;
     linkOnlyIdentity: boolean;
   };
@@ -161,7 +162,7 @@ function NewRun({ onCreated, say }: { onCreated: (id: string) => void; say: (m: 
       });
       setName('');
       setOrganisation('');
-      say('Run created. Add the cuts it collects, then open it.');
+      say('Run created. Choose how results break down, then open it.');
       onCreated(created.id);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not create the run.');
@@ -246,8 +247,16 @@ function RunDetailView({
 
   async function setStatus(status: 'open' | 'closed') {
     try {
-      await api.patchJson(`/api/admin/collab-runs/${runId}`, { status });
-      say(status === 'open' ? 'Run opened.' : 'Run closed. No further responses are accepted.');
+      const result = await api.patchJson<{ sheets: { built: number; sent: number; skipped: string | null } | null }>(
+        `/api/admin/collab-runs/${runId}`,
+        { status },
+      );
+      if (status === 'open') say('Run opened.');
+      else if (result.sheets?.sent) {
+        say(`Run closed, and ${result.sheets.sent} people were sent their own answers.`);
+      } else {
+        say(`Run closed. ${result.sheets?.skipped ?? 'No further responses are accepted.'}`);
+      }
       load();
       onChanged();
     } catch (err) {
@@ -256,11 +265,21 @@ function RunDetailView({
   }
 
   async function startWave() {
-    const label = window.prompt('What is this wave called? For example, March 2027.', '');
+    const label = window.prompt(
+      'What is this wave called? For example, March 2027.\n\nThe current wave closes and keeps its results. On a named run, everyone invited to it is sent a fresh link for the new one.',
+      '',
+    );
     if (label === null) return;
     try {
-      await api.post(`/api/admin/collab-runs/${runId}/waves`, { label });
-      say('New wave open. The previous one is closed and keeps its results.');
+      const started = await api.post<{ no: number; carried: number }>(
+        `/api/admin/collab-runs/${runId}/waves`,
+        { label },
+      );
+      say(
+        started.carried > 0
+          ? `Wave ${started.no} open, and ${started.carried} people were sent a link for it.`
+          : `Wave ${started.no} open. The previous one is closed and keeps its results.`,
+      );
       setWave(undefined);
       load();
       onChanged();
@@ -354,12 +373,38 @@ function RunDetailView({
           {detail.run.anonymous ? 'Responses are anonymous.' : 'Responses are named.'} Departments with
           fewer than {detail.run.min_segment} respondents are not reported.
         </p>
+
+        {!detail.run.anonymous && (
+          <label className="cd-check card-body" htmlFor="cd-share">
+            <input
+              type="checkbox"
+              id="cd-share"
+              checked={detail.run.shareSheets}
+              onChange={async (e) => {
+                try {
+                  await api.patchJson(`/api/admin/collab-runs/${runId}`, { shareSheets: e.target.checked });
+                  load();
+                } catch (err) {
+                  say(err instanceof ApiError ? err.message : 'Could not change that.');
+                }
+              }}
+            />
+            <span>
+              <b>Send each person their own answers when the wave closes</b>
+              <em>
+                A single page comparing what they said with what the group said. Not a score: the
+                diagnostic measures the organisation, and the sheet says so. Nothing is sent until you
+                close the wave, because until then there is no group to compare anyone with.
+              </em>
+            </span>
+          </label>
+        )}
       </section>
 
       <section className="card mb-5">
         <CardHead
-          title="What this run collects"
-          sub="The cuts results can be broken down by. Respondents pick from these lists rather than typing their own."
+          title="Break results down by"
+          sub="One or two background questions, asked before the statements. People pick from your list rather than typing their own, so one department cannot arrive spelled three ways."
         />
         <FacetEditor
           runId={runId}

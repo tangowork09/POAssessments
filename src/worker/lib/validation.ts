@@ -296,6 +296,8 @@ export const collabRunUpdateSchema = z
     status: z.enum(['draft', 'open', 'closed']),
     minSegment: collabFields.minSegment,
     anonymous: collabFields.anonymous,
+    /** Whether each participant is sent their own answers against the group. */
+    shareSheets: z.boolean(),
     linkTtlDays: cohortFields.linkTtlDays,
     otpRequired: cohortFields.otpRequired,
     linkOnlyIdentity: cohortFields.linkOnlyIdentity,

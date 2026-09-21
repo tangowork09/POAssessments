@@ -119,8 +119,9 @@ export function RunTrend({ runId }: { runId: string }) {
           </p>
           <p className="hint">
             {latest.toN === latest.fromN
-              ? `${latest.toN} people answered both waves' worth of statements.`
-              : `${latest.fromN} people answered the earlier wave and ${latest.toN} this one. ` +
+              ? `The same number of people answered both waves: ${latest.toN}.`
+              : `${latest.fromN} ${latest.fromN === 1 ? 'person' : 'people'} answered the earlier wave and ` +
+                `${latest.toN} answered this one. ` +
                 (latest.toN < latest.fromN
                   ? 'Fewer respondents means part of this movement is a change in who was asked, not a change in the organisation.'
                   : 'More people answered this time, so part of this movement is a change in who was asked.')}

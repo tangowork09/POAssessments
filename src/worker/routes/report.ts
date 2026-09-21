@@ -20,6 +20,8 @@ import type { Context } from 'hono';
 import type { Env } from '../env.js';
 import { clientKey, rateLimit } from '../lib/ratelimit.js';
 import { getBranding } from '../lib/settings.js';
+import { decodeImageDataUrl } from '../pdf/image.js';
+import { renderCollabSheetPdf, type CollabSheetPayload } from '../pdf/collab-onepager.js';
 import { brandingForClient } from '../lib/brand-asset.js';
 import { hashToken, looksLikeToken } from '../lib/tokens.js';
 import {
@@ -37,6 +39,68 @@ import {
 } from '../lib/cohort-report-render.js';
 
 export const reportRoutes = new Hono<{ Bindings: Env }>();
+
+/**
+ * A Collaboration Diagnostic participant's own sheet.
+ *
+ * Its own door, deliberately. The two self-rating instruments and sociometry
+ * resolve a token to a stored `scores_json` and render it through shared
+ * machinery that knows those payload shapes; a diagnostic sheet is neither a
+ * score nor a cohort report, and threading a fourth shape through that code
+ * would put a new instrument in the path of the instruments already serving
+ * clients. This route stores its own bytes and serves them.
+ */
+reportRoutes.get('/collab-sheet/:token', async (c) => {
+  const token = c.req.param('token');
+  const rl = await rateLimit(c.env, `sheet:${clientKey(c.req.raw)}`, 60, 300);
+  if (!rl.allowed) return c.text('Too many requests. Try again shortly.', 429);
+  if (!looksLikeToken(token)) return c.text('This link was not recognised.', 404);
+
+  const hash = await hashToken(token, c.env.LINK_TOKEN_SECRET);
+  const row = await c.env.DB.prepare(
+    `SELECT s.sheet_json, co.organisation, co.name
+       FROM collab_participant_sheets s
+       JOIN cohorts co ON co.id = s.cohort_id
+      WHERE s.token_hash = ?1`,
+  )
+    .bind(hash)
+    .first<{ sheet_json: string; organisation: string; name: string }>();
+
+  if (!row) return c.text('This link was not recognised.', 404);
+
+  let figures: Omit<CollabSheetPayload, 'branding'>;
+  try {
+    figures = JSON.parse(row.sheet_json) as Omit<CollabSheetPayload, 'branding'>;
+  } catch {
+    return c.text('This sheet could not be read.', 500);
+  }
+
+  // Rendered on request from the stored figures, the way every other report
+  // here works: branding is current, and a layout fix reaches sheets already
+  // sent.
+  const branding = await getBranding(c.env);
+  const pdf = renderCollabSheetPdf(
+    { ...figures, branding },
+    await decodeImageDataUrl(branding.logoDataUrl),
+  );
+
+  await c.env.DB.prepare(
+    `UPDATE collab_participant_sheets SET sent_at = COALESCE(sent_at, datetime('now')) WHERE token_hash = ?1`,
+  )
+    .bind(hash)
+    .run();
+
+  const slug = (row.organisation || row.name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return new Response(pdf, {
+    headers: {
+      'content-type': 'application/pdf',
+      'content-disposition': `inline; filename="${slug || 'your'}-answers.pdf"`,
+    },
+  });
+});
 
 async function byReportToken(env: Env, token: string): Promise<ReportRow | null> {
   if (!looksLikeToken(token)) return null;

@@ -36,6 +36,7 @@ import {
 import { buildCollabWorkbook } from '../lib/collab-workbook.js';
 import { renderCollabReportPdf } from '../pdf/collab-report.js';
 import { collabTrend } from '../lib/collab-trend.js';
+import { buildParticipantSheets } from '../lib/collab-sheets.js';
 import { sendMail } from '../lib/mailer.js';
 import { magicLinkEmail } from '../email/templates.js';
 import { baseUrl } from '../env.js';
@@ -61,6 +62,7 @@ interface RunRow {
   status: 'draft' | 'open' | 'closed';
   min_segment: number;
   anonymous: number;
+  share_reports: number;
   link_ttl_days: number;
   otp_required: number;
   link_only_identity: number;
@@ -81,7 +83,7 @@ const CURRENT_ROUND = `
 
 async function loadRun(env: Env, id: string): Promise<RunRow | null> {
   return env.DB.prepare(
-    `SELECT id, name, organisation, status, min_segment, anonymous, link_ttl_days,
+    `SELECT id, name, organisation, status, min_segment, anonymous, share_reports, link_ttl_days,
             otp_required, link_only_identity, created_at, closed_at
        FROM cohorts WHERE id = ?1 AND assessment_id = ?2`,
   )
@@ -139,6 +141,7 @@ collabRunRoutes.get('/:id', async (c) => {
     run: {
       ...run,
       anonymous: run.anonymous === 1,
+      shareSheets: run.share_reports === 1,
       otpRequired: run.otp_required === 1,
       linkOnlyIdentity: run.link_only_identity === 1,
     },
@@ -231,6 +234,7 @@ collabRunRoutes.patch('/:id', async (c) => {
   if (d.organisation !== undefined) set('organisation', d.organisation);
   if (d.minSegment !== undefined) set('min_segment', d.minSegment);
   if (d.anonymous !== undefined) set('anonymous', d.anonymous ? 1 : 0);
+  if (d.shareSheets !== undefined) set('share_reports', d.shareSheets ? 1 : 0);
   if (d.linkTtlDays !== undefined) set('link_ttl_days', d.linkTtlDays);
   if (d.otpRequired !== undefined) set('otp_required', d.otpRequired ? 1 : 0);
   if (d.linkOnlyIdentity !== undefined) set('link_only_identity', d.linkOnlyIdentity ? 1 : 0);
@@ -245,7 +249,36 @@ collabRunRoutes.patch('/:id', async (c) => {
     .bind(...binds)
     .run();
 
-  return c.json({ ok: true });
+  /*
+   * Closing is when a participant's own sheet can honestly be built: it
+   * compares them against the group, and until the wave is closed the group is
+   * still changing. Sending on completion would post the fifth respondent a
+   * comparison against four colleagues.
+   */
+  let sheets: Awaited<ReturnType<typeof buildParticipantSheets>> | null = null;
+  if (d.status === 'closed') {
+    const wave = await c.env.DB.prepare(
+      'SELECT no, label FROM cohort_rounds WHERE cohort_id = ?1 ORDER BY no DESC LIMIT 1',
+    )
+      .bind(run.id)
+      .first<{ no: number; label: string }>();
+    if (wave) {
+      sheets = await buildParticipantSheets(
+        c.env,
+        {
+          id: run.id,
+          name: run.name,
+          organisation: run.organisation,
+          anonymous: d.anonymous === undefined ? run.anonymous : d.anonymous ? 1 : 0,
+          share_reports: d.shareSheets === undefined ? run.share_reports : d.shareSheets ? 1 : 0,
+        },
+        wave.no,
+        wave.label.trim() || `Wave ${wave.no}`,
+      );
+    }
+  }
+
+  return c.json({ ok: true, sheets });
 });
 
 // -------------------------------------------------------------------- facets
@@ -329,7 +362,66 @@ collabRunRoutes.post('/:id/waves', async (c) => {
     c.env.DB.prepare("UPDATE cohorts SET status = 'open', closed_at = NULL WHERE id = ?1").bind(run.id),
   ]);
 
-  return c.json({ no: next }, 201);
+  /*
+   * A wave is the same organisation asked again, so the people asked come with
+   * it. Invitations are scoped to the wave they were issued for — a link into
+   * a closed wave has to stop working — which would leave a facilitator
+   * staring at an empty list the moment they started wave two, and retyping
+   * fifty addresses they had already entered.
+   *
+   * Each person gets a new link for the new wave. Their old one keeps pointing
+   * at the wave it belonged to and says that wave has finished.
+   */
+  let carried = 0;
+  if (run.anonymous === 0 && last) {
+    const { results } = await c.env.DB.prepare(
+      `SELECT DISTINCT cd.id, cd.email
+         FROM links l JOIN candidates cd ON cd.id = l.candidate_id
+        WHERE l.cohort_id = ?1 AND l.round_no = ?2 AND l.kind = 'personal'
+          AND l.self_issued = 0 AND l.active = 1`,
+    )
+      .bind(run.id, last.no)
+      .all<{ id: string; email: string }>();
+
+    const branding = brandingFrom(await getSettings(c.env));
+    const logoUrl = `${baseUrl(c.env)}/api/logo`;
+
+    for (const person of results ?? []) {
+      const token = generateToken();
+      await c.env.DB.prepare(
+        `INSERT INTO links (id, token_hash, kind, assessment_id, candidate_id, cohort_id, round_no, active, self_issued)
+         VALUES (?1, ?2, 'personal', ?3, ?4, ?5, ?6, 1, 0)`,
+      )
+        .bind(
+          newId('lnk'),
+          await hashToken(token, c.env.LINK_TOKEN_SECRET),
+          ASSESSMENT_ID.collab,
+          person.id,
+          run.id,
+          next,
+        )
+        .run();
+
+      const mail = magicLinkEmail({
+        branding,
+        logoUrl,
+        name: person.email.split('@')[0] ?? person.email,
+        cohortName: run.name,
+        organisation: run.organisation,
+        link: `${baseUrl(c.env)}/t/${token}`,
+      });
+      await sendMail(c.env, {
+        to: person.email,
+        kind: 'collab_invite',
+        subject: `${run.name} — ${label.trim() || `wave ${next}`}`,
+        html: mail.html,
+        text: mail.text,
+      });
+      carried++;
+    }
+  }
+
+  return c.json({ no: next, carried }, 201);
 });
 
 // ---------------------------------------------------------------------- link
@@ -558,6 +650,124 @@ collabRunRoutes.get('/:id/pdf', async (c) => {
       'content-disposition': `attachment; filename="${slug}-wave-${waveRow.no}-report.pdf"`,
     },
   });
+});
+
+// ---------------------------------------------------------- participants
+
+/**
+ * Who was invited to this wave, and where each of them got to.
+ *
+ * Only for a named run: an anonymous run has nobody to list, which is the
+ * whole point of it. Note what this does *not* return — nobody's answers. The
+ * facilitator needs to know who has finished so they can chase, and that is a
+ * different fact from what any of them said.
+ */
+collabRunRoutes.get('/:id/participants', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+  if (run.anonymous === 1) return c.json({ participants: [], anonymous: true });
+
+  const wave = await c.env.DB.prepare(
+    'SELECT no FROM cohort_rounds WHERE cohort_id = ?1 ORDER BY (closed_at IS NULL) DESC, no DESC LIMIT 1',
+  )
+    .bind(run.id)
+    .first<{ no: number }>();
+  if (!wave) return c.json({ participants: [], anonymous: false });
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT l.id AS link_id, cd.email, l.created_at, l.last_seen_at, l.expires_at,
+            (SELECT r.status FROM responses r WHERE r.link_id = l.id ORDER BY r.invited_at DESC LIMIT 1) AS status,
+            (SELECT r.answered_count FROM responses r WHERE r.link_id = l.id ORDER BY r.invited_at DESC LIMIT 1) AS answered
+       FROM links l
+       JOIN candidates cd ON cd.id = l.candidate_id
+      WHERE l.cohort_id = ?1 AND l.round_no = ?2 AND l.kind = 'personal'
+        AND l.self_issued = 0 AND l.active = 1
+      ORDER BY cd.email`,
+  )
+    .bind(run.id, wave.no)
+    .all<{
+      link_id: string;
+      email: string;
+      created_at: string;
+      last_seen_at: string | null;
+      expires_at: string | null;
+      status: string | null;
+      answered: number | null;
+    }>();
+
+  return c.json({
+    anonymous: false,
+    wave: wave.no,
+    participants: (results ?? []).map((row) => ({
+      linkId: row.link_id,
+      email: row.email,
+      invitedAt: row.created_at,
+      openedAt: row.last_seen_at,
+      status: row.status ?? 'invited',
+      answered: row.answered ?? 0,
+    })),
+  });
+});
+
+/**
+ * Takes somebody off the invitation list.
+ *
+ * Their link stops working, and any answers they have already given stay
+ * exactly where they are. Removing a person is a statement about who is being
+ * asked, never a way to delete what somebody said: a facilitator who could
+ * quietly drop an inconvenient respondent from the average would be running a
+ * different exercise.
+ */
+collabRunRoutes.delete('/:id/participants/:linkId', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+
+  const link = await c.env.DB.prepare(
+    `SELECT l.id, (SELECT COUNT(*) FROM responses r WHERE r.link_id = l.id AND r.status = 'completed') AS finished
+       FROM links l WHERE l.id = ?1 AND l.cohort_id = ?2 AND l.kind = 'personal' AND l.self_issued = 0`,
+  )
+    .bind(c.req.param('linkId'), run.id)
+    .first<{ id: string; finished: number }>();
+  if (!link) return c.json({ error: 'That person is not on this run.' }, 404);
+
+  await c.env.DB.prepare('UPDATE links SET active = 0 WHERE id = ?1').bind(link.id).run();
+  return c.json({
+    ok: true,
+    keptAnswers: link.finished > 0,
+  });
+});
+
+/** Sends one person their link again, rotating the token on their own row. */
+collabRunRoutes.post('/:id/participants/:linkId/resend', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+
+  const row = await c.env.DB.prepare(
+    `SELECT l.id, cd.email FROM links l
+       JOIN candidates cd ON cd.id = l.candidate_id
+      WHERE l.id = ?1 AND l.cohort_id = ?2 AND l.kind = 'personal' AND l.self_issued = 0 AND l.active = 1`,
+  )
+    .bind(c.req.param('linkId'), run.id)
+    .first<{ id: string; email: string }>();
+  if (!row) return c.json({ error: 'That person is not on this run.' }, 404);
+
+  const token = generateToken();
+  await c.env.DB.prepare('UPDATE links SET token_hash = ?2 WHERE id = ?1')
+    .bind(row.id, await hashToken(token, c.env.LINK_TOKEN_SECRET))
+    .run();
+
+  const branding = brandingFrom(await getSettings(c.env));
+  const mail = magicLinkEmail({
+    branding,
+    logoUrl: `${baseUrl(c.env)}/api/logo`,
+    name: row.email.split('@')[0] ?? row.email,
+    cohortName: run.name,
+    organisation: run.organisation,
+    link: `${baseUrl(c.env)}/t/${token}`,
+  });
+  await sendMail(c.env, { to: row.email, kind: 'collab_invite', ...mail });
+
+  return c.json({ ok: true, email: row.email });
 });
 
 // ----------------------------------------------------------------- trend

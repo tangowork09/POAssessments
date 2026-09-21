@@ -1,7 +1,7 @@
 /**
- * The cuts a run collects, declared before anyone is invited.
+ * The background questions a run asks, declared before anyone is invited.
  *
- * A cut is a closed list on purpose. Free text arrives as "Ops", "ops" and
+ * Each one is a closed list on purpose. Free text arrives as "Ops", "ops" and
  * "Operations ", which is one department to the organisation and three to a
  * GROUP BY, and no cleaning afterwards recovers which leader meant which. So
  * the facilitator writes the list once and every respondent picks from it.
@@ -78,10 +78,10 @@ export function FacetEditor({
           return { key, label: f.label.trim(), options: f.options, required: f.required };
         });
       await api.put(`/api/admin/collab-runs/${runId}/facets`, { facets: payload });
-      say(payload.length === 0 ? 'Cuts cleared.' : 'Cuts saved.');
+      say(payload.length === 0 ? 'Background questions cleared.' : 'Saved.');
       onSaved();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not save the cuts.');
+      setError(err instanceof ApiError ? err.message : 'Could not save that.');
     } finally {
       setBusy(false);
     }
@@ -92,8 +92,9 @@ export function FacetEditor({
       <div className="card-body">
         {facets.length === 0 ? (
           <p className="hint">
-            This run collects no cuts, so its results cannot be broken down. People have already
-            answered, so that is now fixed for this wave. Start a new wave to collect a cut next time.
+            This run asks no background questions, so its results cannot be broken down by department
+            or anything else. People have already answered, so that is fixed for this wave — start a
+            new wave to ask one next time.
           </p>
         ) : (
           <>
@@ -106,7 +107,7 @@ export function FacetEditor({
               ))}
             </ul>
             <p className="hint">
-              Fixed for this wave. Respondents chose from these lists, so renaming an option now would
+              Fixed for this wave. People chose from these lists, so renaming an answer now would
               rewrite what they said.
             </p>
           </>
@@ -117,6 +118,13 @@ export function FacetEditor({
 
   return (
     <div className="card-body">
+      {draft.length === 0 && (
+        <p className="hint" style={{ marginBottom: 14 }}>
+          Nothing asked yet. Most runs ask one question — <b>Department</b> — so the results can show
+          where Quality sees something Commercial does not. Any group smaller than the run&rsquo;s floor
+          stays unreported.
+        </p>
+      )}
       <div className="cd-facets">
         {draft.map((facet, i) => (
           <div className="cd-facet" key={facet.key}>
@@ -124,7 +132,7 @@ export function FacetEditor({
               <input
                 className="control"
                 value={facet.label}
-                placeholder="What it is called, e.g. Department"
+                placeholder="What to ask them, e.g. Department"
                 onChange={(e) => update(i, { label: e.target.value })}
               />
               <label className="cd-inline hint">
@@ -147,7 +155,7 @@ export function FacetEditor({
               className="control cd-facet-options"
               rows={Math.max(3, facet.options.length + 1)}
               value={facet.options.join('\n')}
-              placeholder={'One value per line\nOperations\nQuality & QA\nR&D'}
+              placeholder={'One answer per line\nOperations\nQuality & QA\nR&D'}
               onChange={(e) =>
                 update(i, {
                   options: e.target.value
@@ -159,8 +167,8 @@ export function FacetEditor({
             />
             <p className="hint">
               {facet.options.length < 2
-                ? 'At least two values, or this is not a cut.'
-                : `${facet.options.length} values. Respondents pick one; they cannot type their own.`}
+                ? 'At least two answers to choose from, or there is nothing to compare.'
+                : `${facet.options.length} answers. People pick one from this list; they cannot type their own.`}
             </p>
           </div>
         ))}
@@ -168,10 +176,10 @@ export function FacetEditor({
 
       <div className="cd-actions">
         <button type="button" className="btn btn-secondary btn-sm" onClick={add} disabled={draft.length >= 6}>
-          Add a cut
+          Add a question
         </button>
         <button type="button" className="btn btn-primary btn-sm" onClick={save} disabled={busy}>
-          {busy ? 'Saving…' : 'Save cuts'}
+          {busy ? 'Saving…' : 'Save'}
         </button>
       </div>
       {error ? (

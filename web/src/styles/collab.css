@@ -264,3 +264,18 @@
 /* --------------------------------------------------------------- invites */
 .cd-invite-grid { display: flex; flex-direction: column; gap: 10px; max-width: 620px; }
 .cd-invite-grid textarea { font-family: var(--mono); font-size: 12.5px; line-height: 1.6; resize: vertical; width: 100%; }
+
+/* ---------------------------------------------------------- participants */
+.cd-people { display: flex; flex-direction: column; }
+.cd-person {
+  display: grid; grid-template-columns: minmax(0, 1fr) 88px auto; gap: 14px;
+  align-items: center; padding: 11px 20px; border-top: 1px solid var(--line);
+}
+.cd-person:hover { background: var(--surface-2); }
+.cd-person-email { font-size: 14px; min-width: 0; overflow-wrap: anywhere; }
+.cd-person-email em { display: block; font-style: normal; font-size: 11.5px; color: var(--ink-3); margin-top: 1px; }
+.cd-person-actions { display: flex; gap: 6px; }
+@media (max-width: 620px) {
+  .cd-person { grid-template-columns: minmax(0, 1fr) auto; }
+  .cd-person-actions { grid-column: 1 / -1; }
+}
