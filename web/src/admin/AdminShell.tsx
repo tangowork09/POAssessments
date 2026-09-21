@@ -24,6 +24,7 @@ const NAV: NavItem[] = [
   { to: '/admin', label: 'Dashboard', icon: IconGrid, end: true, area: 'dashboard' },
   { to: '/admin/assessments', label: 'Assessments', icon: IconDoc, area: 'assessments' },
   { to: '/admin/cohorts', label: 'Cohorts', icon: IconGroup, area: 'cohorts' },
+  { to: '/admin/collaboration-tests', label: 'Collaboration Tests', icon: IconGauge, area: 'cohorts' },
   { to: '/admin/candidates', label: 'Candidates', icon: IconPeople, area: 'candidates' },
   { to: '/admin/invites', label: 'Invites', icon: IconSend, area: 'invites' },
   { to: '/admin/links', label: 'Assessment Link', icon: IconLink, area: 'links' },
@@ -203,6 +204,16 @@ function initials(value: string): string {
 }
 
 const svg = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, viewBox: '0 0 16 16' } as const;
+
+/** A reading taken off a scale: what this panel does to 24 statements. */
+function IconGauge() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+      <path d="M2.5 12.5a6 6 0 1111 0" />
+      <path d="M8 12.5L10.8 8" />
+    </svg>
+  );
+}
 
 function IconGrid() {
   return (

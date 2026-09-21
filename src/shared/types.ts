@@ -1,5 +1,36 @@
 /** Wire types shared by the Worker API and both frontend shells. */
 
+/** One cut a diagnostic run collects, as the respondent is asked it. */
+export interface CollabFacet {
+  key: string;
+  label: string;
+  /** The values that may be chosen, in the order they are offered. */
+  options: string[];
+  /** A cut the respondent may decline. Declined is absent, never "Not given". */
+  required: boolean;
+}
+
+/**
+ * One wave of a Collaboration Diagnostic run, as the respondent sees it.
+ *
+ * There is no roster here and no list of colleagues: the statements are about
+ * the organisation, not about people. What the respondent is told up front is
+ * which wave they are answering, whether their answers are stored detached
+ * from them, and which cuts the run collects — a promise of anonymity is
+ * worthless if the person it is made to is never told.
+ */
+export interface CollabRunForCandidate {
+  cohortId: string;
+  organisation: string;
+  waveNo: number;
+  waveName: string;
+  anonymous: boolean;
+  facets: CollabFacet[];
+  /** What this respondent has already chosen, on a resumed session. */
+  chosen: Record<string, string>;
+}
+
+
 import type { AssessmentIntro, AssessmentKind } from './assessments.js';
 import type { EgoBand, EgoResult } from './ego-scoring.js';
 import type { Band, ScoreResult } from './scoring.js';
@@ -59,6 +90,12 @@ export interface CandidateSession {
    * as. null for the self-rating instruments, which have no cohort.
    */
   cohort: CandidateCohort | null;
+  /**
+   * Present only for a Collaboration Diagnostic run: which wave is being
+   * answered, whether answers are stored anonymously, and the cuts the run
+   * collects. null for every other instrument, which collects none of this.
+   */
+  run: CollabRunForCandidate | null;
   /** Present once a response row exists (personal link, or generic link resumed). */
   response: CandidateResponseState | null;
   /**

@@ -17,6 +17,7 @@ import { adminRoutes } from './routes/admin.js';
 import { candidateRoutes } from './routes/candidate.js';
 import { LOGO_PATH, logoResponse } from './lib/brand-asset.js';
 import { cohortRoutes } from './routes/cohorts.js';
+import { collabRunRoutes } from './routes/collab-runs.js';
 import { reportRoutes } from './routes/report.js';
 import { handleMessage } from './pipeline.js';
 import { bootstrap } from './bootstrap.js';
@@ -46,6 +47,8 @@ app.use('/api/*', async (c, next) => {
 
 // Mounted before the catch-all admin router so its own session gate runs.
 app.route('/api/admin/cohorts', cohortRoutes);
+// Diagnostic runs are cohorts underneath, and share nothing else — see routes/collab-runs.ts.
+app.route('/api/admin/collab-runs', collabRunRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/candidate', candidateRoutes);
 app.route('/api/report', reportRoutes);
