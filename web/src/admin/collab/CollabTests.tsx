@@ -40,6 +40,7 @@ interface RunDetail {
     status: 'draft' | 'open' | 'closed';
     min_segment: number;
     anonymous: boolean;
+    anonymityEditable: boolean;
     shareSheets: boolean;
     openQuestion: string;
     reminderDays: number[];
@@ -492,6 +493,7 @@ function RunPage({ runId }: { runId: string }) {
           settings={{
             status: detail.run.status,
             anonymous: detail.run.anonymous,
+            anonymityEditable: detail.run.anonymityEditable,
             shareSheets: detail.run.shareSheets,
             openQuestion: detail.run.openQuestion,
             reminderDays: detail.run.reminderDays ?? [],

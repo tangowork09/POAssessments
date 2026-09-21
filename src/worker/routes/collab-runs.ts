@@ -32,6 +32,7 @@ import { COLLAB_ITEMS, COLLAB_ITEM_COUNT, COLLAB_SECTIONS, COLLAB_SECTION_BY_KEY
 import { COLLAB_BANDS, scoreCollabResponse } from '../../shared/collab-scoring.js';
 import {
   CollabRunError,
+  anonymityIsEditable,
   runTurnout,
   scoreRun,
   type CollabRunScores,
@@ -154,6 +155,9 @@ collabRunRoutes.get('/:id', async (c) => {
     run: {
       ...run,
       anonymous: run.anonymous === 1,
+      // The console must not work this out for itself from turnout, which
+      // counts the current wave: the rule spans every wave in the run.
+      anonymityEditable: await anonymityIsEditable(c.env, run.id),
       shareSheets: run.share_reports === 1,
       openQuestion: run.open_question,
       reminderDays: safeDays(run.reminder_days),
@@ -224,17 +228,11 @@ collabRunRoutes.patch('/:id', async (c) => {
    * could not honestly describe either to the group. The wave has to end first.
    */
   if (d.anonymous !== undefined && d.anonymous !== (run.anonymous === 1)) {
-    const answered = await c.env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM responses
-        WHERE cohort_id = ?1 AND status IN ('in_progress','completed')`,
-    )
-      .bind(run.id)
-      .first<{ n: number }>();
-    if ((answered?.n ?? 0) > 0) {
+    if (!(await anonymityIsEditable(c.env, run.id))) {
       return c.json(
         {
           error:
-            'People have already answered under the current setting. Start a new wave to change how responses are stored.',
+            'People have already answered under the current setting, and their responses were stored the way it promised. Start a new run to change how responses are stored.',
         },
         409,
       );

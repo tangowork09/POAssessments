@@ -25,6 +25,8 @@ interface Preview {
 export interface RunSettings {
   status: 'draft' | 'open' | 'closed';
   anonymous: boolean;
+  /** False once anybody has answered: see the card this drives. */
+  anonymityEditable: boolean;
   shareSheets: boolean;
   openQuestion: string;
   reminderDays: number[];
@@ -98,6 +100,70 @@ export function RunSetup({
   return (
     <>
       <section className="card">
+        <CardHead
+          title="How responses are stored"
+          sub="Decided once, before anybody answers, because it is a promise made to the people answering."
+        />
+        <div className="card-body cd-settings">
+          <div className="cd-choice-row" role="radiogroup" aria-label="How responses are stored">
+            {[
+              {
+                value: false,
+                title: 'Named',
+                blurb:
+                  'Each response is stored against the person who gave it. You can see who has not answered, chase them, and open one person’s answers.',
+              },
+              {
+                value: true,
+                title: 'Anonymous',
+                blurb:
+                  'Responses are stored detached from the people who gave them. Every response is still listed in full, with its departments — but with no name on it, and none kept.',
+              },
+            ].map((choice) => (
+              <button
+                key={choice.title}
+                type="button"
+                role="radio"
+                aria-checked={settings.anonymous === choice.value}
+                className="cd-choice"
+                disabled={busy || !settings.anonymityEditable}
+                onClick={() =>
+                  settings.anonymous === choice.value
+                    ? undefined
+                    : patch(
+                        { anonymous: choice.value },
+                        choice.value
+                          ? 'Responses will be stored with no name on them.'
+                          : 'Responses will be stored against the person who gave them.',
+                      )
+                }
+              >
+                <b>{choice.title}</b>
+                <em>{choice.blurb}</em>
+              </button>
+            ))}
+          </div>
+          <p className="hint">
+            {settings.anonymityEditable ? (
+              <>
+                Changeable until the first person answers, then fixed for the life of the run. There is
+                no switch afterwards because there is nothing to switch: an anonymous response is written
+                against a shared placeholder with no name, so the names are never recorded rather than
+                recorded and hidden.
+              </>
+            ) : (
+              <>
+                <b>Fixed — somebody has already answered.</b>{' '}
+                {settings.anonymous
+                  ? 'Their responses carry no identity, and none was stored, so no setting here can show who gave them. Start a new run to collect named responses.'
+                  : 'They answered knowing their responses were named. Start a new run to collect anonymous ones.'}
+              </>
+            )}
+          </p>
+        </div>
+      </section>
+
+      <section className="card mt-4">
         <CardHead
           title="Break results down by"
           sub="Background questions asked before the statements. People pick from your list, so one department cannot arrive spelled three ways."

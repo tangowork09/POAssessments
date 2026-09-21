@@ -113,6 +113,31 @@ export async function loadRunResponses(
 }
 
 /**
+ * Whether anonymity is still the facilitator's to change.
+ *
+ * Anonymous and named are not two ways of displaying the same responses. An
+ * anonymous response is written against a shared placeholder candidate with no
+ * name and an address at `.invalid`, so once one has arrived there is no
+ * identity stored anywhere to turn back on — and a named response cannot be
+ * made anonymous after the fact either, because the roster, the personal links
+ * and the audit log all still point at the person.
+ *
+ * So the setting is editable only while nobody has answered. Counted across
+ * every wave rather than the current one: a second wave in a run whose first
+ * wave was answered anonymously would otherwise look untouched, and flipping it
+ * there would leave one run holding two different promises.
+ */
+export async function anonymityIsEditable(env: Env, cohortId: string): Promise<boolean> {
+  const row = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM responses
+      WHERE cohort_id = ?1 AND status IN ('in_progress','completed')`,
+  )
+    .bind(cohortId)
+    .first<{ n: number }>();
+  return (row?.n ?? 0) === 0;
+}
+
+/**
  * How many people were asked, started and finished.
  *
  * `invited` counts the ways in that a facilitator handed to a named person,

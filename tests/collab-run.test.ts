@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { COLLAB_ITEM_COUNT } from '../src/shared/collab.js';
 import {
   CollabRunError,
+  anonymityIsEditable,
   anonymousCandidateEmail,
   isCompleteRun,
   loadRunResponses,
@@ -217,5 +218,48 @@ describe('submission helpers', () => {
     expect(email.endsWith('.invalid')).toBe(true);
     // One placeholder per wave, so two waves never share a row.
     expect(anonymousCandidateEmail('coh_abc', 3)).not.toBe(email);
+  });
+});
+
+
+/**
+ * A stub that answers only the one count this rule asks for, and records the
+ * SQL — the query's shape *is* the rule, so the test reads it.
+ */
+function answeredStub(n: number) {
+  const seen: string[] = [];
+  const env = {
+    DB: {
+      prepare(sql: string) {
+        seen.push(sql);
+        return { bind: () => ({ first: async () => ({ n }) }) };
+      },
+    },
+  } as unknown as Env;
+  return { env, seen };
+}
+
+describe('whether anonymity is still the facilitator\'s to change', () => {
+  it('is editable while nobody has answered', async () => {
+    const { env } = answeredStub(0);
+    expect(await anonymityIsEditable(env, 'coh_1')).toBe(true);
+  });
+
+  it('is fixed once one person has started, not only once they have finished', async () => {
+    // A half-finished sheet was given under the promise too. Waiting for a
+    // completion would let the setting flip under somebody mid-questionnaire.
+    const { env, seen } = answeredStub(1);
+    expect(await anonymityIsEditable(env, 'coh_1')).toBe(false);
+    expect(seen[0]).toMatch(/in_progress/);
+    expect(seen[0]).toMatch(/completed/);
+  });
+
+  it('counts every wave, not just the current one', async () => {
+    // A fresh wave in a run whose first wave was answered anonymously looks
+    // untouched if the count is scoped to a round, and flipping it there would
+    // leave one run holding two different promises.
+    const { env, seen } = answeredStub(3);
+    await anonymityIsEditable(env, 'coh_1');
+    expect(seen[0]).not.toMatch(/round_no/);
   });
 });
