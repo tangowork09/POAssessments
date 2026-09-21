@@ -324,3 +324,51 @@
 .cd-linkish { color: var(--accent); font-weight: 580; text-align: left; }
 .cd-linkish:hover { text-decoration: underline; }
 .cd-roster td { vertical-align: middle; }
+
+/* ------------------------------------------------------------- verbatims */
+.cd-quotes { display: flex; flex-direction: column; }
+.cd-quotes blockquote {
+  margin: 0; padding: 12px 18px; border-top: 1px solid var(--line);
+  font-size: 13.5px; line-height: 1.55; color: var(--ink-2);
+}
+.cd-quotes blockquote:first-child { border-top: 0; }
+
+/* ------------------------------------------------------------- benchmark */
+.cd-bench { display: flex; flex-direction: column; }
+.cd-bench-row {
+  display: grid; grid-template-columns: 180px minmax(0, 1fr) 70px 70px; gap: 14px;
+  align-items: center; padding: 9px 18px; border-top: 1px solid var(--line); font-size: 13.5px;
+}
+.cd-bench-row:first-child { border-top: 0; }
+.cd-bench-range { position: relative; height: 18px; }
+.cd-bench-range .band { position: absolute; top: 7px; height: 4px; border-radius: 99px; background: var(--surface-3); }
+.cd-bench-range .med { position: absolute; top: 3px; width: 2px; height: 12px; background: var(--ink-4); }
+.cd-bench-range .you { position: absolute; top: 2px; width: 3px; height: 14px; border-radius: 2px; background: var(--accent); }
+.cd-bench-head { display: flex; gap: 14px; font-size: 11.5px; color: var(--ink-3); padding: 8px 18px 0; }
+
+/* -------------------------------------------------------------- settings */
+.cd-settings { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }
+.cd-setting { display: grid; gap: 4px; }
+.cd-setting-label { font-size: 13.5px; font-weight: 600; }
+.cd-setting em { font-style: normal; font-size: 12px; color: var(--ink-3); line-height: 1.5; }
+.cd-setting .control { max-width: 260px; }
+.cd-preview { max-height: 520px; overflow-y: auto; }
+.cd-preview h4 { font-size: 15px; font-weight: 660; margin-bottom: 4px; }
+.cd-preview-scale { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0; font-size: 12.5px; color: var(--ink-3); }
+.cd-preview-scale b { color: var(--ink); }
+.cd-preview-q { font-size: 13px; color: var(--ink-2); margin: 8px 0; }
+.cd-preview-list { margin: 10px 0 0 18px; padding: 0; list-style: decimal; font-size: 13px; color: var(--ink-2); }
+.cd-preview-list li { margin-bottom: 6px; line-height: 1.5; }
+.btn.is-disabled { opacity: .5; pointer-events: none; }
+
+/* ------------------------------------------------------ dashboard tile */
+.cd-tile { display: flex; flex-direction: column; }
+.cd-tile-run {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 10px 20px; border-top: 1px solid var(--line); color: inherit; text-decoration: none;
+}
+.cd-tile-run:hover { background: var(--surface-2); text-decoration: none; }
+.cd-tile-name { font-size: 14px; font-weight: 580; min-width: 0; }
+.cd-tile-name em { display: block; font-style: normal; font-size: 12px; color: var(--ink-3); font-weight: 400; }
+.cd-tile-count { font-size: 17px; font-weight: 660; text-align: right; }
+.cd-tile-count em { display: block; font-style: normal; font-size: 11px; color: var(--ink-3); font-weight: 400; }

@@ -18,6 +18,12 @@ import { api, ApiError } from '../../lib/api.js';
 import { CardHead, DataTable, EmptyState } from '../ui.js';
 import { PersonAnswers } from './PersonAnswers.js';
 
+interface RosterPerson {
+  email: string;
+  name: string;
+  department: string;
+}
+
 interface Participant {
   linkId: string;
   email: string;
@@ -52,6 +58,7 @@ export function RosterPanel({
   const [draft, setDraft] = useState({ name: '', department: '' });
   const [adding, setAdding] = useState(false);
   const [addresses, setAddresses] = useState('');
+  const [reading, setReading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [params, setParams] = useSearchParams();
@@ -100,6 +107,39 @@ export function RosterPanel({
     }
   }
 
+  /**
+   * A spreadsheet, read and shown before anybody is emailed.
+   *
+   * HR arrives with a column of fifty people. Pasting the wrong tab of the
+   * wrong workbook should be discovered in this box, not in fifty inboxes, so
+   * the file is parsed into the same text area the facilitator can edit.
+   */
+  async function readFile(file: File) {
+    setReading(true);
+    setError(null);
+    try {
+      const parsedFile = await api.postRaw<{ people: RosterPerson[]; skipped: number; sheet: string }>(
+        `/api/admin/collab-runs/${runId}/roster/parse`,
+        await file.arrayBuffer(),
+      );
+      setAddresses(
+        parsedFile.people
+          .map((p) => [p.name, p.email, p.department].filter(Boolean).join(', '))
+          .join('\n'),
+      );
+      setAdding(true);
+      say(
+        parsedFile.skipped > 0
+          ? `${parsedFile.people.length} people read from “${parsedFile.sheet}”. ${parsedFile.skipped} rows had no address and were left out — check the list before inviting.`
+          : `${parsedFile.people.length} people read from “${parsedFile.sheet}”. Check the list, then invite.`,
+      );
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'That file could not be read.');
+    } finally {
+      setReading(false);
+    }
+  }
+
   const invite = () =>
     run(
       () =>
@@ -145,6 +185,30 @@ export function RosterPanel({
             >
               Remind {outstanding > 0 ? outstanding : ''}
             </button>
+            <a
+              className="btn btn-secondary btn-sm"
+              href={`/api/admin/collab-runs/${runId}/outstanding.csv`}
+              title="Names and addresses of everyone who has not finished"
+            >
+              Outstanding CSV
+            </a>
+            <label
+              className={`btn btn-secondary btn-sm${status !== 'open' ? ' is-disabled' : ''}`}
+              title="Read a participant list out of a spreadsheet"
+            >
+              {reading ? 'Reading…' : 'Upload list'}
+              <input
+                type="file"
+                accept=".xlsx"
+                hidden
+                disabled={status !== 'open' || reading}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  if (file) void readFile(file);
+                }}
+              />
+            </label>
             <button
               type="button"
               className="btn btn-primary btn-sm"

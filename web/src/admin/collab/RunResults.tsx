@@ -24,6 +24,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '../../lib/api.js';
 import { EmptyState, ErrorState, Loading } from '../ui.js';
 import type { ItemStat, RunResults as Results, SectionScore } from './types.js';
+import { RunBenchmark } from './RunBenchmark.js';
 
 /** A value's place on the instrument's own 1..5 scale. */
 function pos(value: number): number {
@@ -376,6 +377,25 @@ export function RunResults({ runId, wave }: { runId: string; wave?: number }) {
           </div>
         </section>
       ))}
+
+      {data.comments.length > 0 && (
+        <section className="cd-sec">
+          <div className="cd-sec-head">
+            <h3>In their own words</h3>
+            <p>
+              {data.openQuestion || 'The open question'} — {data.comments.length} answered. Quotations,
+              never counted, and in no order that could be matched to who is in the room.
+            </p>
+          </div>
+          <div className="cd-panel cd-quotes">
+            {data.comments.map((text, i) => (
+              <blockquote key={i}>{text}</blockquote>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <RunBenchmark runId={data.run.id} />
 
       <div className="cd-foot">
         <p>

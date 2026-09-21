@@ -25,6 +25,10 @@ export interface CollabRunForCandidate {
   waveNo: number;
   waveName: string;
   anonymous: boolean;
+  /** An optional free-text question asked after the statements; '' for none. */
+  openQuestion: string;
+  /** What this respondent has already typed there. */
+  openAnswer: string;
   facets: CollabFacet[];
   /** What this respondent has already chosen, on a resumed session. */
   chosen: Record<string, string>;

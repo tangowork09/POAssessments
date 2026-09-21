@@ -26,7 +26,7 @@ import {
   useToast,
 } from '../ui.js';
 import { RunResults } from './RunResults.js';
-import { FacetEditor } from './FacetEditor.js';
+import { RunSetup } from './RunSetup.js';
 import { RunTrend } from './RunTrend.js';
 import { RosterPanel } from './RosterPanel.js';
 import type { RunListItem } from './types.js';
@@ -40,6 +40,11 @@ interface RunDetail {
     min_segment: number;
     anonymous: boolean;
     shareSheets: boolean;
+    openQuestion: string;
+    reminderDays: number[];
+    closesAt: string | null;
+    archived: boolean;
+    benchmarkOptIn: boolean;
     otpRequired: boolean;
     linkOnlyIdentity: boolean;
   };
@@ -66,16 +71,17 @@ function RunsList() {
   const [runs, setRuns] = useState<RunListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [archived, setArchived] = useState(false);
   const [toast, say] = useToast();
   const navigate = useNavigate();
 
   const load = useCallback(() => {
     setError(null);
     api
-      .get<{ runs: RunListItem[] }>('/api/admin/collab-runs')
+      .get<{ runs: RunListItem[] }>(`/api/admin/collab-runs${archived ? '?archived=1' : ''}`)
       .then((r) => setRuns(r.runs))
       .catch((err: unknown) => setError(err instanceof ApiError ? err.message : 'Could not load the runs.'));
-  }, []);
+  }, [archived]);
 
   useEffect(load, [load]);
 
@@ -90,9 +96,19 @@ function RunsList() {
           title="Runs"
           sub={runs === null ? undefined : `${runs.length} on the console`}
           aside={
-            <button type="button" className="btn btn-primary btn-sm" onClick={() => setCreating((v) => !v)}>
-              New run
-            </button>
+            <span className="cd-actions">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                aria-pressed={archived}
+                onClick={() => setArchived((v) => !v)}
+              >
+                {archived ? 'Active runs' : 'Archived'}
+              </button>
+              <button type="button" className="btn btn-primary btn-sm" onClick={() => setCreating((v) => !v)}>
+                New run
+              </button>
+            </span>
           }
         />
         {creating && <NewRun onCreated={(id) => navigate(`/admin/collaboration-tests/${id}`)} say={say} />}
@@ -361,6 +377,50 @@ function RunPage({ runId }: { runId: string }) {
           <a className="btn btn-secondary btn-sm" href={`/api/admin/collab-runs/${runId}/xlsx${q}`}>
             Excel
           </a>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            title="Copy this run's setup for another organisation, without anybody's answers"
+            onClick={async () => {
+              const copyName = window.prompt('What is the new run called?', `${detail.run.name} (copy)`);
+              if (copyName === null) return;
+              try {
+                const copy = await api.post<{ id: string }>(`/api/admin/collab-runs/${runId}/duplicate`, {
+                  name: copyName,
+                });
+                navigate(`/admin/collaboration-tests/${copy.id}`);
+              } catch (err) {
+                say(err instanceof ApiError ? err.message : 'Could not duplicate.');
+              }
+            }}
+          >
+            Duplicate
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            title="Archive this run, or delete it if nobody has answered"
+            onClick={async () => {
+              if (!window.confirm('Remove this run from the list? Any answers are kept and it is archived.')) {
+                return;
+              }
+              try {
+                const gone = await api.del<{ archived: boolean; responses?: number }>(
+                  `/api/admin/collab-runs/${runId}`,
+                );
+                say(
+                  gone.archived
+                    ? `Archived, with ${gone.responses} responses kept.`
+                    : 'Deleted. It had no responses.',
+                );
+                navigate('/admin/collaboration-tests');
+              } catch (err) {
+                say(err instanceof ApiError ? err.message : 'Could not remove the run.');
+              }
+            }}
+          >
+            {(detail.turnout?.started ?? 0) > 0 ? 'Archive' : 'Delete'}
+          </button>
           {detail.waves.length > 1 && (
             <select
               className="control control-sm"
@@ -432,37 +492,23 @@ function RunPage({ runId }: { runId: string }) {
         ))}
 
       {tab === 'setup' && (
-        <>
-          <section className="card">
-            <CardHead
-              title="Break results down by"
-              sub="Background questions asked before the statements. People pick from your list, so one department cannot arrive spelled three ways."
-            />
-            <FacetEditor runId={runId} facets={detail.facets} locked={started > 0} onSaved={load} say={say} />
-          </section>
-
-          {!detail.run.anonymous && (
-            <section className="card mt-4">
-              <CardHead title="When the wave closes" />
-              <label className="cd-check card-body" htmlFor="cd-share">
-                <input
-                  type="checkbox"
-                  id="cd-share"
-                  checked={detail.run.shareSheets}
-                  onChange={(e) => patch({ shareSheets: e.target.checked }, () => 'Saved.')}
-                />
-                <span>
-                  <b>Send each person their own answers</b>
-                  <em>
-                    One page comparing what they said with what the group said. Not a score. Nothing is
-                    sent until you close the wave, because until then there is no group to compare
-                    anyone with.
-                  </em>
-                </span>
-              </label>
-            </section>
-          )}
-        </>
+        <RunSetup
+          runId={runId}
+          facets={detail.facets}
+          locked={started > 0}
+          onChanged={load}
+          say={say}
+          settings={{
+            status: detail.run.status,
+            anonymous: detail.run.anonymous,
+            shareSheets: detail.run.shareSheets,
+            openQuestion: detail.run.openQuestion,
+            reminderDays: detail.run.reminderDays ?? [],
+            closesAt: detail.run.closesAt,
+            benchmarkOptIn: detail.run.benchmarkOptIn,
+            minSegment: detail.run.min_segment,
+          }}
+        />
       )}
 
       <Toast message={toast} />

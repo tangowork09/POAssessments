@@ -6,6 +6,7 @@ import { api } from '../lib/api.js';
 import {
   DataTable, CardHead, EmptyState, ErrorState, Head, Loading, StatusPill } from './ui.js';
 import { MAX_STYLE_SCORE } from '../../../src/shared/scoring.js';
+import { CollabTile } from './collab/CollabTile.js';
 
 interface DashboardData {
   totals: { candidates: number; invited: number; in_progress: number; completed: number; started: number };
@@ -171,6 +172,8 @@ export function Dashboard() {
           </div>
         </section>
       </div>
+
+      <CollabTile />
 
       <section className="card mt-4">
         <CardHead title="Assessments" sub="Funnel per instrument" />

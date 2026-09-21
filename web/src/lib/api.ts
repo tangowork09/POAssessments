@@ -50,4 +50,7 @@ export const api = {
     request<T>(path, { method: 'PATCH', body: body === undefined ? undefined : JSON.stringify(body) }),
   // `del`, not `delete` — a reserved word cannot be a shorthand property name.
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  /** A file body, sent as bytes rather than JSON. */
+  postRaw: <T>(path: string, body: ArrayBuffer) =>
+    request<T>(path, { method: 'POST', body, headers: { 'content-type': 'application/octet-stream' } }),
 };

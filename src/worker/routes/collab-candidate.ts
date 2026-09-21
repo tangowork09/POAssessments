@@ -53,6 +53,7 @@ interface RunRow {
   organisation: string;
   status: 'draft' | 'open' | 'closed';
   anonymous: number;
+  open_question: string;
 }
 
 /**
@@ -71,7 +72,8 @@ export async function runForLink(
   if (!link.cohort_id) return { error: 'This link is not attached to a run.', code: 404 };
 
   const run = await env.DB.prepare(
-    `SELECT id, organisation, status, anonymous FROM cohorts WHERE id = ?1 AND assessment_id = ?2`,
+    `SELECT id, organisation, status, anonymous, open_question
+       FROM cohorts WHERE id = ?1 AND assessment_id = ?2`,
   )
     .bind(link.cohort_id, ASSESSMENT_ID.collab)
     .first<RunRow>();
@@ -132,6 +134,42 @@ export async function loadChosenFacets(env: Env, responseId: string): Promise<Re
   return chosen;
 }
 
+/** What this respondent has already typed in the open question. */
+export async function loadOpenAnswer(env: Env, responseId: string): Promise<string> {
+  const row = await env.DB.prepare('SELECT text FROM collab_open_answers WHERE response_id = ?1')
+    .bind(responseId)
+    .first<{ text: string }>();
+  return row?.text ?? '';
+}
+
+/**
+ * Saves the open answer, or clears it.
+ *
+ * Kept out of `answers`, which holds a 1..5 per statement number and is what
+ * every mean is taken over. A sentence is not a rating and must never be
+ * reachable by code that averages.
+ */
+export async function saveOpenAnswer(
+  env: Env,
+  responseId: string,
+  cohortId: string,
+  roundNo: number,
+  text: string,
+): Promise<void> {
+  const trimmed = text.trim().slice(0, 2000);
+  if (trimmed === '') {
+    await env.DB.prepare('DELETE FROM collab_open_answers WHERE response_id = ?1').bind(responseId).run();
+    return;
+  }
+  await env.DB.prepare(
+    `INSERT INTO collab_open_answers (response_id, cohort_id, round_no, text)
+     VALUES (?1, ?2, ?3, ?4)
+     ON CONFLICT(response_id) DO UPDATE SET text = excluded.text, created_at = datetime('now')`,
+  )
+    .bind(responseId, cohortId, roundNo, trimmed)
+    .run();
+}
+
 /** The run block a candidate session carries, or an error the shell can draw. */
 export async function collabSessionFor(
   env: Env,
@@ -147,6 +185,12 @@ export async function collabSessionFor(
     waveNo: resolved.waveNo,
     waveName: waveName(resolved.waveNo, resolved.waveLabel),
     anonymous: resolved.run.anonymous === 1,
+    /**
+     * One optional free-text question, after the statements. Never scored:
+     * the instrument has 24 statements and this is not a 25th.
+     */
+    openQuestion: resolved.run.open_question,
+    openAnswer: responseId ? await loadOpenAnswer(env, responseId) : '',
     facets: await loadFacets(env, resolved.run.id),
     chosen: {
       // Anything the facilitator already recorded about this person is not

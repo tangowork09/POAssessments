@@ -17,6 +17,7 @@ import { adminRoutes } from './routes/admin.js';
 import { candidateRoutes } from './routes/candidate.js';
 import { LOGO_PATH, logoResponse } from './lib/brand-asset.js';
 import { cohortRoutes } from './routes/cohorts.js';
+import { runCollabSchedule } from './lib/collab-schedule.js';
 import { collabRunRoutes } from './routes/collab-runs.js';
 import { reportRoutes } from './routes/report.js';
 import { handleMessage } from './pipeline.js';
@@ -248,6 +249,22 @@ export default {
     if (Math.random() < 0.01) ctx.waitUntil(pruneRateLimits(env));
 
     return serveShell(env, req);
+  },
+
+  /*
+   * Hourly. A wave past its closing date closes itself, and anybody who has
+   * not finished is chased on the days the facilitator chose. Both are
+   * idempotent: a scheduler that fires late, twice, or overlapping is normal,
+   * and fifty people receiving two reminders because of it is not.
+   */
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      runCollabSchedule(env)
+        .then((report) => {
+          if (report.closed || report.reminded) console.log('[collab schedule]', report);
+        })
+        .catch((err) => console.error('[collab schedule] failed', err)),
+    );
   },
 
   async queue(batch: MessageBatch<PipelineMessage>, env: Env): Promise<void> {

@@ -27,7 +27,7 @@ import { requireAdmin, type AdminHono } from '../lib/auth.js';
 import { auditAll, writeAudit } from '../lib/audit.js';
 import { newId } from '../lib/ids.js';
 import { generateToken, hashToken } from '../lib/tokens.js';
-import { ASSESSMENT_ID } from '../../shared/assessments.js';
+import { ASSESSMENT_ID, ASSESSMENTS } from '../../shared/assessments.js';
 import { COLLAB_ITEMS, COLLAB_ITEM_COUNT, COLLAB_SECTIONS, COLLAB_SECTION_BY_KEY } from '../../shared/collab.js';
 import { COLLAB_BANDS, scoreCollabResponse } from '../../shared/collab-scoring.js';
 import {
@@ -39,7 +39,10 @@ import {
 import { buildCollabWorkbook } from '../lib/collab-workbook.js';
 import { renderCollabReportPdf } from '../pdf/collab-report.js';
 import { collabTrend } from '../lib/collab-trend.js';
+import { collabBenchmark } from '../lib/collab-benchmark.js';
 import { buildParticipantSheets } from '../lib/collab-sheets.js';
+import { readRosterFile } from '../lib/collab-roster-file.js';
+import { XlsxError } from '../lib/xlsx-read.js';
 import { sendMail } from '../lib/mailer.js';
 import { magicLinkEmail } from '../email/templates.js';
 import { baseUrl } from '../env.js';
@@ -67,6 +70,11 @@ interface RunRow {
   min_segment: number;
   anonymous: number;
   share_reports: number;
+  open_question: string;
+  reminder_days: string;
+  closes_at: string | null;
+  archived: number;
+  benchmark_opt_in: number;
   link_ttl_days: number;
   otp_required: number;
   link_only_identity: number;
@@ -87,7 +95,8 @@ const CURRENT_ROUND = `
 
 async function loadRun(env: Env, id: string): Promise<RunRow | null> {
   return env.DB.prepare(
-    `SELECT id, name, organisation, status, min_segment, anonymous, share_reports, link_ttl_days,
+    `SELECT id, name, organisation, status, min_segment, anonymous, share_reports, open_question,
+            reminder_days, closes_at, archived, benchmark_opt_in, link_ttl_days,
             otp_required, link_only_identity, created_at, closed_at
        FROM cohorts WHERE id = ?1 AND assessment_id = ?2`,
   )
@@ -100,7 +109,7 @@ async function loadRun(env: Env, id: string): Promise<RunRow | null> {
 collabRunRoutes.get('/', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT co.id, co.name, co.organisation, co.status, co.min_segment, co.anonymous,
-            co.created_at, co.closed_at,
+            co.created_at, co.closed_at, co.closes_at, co.archived,
             COALESCE(${CURRENT_ROUND}, 1) AS round_no,
             (SELECT rd.label FROM cohort_rounds rd
               WHERE rd.cohort_id = co.id AND rd.no = COALESCE(${CURRENT_ROUND}, 1)) AS round_label,
@@ -109,10 +118,10 @@ collabRunRoutes.get('/', async (c) => {
               WHERE r.cohort_id = co.id AND r.round_no = COALESCE(${CURRENT_ROUND}, 1)
                 AND r.status = 'completed') AS completed
        FROM cohorts co
-      WHERE co.assessment_id = ?1
+      WHERE co.assessment_id = ?1 AND co.archived = ?2
       ORDER BY co.created_at DESC`,
   )
-    .bind(ASSESSMENT_ID.collab)
+    .bind(ASSESSMENT_ID.collab, c.req.query('archived') === '1' ? 1 : 0)
     .all();
 
   return c.json({ runs: results ?? [] });
@@ -146,6 +155,11 @@ collabRunRoutes.get('/:id', async (c) => {
       ...run,
       anonymous: run.anonymous === 1,
       shareSheets: run.share_reports === 1,
+      openQuestion: run.open_question,
+      reminderDays: safeDays(run.reminder_days),
+      closesAt: run.closes_at,
+      archived: run.archived === 1,
+      benchmarkOptIn: run.benchmark_opt_in === 1,
       otpRequired: run.otp_required === 1,
       linkOnlyIdentity: run.link_only_identity === 1,
     },
@@ -239,6 +253,10 @@ collabRunRoutes.patch('/:id', async (c) => {
   if (d.minSegment !== undefined) set('min_segment', d.minSegment);
   if (d.anonymous !== undefined) set('anonymous', d.anonymous ? 1 : 0);
   if (d.shareSheets !== undefined) set('share_reports', d.shareSheets ? 1 : 0);
+  if (d.openQuestion !== undefined) set('open_question', d.openQuestion);
+  if (d.reminderDays !== undefined) set('reminder_days', JSON.stringify(d.reminderDays));
+  if (d.closesAt !== undefined) set('closes_at', d.closesAt === '' ? null : d.closesAt);
+  if (d.benchmarkOptIn !== undefined) set('benchmark_opt_in', d.benchmarkOptIn ? 1 : 0);
   if (d.linkTtlDays !== undefined) set('link_ttl_days', d.linkTtlDays);
   if (d.otpRequired !== undefined) set('otp_required', d.otpRequired ? 1 : 0);
   if (d.linkOnlyIdentity !== undefined) set('link_only_identity', d.linkOnlyIdentity ? 1 : 0);
@@ -508,10 +526,23 @@ collabRunRoutes.get('/:id/results', async (c) => {
    * showing the right number against the wrong statement, and the reader has
    * no way to catch it.
    */
+  /*
+   * The open answers, if the run asked one. Verbatim and unattributed: they
+   * are quotations, never counted, and in an anonymous run there is nothing
+   * to attribute them to anyway.
+   */
+  const comments = await c.env.DB.prepare(
+    'SELECT text FROM collab_open_answers WHERE cohort_id = ?1 AND round_no = ?2 ORDER BY created_at',
+  )
+    .bind(run.id, wave)
+    .all<{ text: string }>();
+
   return c.json({
     run: { id: run.id, name: run.name, organisation: run.organisation, anonymous: run.anonymous === 1 },
     wave,
     minSegment: run.min_segment,
+    openQuestion: run.open_question,
+    comments: (comments.results ?? []).map((row) => row.text),
     statements: COLLAB_ITEMS.map((item) => ({
       no: item.no,
       text: item.text,
@@ -611,6 +642,20 @@ collabRunRoutes.get('/:id/pdf', async (c) => {
   const branding = brandingFrom(await getSettings(c.env));
   const logo = await decodeImageDataUrl(branding.logoDataUrl);
 
+  const noteRows = await c.env.DB.prepare(
+    'SELECT section_key, note FROM collab_notes WHERE cohort_id = ?1 AND round_no = ?2',
+  )
+    .bind(run.id, waveRow.no)
+    .all<{ section_key: string; note: string }>();
+  const notes: Record<string, string> = {};
+  for (const row of noteRows.results ?? []) notes[row.section_key] = row.note;
+
+  const commentRows = await c.env.DB.prepare(
+    'SELECT text FROM collab_open_answers WHERE cohort_id = ?1 AND round_no = ?2 ORDER BY created_at',
+  )
+    .bind(run.id, waveRow.no)
+    .all<{ text: string }>();
+
   const strongest = COLLAB_SECTION_BY_KEY.get(scores.group.gap.strongestKey)?.short ?? '';
   const weakest = COLLAB_SECTION_BY_KEY.get(scores.group.gap.weakestKey)?.short ?? '';
 
@@ -641,6 +686,9 @@ collabRunRoutes.get('/:id/pdf', async (c) => {
       strengths: scores.group.strengths,
       split: scores.group.split,
       cuts: scores.cuts.map((cut) => ({ label: cut.label, segments: cut.segments })),
+      notes,
+      openQuestion: run.open_question,
+      comments: (commentRows.results ?? []).map((row) => row.text),
       branding,
       generatedAt: new Date().toISOString().slice(0, 10),
     },
@@ -654,6 +702,291 @@ collabRunRoutes.get('/:id/pdf', async (c) => {
       'content-disposition': `attachment; filename="${slug}-wave-${waveRow.no}-report.pdf"`,
     },
   });
+});
+
+// ----------------------------------------------------------- benchmark
+
+collabRunRoutes.get('/:id/benchmark', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+  return c.json(await collabBenchmark(c.env, run.id));
+});
+
+// --------------------------------------------------- the facilitator's read
+
+/** What the facilitator wants said about each section, printed in the report. */
+collabRunRoutes.get('/:id/notes', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+
+  const wave = Number(c.req.query('wave')) || (await currentWaveNo(c.env, run.id));
+  const { results } = await c.env.DB.prepare(
+    'SELECT section_key, note FROM collab_notes WHERE cohort_id = ?1 AND round_no = ?2',
+  )
+    .bind(run.id, wave)
+    .all<{ section_key: string; note: string }>();
+
+  const notes: Record<string, string> = {};
+  for (const row of results ?? []) notes[row.section_key] = row.note;
+  return c.json({ wave, notes });
+});
+
+collabRunRoutes.put('/:id/notes', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+
+  const body = (await c.req.json().catch(() => ({}))) as { wave?: unknown; notes?: unknown };
+  const wave = Number(body.wave) || (await currentWaveNo(c.env, run.id));
+  const notes = body.notes && typeof body.notes === 'object' ? (body.notes as Record<string, unknown>) : {};
+
+  const valid = new Set(['', ...COLLAB_SECTIONS.map((s) => s.key)]);
+  const statements: ReturnType<typeof c.env.DB.prepare>[] = [];
+  for (const [key, value] of Object.entries(notes)) {
+    if (!valid.has(key)) continue;
+    const text = typeof value === 'string' ? value.trim().slice(0, 2000) : '';
+    statements.push(
+      text === ''
+        ? c.env.DB.prepare('DELETE FROM collab_notes WHERE cohort_id = ?1 AND round_no = ?2 AND section_key = ?3')
+            .bind(run.id, wave, key)
+        : c.env.DB.prepare(
+            `INSERT INTO collab_notes (cohort_id, round_no, section_key, note)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(cohort_id, round_no, section_key)
+             DO UPDATE SET note = excluded.note, updated_at = datetime('now')`,
+          ).bind(run.id, wave, key, text),
+    );
+  }
+  if (statements.length > 0) await c.env.DB.batch(statements);
+  return c.json({ ok: true, wave });
+});
+
+async function currentWaveNo(env: Env, cohortId: string): Promise<number> {
+  const row = await env.DB.prepare(
+    'SELECT no FROM cohort_rounds WHERE cohort_id = ?1 ORDER BY (closed_at IS NULL) DESC, no DESC LIMIT 1',
+  )
+    .bind(cohortId)
+    .first<{ no: number }>();
+  return row?.no ?? 1;
+}
+
+// ------------------------------------------------------------- preview
+
+/**
+ * Exactly what a respondent will be shown.
+ *
+ * Before a diagnostic goes to fifty executives, the person sending it wants to
+ * read it. Issuing a link and opening it yourself works, but it starts a
+ * response and burns a link, so the questions come back here instead —
+ * including the background questions and the optional open one, in the order
+ * they are asked, and with the section headings still withheld the way the
+ * master copy requires.
+ */
+collabRunRoutes.get('/:id/preview', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+
+  const facets = await c.env.DB.prepare(
+    'SELECT key, label, options, required FROM cohort_facets WHERE cohort_id = ?1 ORDER BY sort_order, key',
+  )
+    .bind(run.id)
+    .all<{ key: string; label: string; options: string; required: number }>();
+
+  const config = ASSESSMENTS.collab;
+  return c.json({
+    intro: config.intro,
+    scale: config.scale,
+    anonymous: run.anonymous === 1,
+    facets: (facets.results ?? []).map((f) => ({
+      label: f.label,
+      options: safeOptions(f.options),
+      required: f.required === 1,
+    })),
+    // Statement text only. No section, no direction: this is the respondent's
+    // view, and it is a preview of that view rather than of the scoring key.
+    statements: COLLAB_ITEMS.map((item) => ({ no: item.no, text: item.text })),
+    openQuestion: run.open_question,
+  });
+});
+
+// ------------------------------------------------------------ roster file
+
+/**
+ * Reads a participant list out of a spreadsheet and previews it.
+ *
+ * Preview, not import: a facilitator pasting the wrong tab of the wrong
+ * workbook should find that out before fifty people are emailed, not after.
+ * The console shows what was read and invites them separately.
+ */
+collabRunRoutes.post('/:id/roster/parse', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+
+  const bytes = new Uint8Array(await c.req.arrayBuffer());
+  if (bytes.length === 0) return c.json({ error: 'That upload was empty.' }, 400);
+  if (bytes.length > 4_000_000) {
+    return c.json({ error: 'That file is larger than a participant list should ever be.' }, 400);
+  }
+
+  try {
+    const parsed = await readRosterFile(bytes);
+    return c.json(parsed);
+  } catch (err) {
+    if (err instanceof XlsxError) return c.json({ error: err.message }, 400);
+    throw err;
+  }
+});
+
+// ------------------------------------------------------- outstanding export
+
+/**
+ * Who has not finished, as a file.
+ *
+ * Facilitators chase people in their mail client, not in this console. The
+ * list they need is names and addresses, in something they can paste.
+ */
+collabRunRoutes.get('/:id/outstanding.csv', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+  if (run.anonymous === 1) {
+    return c.json({ error: 'An anonymous run cannot say who has not answered.' }, 409);
+  }
+
+  const wave = await c.env.DB.prepare(
+    'SELECT no FROM cohort_rounds WHERE cohort_id = ?1 ORDER BY (closed_at IS NULL) DESC, no DESC LIMIT 1',
+  )
+    .bind(run.id)
+    .first<{ no: number }>();
+  if (!wave) return c.json({ error: 'This run has no wave.' }, 409);
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT cd.first_name AS name, cd.email,
+            (SELECT m.function FROM cohort_members m
+              WHERE m.cohort_id = l.cohort_id AND m.email = cd.email AND m.active = 1 LIMIT 1) AS department,
+            (SELECT r.status FROM responses r WHERE r.link_id = l.id ORDER BY r.invited_at DESC LIMIT 1) AS status,
+            (SELECT r.answered_count FROM responses r WHERE r.link_id = l.id ORDER BY r.invited_at DESC LIMIT 1) AS answered
+       FROM links l JOIN candidates cd ON cd.id = l.candidate_id
+      WHERE l.cohort_id = ?1 AND l.round_no = ?2 AND l.kind = 'personal'
+        AND l.self_issued = 0 AND l.active = 1
+        AND NOT EXISTS (SELECT 1 FROM responses r WHERE r.link_id = l.id AND r.status = 'completed')
+      ORDER BY cd.email`,
+  )
+    .bind(run.id, wave.no)
+    .all<{ name: string; email: string; department: string | null; status: string | null; answered: number | null }>();
+
+  const rows = [
+    ['Name', 'Email', 'Department', 'Progress'],
+    ...(results ?? []).map((row) => [
+      row.name ?? '',
+      row.email,
+      row.department ?? '',
+      row.status === 'in_progress' ? `${row.answered ?? 0} of 24` : 'Not started',
+    ]),
+  ];
+  const csv = rows
+    .map((cells) => cells.map((v) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v)).join(','))
+    .join('\r\n');
+
+  const slug = run.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'run';
+  return new Response('\ufeff' + csv, {
+    headers: {
+      'content-type': 'text/csv; charset=utf-8',
+      'content-disposition': `attachment; filename="${slug}-outstanding.csv"`,
+    },
+  });
+});
+
+// ---------------------------------------------------------- archive, delete
+
+/**
+ * Archives a run, or deletes one that never collected anything.
+ *
+ * A run holding answers is archived, never destroyed: those answers were given
+ * under a promise, and removing them to tidy a list is not a decision a
+ * console should make easy. A run with no responses is a typo, and deleting a
+ * typo is housekeeping.
+ */
+collabRunRoutes.delete('/:id', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+
+  const answered = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM responses WHERE cohort_id = ?1 AND status IN ('in_progress','completed')`,
+  )
+    .bind(run.id)
+    .first<{ n: number }>();
+
+  if ((answered?.n ?? 0) > 0) {
+    await c.env.DB.prepare('UPDATE cohorts SET archived = 1 WHERE id = ?1').bind(run.id).run();
+    return c.json({ archived: true, responses: answered?.n ?? 0 });
+  }
+
+  await c.env.DB.prepare('DELETE FROM cohorts WHERE id = ?1').bind(run.id).run();
+  return c.json({ archived: false, deleted: true });
+});
+
+/** Puts an archived run back on the list. */
+collabRunRoutes.post('/:id/restore', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+  await c.env.DB.prepare('UPDATE cohorts SET archived = 0 WHERE id = ?1').bind(run.id).run();
+  return c.json({ ok: true });
+});
+
+/**
+ * Copies a run's setup, without a single answer.
+ *
+ * The second client gets the same background questions, the same floor and the
+ * same sharing decision. What it does not get is anybody's responses, which is
+ * the whole point: a duplicate is a fresh diagnostic of a different
+ * organisation, not a copy of somebody else's results.
+ */
+collabRunRoutes.post('/:id/duplicate', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+
+  const body = (await c.req.json().catch(() => ({}))) as { name?: unknown; organisation?: unknown };
+  const name = typeof body.name === 'string' && body.name.trim() !== '' ? body.name.trim() : `${run.name} (copy)`;
+  const organisation = typeof body.organisation === 'string' ? body.organisation.trim() : run.organisation;
+
+  const id = newId('coh');
+  await c.env.DB.prepare(
+    `INSERT INTO cohorts (id, assessment_id, name, organisation, status, min_segment, anonymous,
+                          share_reports, open_question, reminder_days)
+     VALUES (?1, ?2, ?3, ?4, 'draft', ?5, ?6, ?7, ?8, ?9)`,
+  )
+    .bind(
+      id,
+      ASSESSMENT_ID.collab,
+      name,
+      organisation,
+      run.min_segment,
+      run.anonymous,
+      run.share_reports,
+      run.open_question,
+      run.reminder_days,
+    )
+    .run();
+
+  await c.env.DB.prepare('INSERT INTO cohort_rounds (id, cohort_id, no, label) VALUES (?1, ?2, 1, ?3)')
+    .bind(newId('crd'), id, '')
+    .run();
+
+  const { results } = await c.env.DB.prepare(
+    'SELECT key, label, options, required, sort_order FROM cohort_facets WHERE cohort_id = ?1',
+  )
+    .bind(run.id)
+    .all<{ key: string; label: string; options: string; required: number; sort_order: number }>();
+
+  for (const facet of results ?? []) {
+    await c.env.DB.prepare(
+      `INSERT INTO cohort_facets (cohort_id, key, label, options, required, sort_order)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+    )
+      .bind(id, facet.key, facet.label, facet.options, facet.required, facet.sort_order)
+      .run();
+  }
+
+  return c.json({ id }, 201);
 });
 
 // ---------------------------------------------------------- participants
@@ -1197,6 +1530,16 @@ async function upsertMember(
   )
     .bind(newId('mem'), cohortId, next?.no ?? 1, name || email, department ?? '', email)
     .run();
+}
+
+/** Reminder offsets, tolerant of a column that predates them. */
+export function safeDays(json: string): number[] {
+  try {
+    const parsed: unknown = JSON.parse(json || '[]');
+    return Array.isArray(parsed) ? parsed.filter((v): v is number => Number.isInteger(v) && v > 0) : [];
+  } catch {
+    return [];
+  }
 }
 
 function safeOptions(json: string): string[] {

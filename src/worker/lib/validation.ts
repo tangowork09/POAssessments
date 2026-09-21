@@ -322,6 +322,20 @@ export const collabRunUpdateSchema = z
     anonymous: collabFields.anonymous,
     /** Whether each participant is sent their own answers against the group. */
     shareSheets: z.boolean(),
+    /**
+     * One optional free-text question, asked after the 24 statements. Never
+     * scored: the instrument has 24 statements and this is not a 25th.
+     */
+    openQuestion: z.string().trim().max(240),
+    /**
+     * Days after somebody was invited at which they are chased, if they have
+     * not finished. Capped at four: past that it is not a reminder.
+     */
+    reminderDays: z.array(z.number().int().min(1).max(60)).max(4),
+    /** The date the wave closes itself. '' clears it back to closing by hand. */
+    closesAt: z.union([z.literal(''), z.iso.date()]),
+    /** Whether this organisation's figures may sit in a benchmark. */
+    benchmarkOptIn: z.boolean(),
     linkTtlDays: cohortFields.linkTtlDays,
     otpRequired: cohortFields.otpRequired,
     linkOnlyIdentity: cohortFields.linkOnlyIdentity,

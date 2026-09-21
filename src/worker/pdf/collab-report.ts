@@ -109,6 +109,15 @@ export interface CollabReportPayload {
   strengths: number[];
   split: number[];
   cuts: CollabReportCut[];
+  /**
+   * What the facilitator wants said, keyed by section, '' for the opening.
+   * Optional: a report generated before anybody wrote anything is a report
+   * without notes, not a failure.
+   */
+  notes?: Record<string, string>;
+  /** The open question and its answers, when the run asked one. */
+  openQuestion?: string;
+  comments?: string[];
   branding: Branding;
   generatedAt: string;
 }
@@ -138,6 +147,7 @@ export function renderCollabReportPdf(
 
   drawCover(ctx);
   newPage(ctx);
+  drawFacilitatorNote(ctx);
   drawHowToRead(ctx);
   drawHeadline(ctx);
   drawSections(ctx);
@@ -145,6 +155,7 @@ export function renderCollabReportPdf(
   drawStrengths(ctx);
   drawEveryStatement(ctx);
   drawSegments(ctx);
+  drawComments(ctx);
   drawMethod(ctx);
   drawFooters(ctx);
 
@@ -294,6 +305,59 @@ function drawCover(ctx: Ctx): void {
     size: 8.6,
     color: T.ink3,
   });
+}
+
+/**
+ * The facilitator's opening read, before any figure.
+ *
+ * The numbers say what happened; this is where the person who ran the
+ * exercise says what they think it means, which is the half the client is
+ * paying for. Absent when they wrote nothing — an empty heading is worse than
+ * no heading.
+ */
+function drawFacilitatorNote(ctx: Ctx): void {
+  const note = ctx.report.notes?.[''];
+  if (!note || note.trim() === '') return;
+  heading(ctx, 'What we take from this');
+  ctx.y = paragraph(ctx, note.trim(), ctx.y, { size: 10.4, leading: 16.4, color: T.ink });
+  ctx.y += 10;
+}
+
+/**
+ * What people wrote, verbatim.
+ *
+ * Quotations, never counted and never attributed. In a named run this is the
+ * one place somebody's own words appear, so they appear without their name
+ * beside them: the sentence is the finding, not who said it.
+ */
+function drawComments(ctx: Ctx): void {
+  const { report } = ctx;
+  if (!report.comments || report.comments.length === 0) return;
+
+  heading(ctx, 'In their own words');
+  ctx.y = paragraph(
+    ctx,
+    `${report.openQuestion || 'The open question'} — ${report.comments.length} of ${report.n} answered. ` +
+      'Unattributed, and in no order that could be matched to who was in the room.',
+    ctx.y,
+    { size: 8.6, leading: 13.5, color: T.ink3 },
+  );
+  ctx.y += 10;
+
+  for (const comment of report.comments) {
+    const lines = wrap(comment, 'Helvetica', 9.4, CONTENT_W - 30);
+    const height = lines.length * 14 + 16;
+    ensure(ctx, height + 6);
+    doc(ctx).roundRect(M.left, ctx.y, CONTENT_W, height, 5, T.surface);
+    doc(ctx).rect(M.left, ctx.y, 2, height, T.line2);
+    let ty = ctx.y + 9;
+    for (const line of lines) {
+      doc(ctx).text(line, M.left + 16, ty, { size: 9.4, color: T.ink2 });
+      ty += 14;
+    }
+    ctx.y += height + 6;
+  }
+  ctx.y += 6;
 }
 
 // --------------------------------------------------------------- how to read
@@ -494,6 +558,17 @@ function drawSections(ctx: Ctx): void {
     { size: 8.6, leading: 13.5, color: T.ink3 },
   );
   ctx.y += 14;
+
+  // Anything the facilitator wrote about a particular section, under it.
+  for (const section of ranked) {
+    const note = report.notes?.[section.key];
+    if (!note || note.trim() === '') continue;
+    ensure(ctx, 46);
+    doc(ctx).text(section.short, M.left, ctx.y, { font: 'Helvetica-Bold', size: 9.4, color: T.ink });
+    ctx.y += 13;
+    ctx.y = paragraph(ctx, note.trim(), ctx.y, { size: 9, leading: 13.8, color: T.ink2 });
+    ctx.y += 10;
+  }
 }
 
 // ----------------------------------------------------------- where to look

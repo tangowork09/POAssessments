@@ -8,6 +8,10 @@ import { renderCollabReportPdf, type CollabReportPayload } from '../src/worker/p
  * tests assert on what it *says*, not only that it renders. Content streams are
  * uncompressed, so the drawn text is searchable in the bytes.
  */
+function rawOf(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString('latin1');
+}
+
 function textOf(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('latin1');
 }
@@ -51,6 +55,9 @@ function payload(
     strengths: group.strengths,
     split: group.split,
     cuts: [],
+    notes: {},
+    openQuestion: '',
+    comments: [],
     branding: BRANDING,
     generatedAt: '2026-09-21',
     ...over,
@@ -132,6 +139,46 @@ describe('the facilitator report', () => {
   it('renders from a single response, where there is no spread to draw', () => {
     const bytes = renderCollabReportPdf(payload([sheet(3)]));
     expect(textOf(bytes).startsWith('%PDF')).toBe(true);
+  });
+
+  it('prints the facilitator’s read before any figure, when they wrote one', () => {
+    const text = textOf(
+      renderCollabReportPdf(
+        payload([sheet(3), sheet(3)], {
+          notes: { '': 'Quality and Commercial are describing two different companies.' },
+        }),
+      ),
+    );
+    expect(text).toContain('What we take from this');
+    expect(text).toContain('two different companies');
+  });
+
+  it('leaves the note out entirely when there is none', () => {
+    const text = textOf(renderCollabReportPdf(payload([sheet(3), sheet(3)])));
+    expect(text).not.toContain('What we take from this');
+  });
+
+  it('prints the open answers as unattributed quotations', () => {
+    const text = textOf(
+      renderCollabReportPdf(
+        payload([sheet(3), sheet(3)], {
+          openQuestion: 'What is the single biggest barrier?',
+          comments: ['Handovers between QA and Production.', 'Nobody owns the end to end.'],
+        }),
+      ),
+    );
+    expect(text).toContain('In their own words');
+    expect(text).toContain('Handovers between QA and Production.');
+    expect(text).toContain('Nobody owns the end to end.');
+    // A quotation carries no name, in a named run or any other.
+    expect(text).not.toContain('@');
+  });
+
+  it('renders from a payload that predates notes and comments', () => {
+    const bare = payload([sheet(3), sheet(3)]);
+    delete (bare as { notes?: unknown }).notes;
+    delete (bare as { comments?: unknown }).comments;
+    expect(rawOf(renderCollabReportPdf(bare)).startsWith('%PDF')).toBe(true);
   });
 
   it('accounts for sheets left unfinished rather than dropping them silently', () => {

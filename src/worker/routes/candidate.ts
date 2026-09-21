@@ -30,6 +30,7 @@ import {
   checkCollabSubmission,
   collabSessionFor,
   isCollabLink,
+  saveOpenAnswer,
   startCollabResponse,
 } from './collab-candidate.js';
 import {
@@ -1104,7 +1105,15 @@ async function verifyOtp(
 
 // -------------------------------------------------------------------- submit
 
-const submitSchema = z.object({ responseId: z.string().min(1) });
+const submitSchema = z.object({
+  responseId: z.string().min(1),
+  /**
+   * The diagnostic's optional free-text answer. Accepted here rather than on
+   * the autosave route because it is not a rating: it is submitted once, with
+   * the sheet, and never averaged.
+   */
+  openAnswer: z.string().max(2000).optional(),
+});
 
 candidateRoutes.post('/submit/:token', async (c) => {
   const link = await resolveLink(c.env, c.req.param('token'));
@@ -1168,6 +1177,13 @@ candidateRoutes.post('/submit/:token', async (c) => {
     const missingNos = await checkCollabSubmission(c.env, resp.id);
     if (missingNos.length > 0) {
       return c.json({ error: 'Some statements are still unanswered.', missing: missingNos }, 400);
+    }
+
+    // The open question is optional and is stored apart from the ratings: a
+    // sentence is not a 25th statement and must never reach a mean.
+    const body = parsed.data as { responseId: string; openAnswer?: unknown };
+    if (typeof body.openAnswer === 'string' && link.cohort_id) {
+      await saveOpenAnswer(c.env, resp.id, link.cohort_id, link.round_no, body.openAnswer);
     }
     await c.env.DB.prepare(
       `UPDATE responses SET status = 'completed', completed_at = datetime('now') WHERE id = ?1`,

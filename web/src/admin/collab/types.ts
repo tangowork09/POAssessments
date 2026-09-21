@@ -80,6 +80,9 @@ export interface RunResults {
   wave: number;
   minSegment: number;
   statements: Statement[];
+  /** The optional open question, and what people typed. Quotations, never counted. */
+  openQuestion: string;
+  comments: string[];
   group: {
     n: number;
     incomplete: number;

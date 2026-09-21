@@ -31,6 +31,14 @@
     }
   ],
 
+  // Hourly, for the two things a run does while nobody is watching: closing
+  // a wave on the date the facilitator set, and chasing whoever has not
+  // finished on the days they chose. Both are idempotent, so a missed or
+  // doubled firing costs nothing.
+  "triggers": {
+    "crons": ["17 * * * *"]
+  },
+
   "queues": {
     "producers": [
       { "binding": "PIPELINE", "queue": "assessment-pipeline" }
