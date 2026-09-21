@@ -269,6 +269,19 @@ export const collabFacetsSchema = z.object({
   facets: z.array(collabFacetSchema).max(6),
 });
 
+/**
+ * Who to invite to a named run. Addresses are lower-cased and de-duplicated
+ * here rather than at the call site, because "A@x.com" and "a@x.com" are one
+ * person with two invitations and two half-finished sheets.
+ */
+export const collabInviteSchema = z.object({
+  emails: z
+    .array(z.string().trim().toLowerCase().email('That is not an email address.').max(200))
+    .min(1, 'Add at least one address.')
+    .max(200)
+    .transform((list) => [...new Set(list)]),
+});
+
 export const collabRunCreateSchema = z.object({
   name: cohortFields.name,
   organisation: cohortFields.organisation.default(''),

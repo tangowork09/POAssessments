@@ -245,3 +245,22 @@
 .cd-facet-read li { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
 .cd-facet-read b { font-weight: 620; font-size: 13.5px; }
 .cd-facet-read span { font-size: 13px; color: var(--ink-3); }
+
+/* ---------------------------------------------------------- wave over wave */
+.cd-move-head { font-size: 14px; color: var(--ink); margin-bottom: 4px; }
+.cd-up { color: var(--ok); }
+.cd-down { color: var(--push); }
+.cd-flat { color: var(--ink-3); }
+.cd-moves { display: flex; flex-direction: column; margin-top: 12px; }
+.cd-moves li {
+  display: grid; grid-template-columns: minmax(0, 1fr) 120px 70px; gap: 12px;
+  padding: 8px 0; border-top: 1px solid var(--line); align-items: baseline; font-size: 13.5px;
+}
+.cd-move-name { font-weight: 600; }
+.cd-move-from { color: var(--ink-3); font-size: 12.5px; text-align: right; }
+.cd-move-delta { text-align: right; font-weight: 640; }
+@media (max-width: 560px) { .cd-moves li { grid-template-columns: minmax(0, 1fr) 62px; } .cd-move-from { display: none; } }
+
+/* --------------------------------------------------------------- invites */
+.cd-invite-grid { display: flex; flex-direction: column; gap: 10px; max-width: 620px; }
+.cd-invite-grid textarea { font-family: var(--mono); font-size: 12.5px; line-height: 1.6; resize: vertical; width: 100%; }

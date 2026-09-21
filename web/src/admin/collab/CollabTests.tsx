@@ -12,6 +12,8 @@ import { api, ApiError } from '../../lib/api.js';
 import { CardHead, EmptyState, ErrorState, Head, Loading, formatDate, Toast, useToast } from '../ui.js';
 import { RunResults } from './RunResults.js';
 import { FacetEditor } from './FacetEditor.js';
+import { RunTrend } from './RunTrend.js';
+import { InvitePanel } from './InvitePanel.js';
 import type { RunListItem } from './types.js';
 
 interface RunDetail {
@@ -253,6 +255,20 @@ function RunDetailView({
     }
   }
 
+  async function startWave() {
+    const label = window.prompt('What is this wave called? For example, March 2027.', '');
+    if (label === null) return;
+    try {
+      await api.post(`/api/admin/collab-runs/${runId}/waves`, { label });
+      say('New wave open. The previous one is closed and keeps its results.');
+      setWave(undefined);
+      load();
+      onChanged();
+    } catch (err) {
+      say(err instanceof ApiError ? err.message : 'Could not start a wave.');
+    }
+  }
+
   async function issueLink() {
     try {
       const issued = await api.post<{ token: string }>(`/api/admin/collab-runs/${runId}/link`, {});
@@ -286,6 +302,9 @@ function RunDetailView({
             <>
               <button className="btn btn-secondary btn-sm" type="button" onClick={issueLink}>
                 Issue shared link
+              </button>
+              <button className="btn btn-secondary btn-sm" type="button" onClick={startWave}>
+                Start a new wave
               </button>
               <button className="btn btn-secondary btn-sm" type="button" onClick={() => setStatus('closed')}>
                 Close the run
@@ -350,6 +369,12 @@ function RunDetailView({
           say={say}
         />
       </section>
+
+      {!detail.run.anonymous && (
+        <InvitePanel runId={runId} status={detail.run.status} say={say} onChanged={load} />
+      )}
+
+      <RunTrend runId={runId} />
 
       <RunResults runId={runId} wave={wave} />
     </>

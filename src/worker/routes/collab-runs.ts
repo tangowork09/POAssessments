@@ -35,10 +35,15 @@ import {
 } from '../lib/collab-run.js';
 import { buildCollabWorkbook } from '../lib/collab-workbook.js';
 import { renderCollabReportPdf } from '../pdf/collab-report.js';
+import { collabTrend } from '../lib/collab-trend.js';
+import { sendMail } from '../lib/mailer.js';
+import { magicLinkEmail } from '../email/templates.js';
+import { baseUrl } from '../env.js';
 import { decodeImageDataUrl } from '../pdf/image.js';
 import { brandingFrom, getSettings } from '../lib/settings.js';
 import {
   collabFacetsSchema,
+  collabInviteSchema,
   collabRunCreateSchema,
   collabRunUpdateSchema,
   fieldErrors,
@@ -553,6 +558,209 @@ collabRunRoutes.get('/:id/pdf', async (c) => {
       'content-disposition': `attachment; filename="${slug}-wave-${waveRow.no}-report.pdf"`,
     },
   });
+});
+
+// ----------------------------------------------------------------- trend
+
+collabRunRoutes.get('/:id/trend', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+
+  const names = new Map(COLLAB_SECTIONS.map((s) => [s.key, s.short]));
+  return c.json(await collabTrend(c.env, run.id, names));
+});
+
+// --------------------------------------------------------------- invitations
+
+/**
+ * Invites named people to a run, one personal link each.
+ *
+ * Refused outright for an anonymous run. A personal link is a door with
+ * somebody's name on it, and the response that comes through it is reachable
+ * from that door: issuing one in a run promised as anonymous would make every
+ * answer joinable back to a person, whatever the console chose to display. An
+ * anonymous run is shared as one link, and chasing it means chasing everybody.
+ */
+collabRunRoutes.post('/:id/invites', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+  if (run.anonymous === 1) {
+    return c.json(
+      {
+        error:
+          'This run is anonymous, so it cannot send a personal link to a named person — that link would tie their answers back to them. Share the run\'s link with the group instead.',
+      },
+      409,
+    );
+  }
+  if (run.status !== 'open') {
+    return c.json({ error: 'Open the run before inviting anyone to it.' }, 409);
+  }
+
+  const parsed = collabInviteSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: 'Please check the addresses.', details: fieldErrors(parsed.error) }, 400);
+  }
+
+  const wave = await c.env.DB.prepare(
+    'SELECT no FROM cohort_rounds WHERE cohort_id = ?1 ORDER BY (closed_at IS NULL) DESC, no DESC LIMIT 1',
+  )
+    .bind(run.id)
+    .first<{ no: number }>();
+  if (!wave) return c.json({ error: 'This run has no wave to invite to.' }, 409);
+
+  const branding = brandingFrom(await getSettings(c.env));
+  const logoUrl = `${baseUrl(c.env)}/api/logo`;
+  const sent: string[] = [];
+  const skipped: string[] = [];
+
+  for (const email of parsed.data.emails) {
+    // Already invited to this wave: the link they hold still works, and a
+    // second one would silently retire it mid-exercise.
+    const existing = await c.env.DB.prepare(
+      `SELECT l.id FROM links l
+         JOIN candidates cd ON cd.id = l.candidate_id
+        WHERE l.cohort_id = ?1 AND l.round_no = ?2 AND l.kind = 'personal'
+          AND l.self_issued = 0 AND l.active = 1 AND cd.email = ?3`,
+    )
+      .bind(run.id, wave.no, email)
+      .first<{ id: string }>();
+    if (existing) {
+      skipped.push(email);
+      continue;
+    }
+
+    let candidate = await c.env.DB.prepare('SELECT id FROM candidates WHERE email = ?1')
+      .bind(email)
+      .first<{ id: string }>();
+    if (!candidate) {
+      const id = newId('cand');
+      await c.env.DB.prepare(
+        `INSERT INTO candidates (id, email, first_name, last_name, organisation)
+         VALUES (?1, ?2, '', '', ?3)`,
+      )
+        .bind(id, email, run.organisation)
+        .run();
+      candidate = { id };
+    }
+
+    const token = generateToken();
+    await c.env.DB.prepare(
+      `INSERT INTO links (id, token_hash, kind, assessment_id, candidate_id, cohort_id, round_no, active, self_issued)
+       VALUES (?1, ?2, 'personal', ?3, ?4, ?5, ?6, 1, 0)`,
+    )
+      .bind(
+        newId('lnk'),
+        await hashToken(token, c.env.LINK_TOKEN_SECRET),
+        ASSESSMENT_ID.collab,
+        candidate.id,
+        run.id,
+        wave.no,
+      )
+      .run();
+
+    const mail = magicLinkEmail({
+      branding,
+      logoUrl,
+      name: email.split('@')[0] ?? email,
+      cohortName: run.name,
+      organisation: run.organisation,
+      link: `${baseUrl(c.env)}/t/${token}`,
+    });
+    await sendMail(c.env, { to: email, kind: 'collab_invite', ...mail });
+    sent.push(email);
+  }
+
+  return c.json({ sent: sent.length, skipped: skipped.length, wave: wave.no });
+});
+
+/**
+ * Reminds the people who have not finished.
+ *
+ * The link they were sent is not reissued: it still works, and replacing it
+ * mid-exercise would break the half-finished sheet they can currently return
+ * to. This is the same door, knocked on again.
+ */
+collabRunRoutes.post('/:id/remind', async (c) => {
+  const run = await loadRun(c.env, c.req.param('id'));
+  if (!run) return c.json({ error: 'Run not found' }, 404);
+  if (run.anonymous === 1) {
+    return c.json(
+      {
+        error:
+          'This run is anonymous, so there is no way to tell who has answered and nobody to chase. Send the run\'s link to the group again.',
+      },
+      409,
+    );
+  }
+
+  const wave = await c.env.DB.prepare(
+    'SELECT no FROM cohort_rounds WHERE cohort_id = ?1 ORDER BY (closed_at IS NULL) DESC, no DESC LIMIT 1',
+  )
+    .bind(run.id)
+    .first<{ no: number }>();
+  if (!wave) return c.json({ error: 'This run has no wave to remind about.' }, 409);
+
+  /*
+   * Everyone invited to this wave whose response is not complete. A link with
+   * no response at all has not been opened; one with an unfinished response
+   * was started and abandoned. Both get the same nudge — the difference
+   * matters to the facilitator, not to the person being reminded.
+   */
+  const { results } = await c.env.DB.prepare(
+    `SELECT l.id, cd.email
+       FROM links l
+       JOIN candidates cd ON cd.id = l.candidate_id
+      WHERE l.cohort_id = ?1 AND l.round_no = ?2 AND l.kind = 'personal'
+        AND l.self_issued = 0 AND l.active = 1
+        AND NOT EXISTS (
+          SELECT 1 FROM responses r
+           WHERE r.link_id = l.id AND r.status = 'completed'
+        )`,
+  )
+    .bind(run.id, wave.no)
+    .all<{ id: string; email: string }>();
+
+  const outstanding = results ?? [];
+  if (outstanding.length === 0) {
+    return c.json({ reminded: 0, message: 'Everyone invited to this wave has finished.' });
+  }
+
+  const branding = brandingFrom(await getSettings(c.env));
+  const logoUrl = `${baseUrl(c.env)}/api/logo`;
+
+  for (const row of outstanding) {
+    /*
+     * Only a hash of the original token was kept, so the reminder cannot
+     * repeat the link that was sent. It rotates the token *on the same link
+     * row* instead: the row's id is what a half-finished response is attached
+     * to, so the new token opens the same sheet at the same statement, and the
+     * old one stops working — which is the right outcome for a link that has
+     * been sitting in an inbox for a fortnight.
+     */
+    const token = generateToken();
+    await c.env.DB.prepare('UPDATE links SET token_hash = ?2, active = 1 WHERE id = ?1')
+      .bind(row.id, await hashToken(token, c.env.LINK_TOKEN_SECRET))
+      .run();
+
+    const mail = magicLinkEmail({
+      branding,
+      logoUrl,
+      name: row.email.split('@')[0] ?? row.email,
+      cohortName: run.name,
+      organisation: run.organisation,
+      link: `${baseUrl(c.env)}/t/${token}`,
+    });
+    await sendMail(c.env, {
+      to: row.email,
+      kind: 'collab_reminder',
+      subject: `${run.name} — a reminder to finish`,
+      html: mail.html,
+      text: mail.text,
+    });
+  }
+
+  return c.json({ reminded: outstanding.length, wave: wave.no });
 });
 
 function safeOptions(json: string): string[] {
