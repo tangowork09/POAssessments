@@ -58,6 +58,8 @@ export interface Benchmark {
 
 interface OrgReading {
   cohortId: string;
+  /** Lower-cased organisation, or the run's own name when none was recorded. */
+  org: string;
   perItem: number;
   total: number;
   sections: Map<string, number>;
@@ -65,27 +67,45 @@ interface OrgReading {
 
 export async function collabBenchmark(env: Env, subjectCohortId: string | null): Promise<Benchmark> {
   const { results } = await env.DB.prepare(
-    `SELECT co.id,
+    `SELECT co.id, co.name, co.organisation,
             (SELECT rd.no FROM cohort_rounds rd
               WHERE rd.cohort_id = co.id ORDER BY (rd.closed_at IS NULL) DESC, rd.no DESC LIMIT 1) AS round_no
        FROM cohorts co
-      WHERE co.assessment_id = ?1 AND co.benchmark_opt_in = 1 AND co.archived = 0`,
+      WHERE co.assessment_id = ?1 AND co.benchmark_opt_in = 1 AND co.archived = 0
+      ORDER BY co.created_at DESC`,
   )
     .bind(ASSESSMENT_ID.collab)
-    .all<{ id: string; round_no: number | null }>();
+    .all<{ id: string; name: string; organisation: string; round_no: number | null }>();
 
+  /*
+   * One organisation, one reading — the most recent.
+   *
+   * The floor counts organisations, so the thing counted has to be an
+   * organisation. A consultancy that runs Acme in March and again in September,
+   * or seeds a run twice while setting it up, would otherwise satisfy a floor
+   * of four with one client and publish a "benchmark" that is Acme compared
+   * with itself. Rows arrive newest first, so the first reading for a given
+   * organisation is the one kept.
+   */
   const readings: OrgReading[] = [];
+  const seen = new Set<string>();
+
   for (const row of results ?? []) {
+    const org = (row.organisation.trim() || row.name.trim()).toLowerCase();
+    if (seen.has(org)) continue;
+
     const responses = await loadRunResponses(env, row.id, row.round_no ?? 1);
     if (responses.length === 0) continue;
     try {
       const group = scoreCollabGroup(responses.map((r) => r.answers));
       readings.push({
         cohortId: row.id,
+        org,
         perItem: group.perItem,
         total: group.total,
         sections: new Map(group.sections.map((s) => [s.key, s.mean])),
       });
+      seen.add(org);
     } catch {
       // A run where nothing is complete is not an organisation's reading.
     }

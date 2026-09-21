@@ -16,7 +16,7 @@ function sheet(value: number): Record<number, number> {
  * Only runs that opted in are ever handed back by the query the benchmark
  * makes, so the stub models that: `optedIn` is the whole world it can see.
  */
-function stubDb(optedIn: { id: string; value: number }[]) {
+function stubDb(optedIn: { id: string; value: number; org?: string }[]) {
   const env = {
     DB: {
       prepare(sql: string) {
@@ -24,7 +24,14 @@ function stubDb(optedIn: { id: string; value: number }[]) {
           bind: (...binds: unknown[]) => ({
             all: async () => {
               if (/FROM cohorts co/.test(sql)) {
-                return { results: optedIn.map((o) => ({ id: o.id, round_no: 1 })) };
+                return {
+                  results: optedIn.map((o) => ({
+                    id: o.id,
+                    name: o.id,
+                    organisation: o.org ?? o.id,
+                    round_no: 1,
+                  })),
+                };
               }
               const org = optedIn.find((o) => o.id === binds[0]);
               if (!org) return { results: [] };
@@ -118,5 +125,35 @@ describe('comparing one organisation with the others', () => {
     const bench = await collabBenchmark(env, 'a');
     expect(bench.orgs).toBe(0);
     expect(bench.sections).toBeNull();
+  });
+});
+
+describe('what counts as an organisation', () => {
+  it('counts one organisation once, however many times it has been run', async () => {
+    // A consultancy that runs Acme in March and again in September would
+    // otherwise meet a floor of four with one client, and publish a benchmark
+    // that is Acme compared with itself.
+    const env = stubDb([
+      { id: 'a1', value: 2, org: 'Acme Pharma' },
+      { id: 'a2', value: 3, org: 'acme pharma' },
+      { id: 'a3', value: 4, org: 'ACME PHARMA ' },
+      { id: 'b1', value: 3, org: 'Beta Pharma' },
+    ]);
+    const bench = await collabBenchmark(env, 'a1');
+    expect(bench.orgs).toBe(2);
+    expect(bench.sections).toBeNull();
+    expect(bench.withheld).toContain(`at least ${MIN_ORGS}`);
+  });
+
+  it('shows a comparison once four different organisations have opted in', async () => {
+    const env = stubDb([
+      { id: 'a', value: 2, org: 'Acme' },
+      { id: 'b', value: 3, org: 'Beta' },
+      { id: 'c', value: 3, org: 'Gamma' },
+      { id: 'd', value: 4, org: 'Delta' },
+    ]);
+    const bench = await collabBenchmark(env, 'a');
+    expect(bench.orgs).toBe(4);
+    expect(bench.sections).not.toBeNull();
   });
 });
