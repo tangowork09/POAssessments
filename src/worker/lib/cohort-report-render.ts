@@ -32,6 +32,7 @@ export interface CohortReportRow {
   min_raters: number;
   tie_threshold: number;
   min_rated_targets: number;
+  share_reports: number;
   cohort_created_at: string;
   closed_at: string | null;
   assessment_id: string;
@@ -44,7 +45,7 @@ export const COHORT_REPORT_SELECT = `
          cr.round_no, rd.label AS round_label,
          m.name AS member_name,
          co.id AS cohort_id, co.name AS cohort_name, co.organisation, co.status,
-         co.min_raters, co.tie_threshold, co.min_rated_targets,
+         co.min_raters, co.tie_threshold, co.min_rated_targets, co.share_reports,
          co.created_at AS cohort_created_at, co.closed_at,
          a.id AS assessment_id, a.name AS assessment_name
     FROM cohort_reports cr
@@ -70,10 +71,12 @@ function cohortOf(row: CohortReportRow): CohortRow {
     // Likewise not selected: how long a participant's link lasts has nothing
     // to do with what a finished report says.
     link_ttl_days: DEFAULT_LINK_TTL_DAYS,
+    // Sharing does bear on the report now: a member's own quadrant is shown
+    // only while it is on (guide §6, coaching only), read at render time so
+    // switching it off withdraws the quadrant from every link at once.
+    share_reports: row.share_reports,
     // Not selected by the report query and not read by rendering: how someone
-    // proved who they were on the way in, and whether the completion screen
-    // promises a report, have no bearing on what the report says.
-    share_reports: 0,
+    // proved who they were on the way in has no bearing on what it says.
     otp_required: 0,
     link_only_identity: 0,
     tie_threshold: row.tie_threshold,

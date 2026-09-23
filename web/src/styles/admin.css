@@ -1996,6 +1996,13 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
 }
 .ins-band-head h4{ margin:0; font-size:12.5px; font-weight:640; color:var(--ink); }
 .ins-band-head span{ margin-left:auto; font-size:11.5px; color:var(--ink-3); }
+.ins-band-actions{ flex:none; align-self:center; white-space:nowrap; }
+.ins-band-head span + .ins-band-actions{ margin-left:12px; }
+.ins-band-head h4 + .ins-band-actions{ margin-left:auto; }
+.ins-sum{ display:inline-flex; flex-direction:column; align-items:flex-end; line-height:1.2; }
+.ins-sum b{ font-weight:650; color:var(--ink); font-variant-numeric:tabular-nums; }
+.ins-sum small{ font-size:10.5px; color:var(--ink-3); font-variant-numeric:tabular-nums; }
+.ins-sum.is-block b{ color:var(--accent); }
 .ins-band-body{ flex:1; min-height:0; overflow:visible; }
 /* Present mode is the one fixed frame: there the band scrolls inside itself. */
 .net-explorer.is-full .ins-ws{ grid-template-rows:minmax(300px,1fr) minmax(0, 46%); }
@@ -2672,6 +2679,7 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
 }
 .ins-person-cell:hover{ border-color:var(--accent-line); background:var(--accent-soft); }
 .ins-person-cell.is-on{ border-color:var(--accent-line); background:var(--accent-soft); }
+.ins-person-cell.is-wide{ grid-column:1 / -1; }
 .ins-person-cell small{ font-size:10.5px; font-weight:600; line-height:1.25; color:var(--ink-3); text-wrap:balance; }
 .ins-person-cell b{ font-size:12.5px; font-weight:680; line-height:1.25; color:var(--ink); font-variant-numeric:tabular-nums; text-wrap:balance; }
 .ins-person-cell b.is-warn{ color:#B54708; }
@@ -2889,3 +2897,9 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
 
 /* A name seated out from its dot keeps a hairline back to it. */
 .insights-map-lead{ stroke:var(--ink-4); stroke-width:1.4; opacity:.5; }
+
+/* ---------- raw data export (cohort Reports tab) ---------- */
+.raw-export-row{ display:flex; flex-wrap:wrap; align-items:flex-end; gap:12px; }
+.raw-export-row label, .raw-export-person{ display:flex; flex-direction:column; gap:4px; min-width:180px; }
+.raw-export-person{ min-width:240px; }
+.raw-export-row .btn.is-disabled{ opacity:.5; pointer-events:none; }

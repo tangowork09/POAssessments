@@ -682,6 +682,7 @@ function CohortPanel({ cohortId, onClose }: { cohortId: string; onClose: () => v
             showToast={showToast}
           />
         ) : null}
+        {activeTab === 'reports' ? <RawExportPanel cohort={cohort} /> : null}
       </div>
 
       <Toast message={toast} />
@@ -1671,6 +1672,107 @@ function useAnchoredMenu(open: boolean, width: number) {
   }, [open, width]);
 
   return { ref, style };
+}
+
+/**
+ * The round's raw ratings as a spreadsheet — guide §6 step 4, the long table
+ * (rater, ratee, criterion, score) everything else is computed from. For
+ * re-analysis, or for the neutral party the guide says should hold the data.
+ *
+ * Three cuts: the whole group, the ratings one department received, or the
+ * ratings one person received. A plain link rather than a fetch, the same way
+ * the diagnostic's workbook downloads, so the browser handles the file.
+ */
+function RawExportPanel({ cohort }: { cohort: CohortDetail }) {
+  const [scope, setScope] = useState<'whole' | 'department' | 'member'>('whole');
+  // Rounds come oldest first. Open on the newest one anybody has answered —
+  // a freshly started wave is empty, and the export people want is the last one.
+  const answered = [...cohort.rounds].reverse().find((r) => r.respondents > 0) ?? cohort.rounds[cohort.rounds.length - 1];
+  const [round, setRound] = useState(String(answered?.no ?? 1));
+  const departments = [...new Set(cohort.roster.filter((m) => m.active && m.func.trim()).map((m) => m.func.trim()))].sort(
+    (a, b) => a.localeCompare(b),
+  );
+  const [dept, setDept] = useState(departments[0] ?? '');
+  const [member, setMember] = useState('');
+  const people = cohort.roster
+    .filter((m) => m.active)
+    .map((m) => ({ no: m.no, name: m.name, func: m.func }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const ready = scope === 'whole' || (scope === 'department' && dept !== '') || (scope === 'member' && member !== '');
+  const q = new URLSearchParams({ round, scope });
+  if (scope === 'department') q.set('dept', dept);
+  if (scope === 'member') q.set('member', member);
+  const href = `/api/admin/cohorts/${cohort.id}/export?${q.toString()}`;
+  const respondents = cohort.rounds.find((r) => String(r.no) === round)?.respondents ?? 0;
+
+  return (
+    <section className="card mt-4">
+      <CardHead
+        title="Raw data export"
+        sub="Every submitted rating as one row — rater, ratee, criterion, score — in an Excel workbook, with the statements and a read-me alongside. For re-analysis or a neutral data holder; report only patterns from it."
+      />
+      <div className="card-body">
+        <div className="raw-export-row">
+          <label>
+            <span className="hint">Round</span>
+            <select className="control control-sm" value={round} onChange={(e) => setRound(e.target.value)}>
+              {cohort.rounds.map((r) => (
+                <option key={r.no} value={String(r.no)}>
+                  {r.name} · {r.respondents} responded
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span className="hint">What to include</span>
+            <select
+              className="control control-sm"
+              value={scope}
+              onChange={(e) => setScope(e.target.value as typeof scope)}
+            >
+              <option value="whole">Whole group</option>
+              <option value="department" disabled={departments.length === 0}>
+                One department (ratings they received)
+              </option>
+              <option value="member">One person (ratings they received)</option>
+            </select>
+          </label>
+          {scope === 'department' ? (
+            <label>
+              <span className="hint">Department</span>
+              <select className="control control-sm" value={dept} onChange={(e) => setDept(e.target.value)}>
+                {departments.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {scope === 'member' ? (
+            <div className="raw-export-person">
+              <span className="hint">Person</span>
+              <PersonPicker value={member} options={people} onChange={setMember} placeholder="Choose a person" label="Person to export" />
+            </div>
+          ) : null}
+          <a
+            className={`btn btn-primary btn-sm${ready && respondents > 0 ? '' : ' is-disabled'}`}
+            href={ready && respondents > 0 ? href : undefined}
+            aria-disabled={!ready || respondents === 0}
+            download
+          >
+            Download .xlsx
+          </a>
+        </div>
+        <p className="hint mt-2">
+          {respondents === 0
+            ? 'Nobody has submitted in this round yet, so there is nothing to export.'
+            : 'Rater names are included for full administrators; the shared cohort account receives raters as “Rater NN”. Every export is recorded in the activity log.'}
+        </p>
+      </div>
+    </section>
+  );
 }
 
 /**

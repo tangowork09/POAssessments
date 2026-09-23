@@ -34,6 +34,20 @@ describe('comparePeople', () => {
     expect(metricLeader(power)).toBe(1);
   });
 
+  it('counts hidden power apart from open power-over, and crowns nobody for it', () => {
+    const edges = [
+      edge(2, 1, { power_over: 5, covert_power: 5 }),
+      edge(3, 1, { covert_power: 4 }),
+      edge(4, 2, { power_over: 5, covert_power: 2 }),
+    ];
+    const m = comparePeople([1, 2], MEMBERS, edges, 4);
+    const covert = m.find((x) => x.key === 'covert')!;
+    expect(covert.values).toEqual([2, 0]);
+    expect(m.find((x) => x.key === 'powerIn')!.values).toEqual([1, 1]);
+    // Agenda-setting is influence, not a standing to win.
+    expect(covert.better).toBe('none');
+  });
+
   it('reads trust returned as a share of the trust given', () => {
     const edges = [
       // 1 trusts two people; one returns it.

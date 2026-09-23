@@ -40,7 +40,7 @@ export interface CollabRunForCandidate {
 import type { AssessmentIntro, AssessmentKind } from './assessments.js';
 import type { EgoBand, EgoResult } from './ego-scoring.js';
 import type { Band, ScoreResult } from './scoring.js';
-import type { SocioGroupResult, SocioMemberResult } from './socio-scoring.js';
+import type { SocioGroupResult, SocioMemberResult, SocioStanding } from './socio-scoring.js';
 
 export interface Question {
   no: number;
@@ -421,6 +421,12 @@ export interface SocioMemberReportPayload extends CohortReportBase {
   items: SocioItemInfo[];
   /** True when coverage was under the floor and the profile is withheld. */
   suppressed: boolean;
+  /**
+   * Their corner of the Power × Trust map and the kind of power behind it.
+   * Present only while the facilitator has report sharing on — the guide lets
+   * a person learn their own quadrant in a coaching setting, and nowhere else.
+   */
+  standing: SocioStanding | null;
 }
 
 export type CohortReportPayload = SocioGroupReportPayload | SocioMemberReportPayload;

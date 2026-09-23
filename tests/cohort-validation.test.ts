@@ -6,6 +6,7 @@ import {
   cohortIdentitySchema,
   cohortUpdateSchema,
   reportsToError,
+  rosterMemberPatchSchema,
   rosterMemberSchema,
   rosterSetSchema,
 } from '../src/worker/lib/validation.js';
@@ -224,6 +225,25 @@ describe('the optional member attributes', () => {
     expect(rosterMemberSchema.safeParse({ name: 'P', tenureBand: '2y' }).success).toBe(false);
     expect(rosterMemberSchema.safeParse({ name: 'P', reportsTo: 0 }).success).toBe(false);
     expect(rosterMemberSchema.safeParse({ name: 'P', reportsTo: 2.5 }).success).toBe(false);
+  });
+});
+
+describe('rosterMemberPatchSchema', () => {
+  // zod 4 keeps .default() under .partial(): the old patch parse turned an
+  // omitted func/email into '', and COALESCE wrote the blank over the stored one.
+  it('leaves every field it was not given as absent, not blank', () => {
+    const parsed = rosterMemberPatchSchema.parse({ tenureBand: '7y+' });
+    expect(parsed).toEqual({ tenureBand: '7y+' });
+    expect('func' in parsed).toBe(false);
+    expect('email' in parsed).toBe(false);
+  });
+
+  it('still lets an edit clear a function or email on purpose', () => {
+    expect(rosterMemberPatchSchema.parse({ func: '', email: '' })).toEqual({ func: '', email: '' });
+  });
+
+  it('refuses a blank name', () => {
+    expect(rosterMemberPatchSchema.safeParse({ name: '  ' }).success).toBe(false);
   });
 });
 

@@ -24,7 +24,15 @@ import type {
   SocioGroupReportPayload,
   SocioMemberReportPayload,
 } from '../../shared/types.js';
-import { influenceMix, powerKindReading, signatures } from '../../shared/socio-scoring.js';
+import {
+  SOCIO_QUADRANT_FOR_MEMBER,
+  influenceMix,
+  powerKindForMember,
+  powerKindReading,
+  signatures,
+  type SocioQuadrant,
+  type SocioStanding,
+} from '../../shared/socio-scoring.js';
 import { itemVisibility } from '../../shared/socio.js';
 import type { SignatureMember, SocioBlockNetwork } from '../../shared/socio-scoring.js';
 import { SOCIO_MAX_ANSWER, SOCIO_SCALE_LABELS } from '../../shared/socio.js';
@@ -877,13 +885,13 @@ function drawSignatures(ctx: Ctx, report: SocioGroupReportPayload): void {
   const sections: { title: string; note: string; color: string; rows: SignatureMember[] }[] = [
     {
       title: 'Depended on, not trusted',
-      note: 'Control ahead of trust, and colleagues asking for more than they get.',
+      note: 'Top third on power-over, bottom half on trust, and colleagues asking for more than they get.',
       color: T.warn,
       rows: found.dominating,
     },
     {
       title: 'Quietly unreliable',
-      note: 'Low on delivery and on being straightforward to work with. A trust problem, not a power one.',
+      note: 'Low on time, on keeping their word and on ease of working. A trust problem, not a power one.',
       color: T.warn,
       rows: found.unreliable,
     },
@@ -1265,6 +1273,7 @@ function drawMemberChapters(ctx: Ctx, report: SocioMemberReportPayload): void {
     drawSuppressed(ctx, report);
     return;
   }
+  if (report.standing) drawMemberStanding(ctx, report.standing);
   drawMemberProfile(ctx, report);
   drawMemberItems(ctx, report);
   drawMemberGiven(ctx, report);
@@ -1279,6 +1288,68 @@ function drawSuppressed(ctx: Ctx, report: SocioMemberReportPayload): void {
     `${report.member.name} was rated by ${report.member.coverage} of ${report.member.possibleRaters} colleagues, below the ${report.groupContext.minRaters}-rater floor this group set. Reporting an average of one or two responses in a named group of this size would identify who gave them, which is the one thing every participant was promised would not happen. Nothing has gone wrong, and nothing is being kept from you: the numbers simply do not exist in a reportable form.`,
   );
   ctx.y += 12;
+}
+
+/**
+ * Their corner of the Power × Trust map. Only reached when the payload carries
+ * a standing, which it does only while the facilitator has sharing on.
+ */
+function drawMemberStanding(ctx: Ctx, standing: SocioStanding): void {
+  const { doc, accent } = ctx;
+  const mine = SOCIO_QUADRANT_FOR_MEMBER[standing.quadrant];
+  const kind = powerKindForMember(standing.powerKind);
+
+  ensure(ctx, 240);
+  sectionHead(ctx, 'Where you sit on the Power × Trust map', 'Split at the middle of this group — relative to these colleagues, not a fixed standard');
+
+  // The map, trust up and power right, as the guide draws it.
+  const grid: SocioQuadrant[][] = [
+    ['underused', 'anchor'],
+    ['peripheral', 'watch'],
+  ];
+  const axis = 14;
+  const cellW = 92;
+  const cellH = 54;
+  const gapPx = 4;
+  const gx = M.left + axis;
+  const gy = ctx.y;
+  grid.forEach((row, r) =>
+    row.forEach((q, c) => {
+      const x = gx + c * (cellW + gapPx);
+      const y = gy + r * (cellH + gapPx);
+      const on = q === standing.quadrant;
+      doc.roundRect(x, y, cellW, cellH, 6, on ? accent : T.surface2);
+      const info = SOCIO_QUADRANT_FOR_MEMBER[q];
+      doc.paragraph(info.name, x + 8, y + 14, cellW - 14, {
+        font: 'Helvetica-Bold',
+        size: 7.8,
+        color: on ? T.paper : T.ink3,
+        leading: 9.6,
+      });
+    }),
+  );
+  const gridH = 2 * cellH + gapPx;
+  const gridW = 2 * cellW + gapPx;
+  doc.textCentre('More influential →', gx + gridW / 2, gy + gridH + 12, { size: 6.8, color: T.ink4 });
+  doc.text('More', M.left, gy + gridH / 2 - 4, { size: 6.8, color: T.ink4 });
+  doc.text('trusted', M.left - 4, gy + gridH / 2 + 5, { size: 6.8, color: T.ink4 });
+
+  // What it means, beside the map.
+  const tx = gx + gridW + 22;
+  const tw = RIGHT - tx;
+  let ty = gy + 10;
+  doc.text(mine.name, tx, ty, { font: 'Helvetica-Bold', size: 13, color: T.ink });
+  ty += 14;
+  doc.text(mine.gloss, tx, ty, { size: 8.4, color: T.ink4 });
+  ty += 16;
+  doc.paragraph(mine.reading, tx, ty, tw, { size: 8.6, color: T.ink2, leading: 13 });
+  ty += doc.paragraphHeight(mine.reading, tw, { size: 8.6, leading: 13 }) + 8;
+  doc.text(`Kind of power: ${kind.label}`, tx, ty, { font: 'Helvetica-Bold', size: 8.6, color: T.ink });
+  ty += 13;
+  doc.paragraph(kind.reading, tx, ty, tw, { size: 8.6, color: T.ink2, leading: 13 });
+  ty += doc.paragraphHeight(kind.reading, tw, { size: 8.6, leading: 13 });
+
+  ctx.y = Math.max(gy + gridH + 24, ty) + 18;
 }
 
 function drawMemberProfile(ctx: Ctx, report: SocioMemberReportPayload): void {

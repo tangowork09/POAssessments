@@ -192,6 +192,7 @@ export function Workspace({
   band,
   bandTitle,
   bandNote,
+  bandActions,
   bandTall,
   centreAside,
   legend,
@@ -210,6 +211,8 @@ export function Workspace({
   band: React.ReactNode;
   bandTitle: string;
   bandNote?: string;
+  /** Controls at the right of the band's header, such as a view switch. */
+  bandActions?: React.ReactNode;
   /**
    * For a band whose content is genuinely tall — the adjacency grid is the
    * only one — trading some of the graph's height for it. Scrolling a matrix
@@ -318,6 +321,7 @@ export function Workspace({
         <header className="ins-band-head">
           <h4>{bandTitle}</h4>
           {bandNote ? <span>{bandNote}</span> : null}
+          {bandActions ? <div className="ins-band-actions">{bandActions}</div> : null}
         </header>
         <div className="ins-band-body">{band}</div>
       </section>
@@ -1291,10 +1295,12 @@ export interface PersonCell {
   tone?: 'ok' | 'warn';
   /** 0..1 — a hairline bar under the value, for the counted measures. */
   share?: number | null;
+  /** Spans the whole row — for a reading that needs a sentence, not a number. */
+  wide?: boolean;
 }
 
 /**
- * One person, nine answers. Focus is emphasis on every tab; this card is the
+ * One person, one answer per question. Focus is emphasis on every tab; this card is the
  * one place it is also a reading. Every cell is the standing that tab would
  * give this person, and clicking it opens that tab with the focus kept.
  */
@@ -1333,7 +1339,7 @@ export function PersonCard({
           <button
             key={c.tab + c.label}
             type="button"
-            className={`ins-person-cell${activeTab === c.tab ? ' is-on' : ''}`}
+            className={`ins-person-cell${c.wide ? ' is-wide' : ''}${activeTab === c.tab ? ' is-on' : ''}`}
             onClick={() => onPick(c.tab)}
             title={`Open ${c.label.toLowerCase()}`}
           >

@@ -160,7 +160,8 @@ import {
 } from './model.js';
 import { covertPowerVerdict } from '../../../../src/shared/socio-insights.js';
 import { influenceMix, signatures } from '../../../../src/shared/socio-scoring.js';
-import type { PowerKind } from '../../../../src/shared/socio-scoring.js';
+import type { PowerKind, SocioMemberResult } from '../../../../src/shared/socio-scoring.js';
+import { SOCIO_BLOCKS, SOCIO_ITEMS } from '../../../../src/shared/socio.js';
 import type { DivergenceShare, PaneEdge } from './model.js';
 import {
   downloadInsightHtml,
@@ -1030,6 +1031,40 @@ export function InsightsView({
     [cut, edges, memberNos],
   );
   /**
+   * Who holds the hidden half, by name. The concentration meter says whether
+   * agenda-setting sits in few hands; this says whose. Same table the meter's
+   * neighbours read, so a holder's count and rank agree with the person card.
+   */
+  const covertShares = useMemo(
+    () => concentrationTable(memberNos, edges, COVERT_LENS, cut),
+    [cut, edges, memberNos],
+  );
+  /**
+   * Ranked by rate — ties over the colleagues who rated them — not raw count,
+   * the same normalising the concentration meter uses. A raw count caps
+   * anyone in a small or siloed function: rated by eight, they can never
+   * out-rank somebody rated by fifty, however unanimous the eight are.
+   */
+  const covertHolders = useMemo(() => {
+    const rate = (no: number, count: number) => {
+      const cov = coverageOf.get(no) ?? 0;
+      return cov > 0 ? count / cov : 0;
+    };
+    return covertShares.rows
+      .filter((r) => r.count > 0)
+      .map((r) => ({ no: r.no, count: r.count, rate: rate(r.no, r.count) }))
+      .sort((a, b) => b.rate - a.rate || b.count - a.count || a.no - b.no);
+  }, [coverageOf, covertShares]);
+  /** Who together hold half of every hidden-power tie, by count. */
+  const covertHalf = useMemo(
+    () => new Set(covertShares.rows.slice(0, covertShares.halfCount).map((r) => r.no)),
+    [covertShares],
+  );
+  const covertRank = useMemo(
+    () => new Map(covertHolders.map((h, i) => [h.no, i + 1])),
+    [covertHolders],
+  );
+  /**
    * The guide's §5.4 sentence, said the same way on screen as in the report:
    * concentration in the informal half of power, read against the formal half
    * rather than against a fixed line, because someone has to set an agenda and
@@ -1072,6 +1107,17 @@ export function InsightsView({
     [coverageOf, cut, edges, memberNos],
   );
   const shareOf = useMemo(() => new Map(shareRows.map((r) => [r.no, r])), [shareRows]);
+  /**
+   * The same table in raw numbers: every rating each person received, added
+   * up per statement and per block, with the average beside each sum. From the
+   * scored group, so it ignores the threshold slider — a sum has no cut.
+   */
+  const [standingsView, setStandingsView] = useState<'shares' | 'scores'>('shares');
+  const scoreRows = useMemo(
+    () =>
+      (net.group?.members ?? []).filter((m) => memberNos.includes(m.memberNo)),
+    [memberNos, net.group],
+  );
   const gapOf = useMemo(() => new Map(shareRows.map((r) => [r.no, r.gap])), [shareRows]);
   const divergentRows = useMemo(
     () =>
@@ -1520,6 +1566,8 @@ export function InsightsView({
     const share = spreadShares.find((r) => r.trust.no === no)?.trust.share;
     const facet = facetRows.find((r) => r.no === no);
     const standing = shareOf.get(no);
+    const hiddenIn = covertShares.rows.find((r) => r.no === no)?.count ?? 0;
+    const hiddenRank = covertRank.get(no);
     // The guide's own archetype names, so a card, a panel and the client's
     // deck all say the same word for the same quadrant.
     const quadShort = QUADRANT_NAME;
@@ -1544,6 +1592,16 @@ export function InsightsView({
             : undefined,
       },
       { tab: 'facets', label: 'Reliability − openness', value: facet ? (facet.gap > 0 ? `+${facet.gap}` : String(facet.gap)) : '—' },
+      {
+        tab: 'spread',
+        label: 'Hidden power in',
+        value: hiddenRank === undefined
+          ? `${hiddenIn} · not a holder`
+          : `${hiddenIn} · #${hiddenRank} of ${covertHolders.length} holders`,
+        share: covertHolders.length > 0 ? (covertHolders.find((h) => h.no === no)?.rate ?? 0) / covertHolders[0]!.rate : null,
+        tone: covertHalf.has(no) ? 'warn' : undefined,
+        wide: true,
+      },
     ];
     return (
       <PersonCard
@@ -1556,7 +1614,7 @@ export function InsightsView({
         onClear={() => setFocusNo(null)}
       />
     );
-  }, [allBridges, anchorRows, clusters, colMax, coverageOf, divergenceRows, facetRows, fillOfFunc, focusNo, funcOf, nameOf, oneWayAll, periphery.members, shareOf, spreadShares, tab, tenureOf]);
+  }, [allBridges, anchorRows, clusters, colMax, covertHalf, covertHolders, covertRank, covertShares, coverageOf, divergenceRows, facetRows, fillOfFunc, focusNo, funcOf, nameOf, oneWayAll, periphery.members, shareOf, spreadShares, tab, tenureOf]);
 
   return (
     <div
@@ -2426,8 +2484,8 @@ export function InsightsView({
                   <Panel title="Where collaboration is not happening" sub="Three patterns of absence">
                     {(
                       [
-                        ['dominating', 'Depended on, not trusted', 'Control ahead of trust, and colleagues asking for more.'],
-                        ['unreliable', 'Quietly unreliable', 'Low on delivery and on being straightforward. A trust problem, not a power one.'],
+                        ['dominating', 'Depended on, not trusted', 'Top third on power-over, bottom half on trust, and colleagues asking for more.'],
+                        ['unreliable', 'Quietly unreliable', 'Low on time, on keeping their word and on ease. A trust problem, not a power one.'],
                         ['disconnected', 'Outside the network', 'Too few had a basis to judge. Connect, do not correct.'],
                       ] as const
                     ).map(([kind, title, note]) =>
@@ -3034,6 +3092,31 @@ export function InsightsView({
                     {l.key === COVERT_LENS ? <p className="ins-panel-foot">{covertVerdict}</p> : null}
                   </Panel>
                 ))}
+                <Panel
+                  title="Who holds hidden power"
+                  sub="Put over the line on shaping issues before they reach the room"
+                  accent={COVERT_ACCENT}
+                >
+                  <RankList
+                    coverageOf={coverageOf}
+                    colorOf={fillOfFunc}
+                    entries={covertHolders.slice(0, 8)}
+                    bold={covertHalf}
+                    fill={COVERT_ACCENT}
+                    activeNo={activeNo}
+                    nameOf={nameOf}
+                    funcOf={funcOf}
+                    unit="hidden-power ties received"
+                    personProps={personProps}
+                  />
+                  <p className="ins-panel-foot">Ranked by share of the colleagues who rated them, so a small team can rank as high as a large one.</p>
+                  {covertShares.halfCount > 0 ? (
+                    <p className="ins-panel-foot">
+                      Names in bold hold half of all hidden-power ties
+                      {covertHolders.length > 8 ? ` · ${covertHolders.length} holders in all` : ''}.
+                    </p>
+                  ) : null}
+                </Panel>
                 <Panel title="How few hold half">
                   <p className="ins-panel-body">
                     {halfSentence('trust', trustShares, nodes.length)}{' '}
@@ -3138,7 +3221,32 @@ export function InsightsView({
             }
             finding={findings[tab] ?? null}
             bandTitle="Both standings, per person"
-            bandNote="Share of the colleagues who rated them"
+            bandNote={
+              standingsView === 'shares'
+                ? 'Share of the colleagues who rated them'
+                : 'Every rating received, added up · average beneath'
+            }
+            bandActions={
+              <div className="nx-seg nx-seg-sm" role="tablist" aria-label="Table view">
+                {(
+                  [
+                    ['shares', 'Shares'],
+                    ['scores', 'Sums & averages'],
+                  ] as const
+                ).map(([k, label]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    role="tab"
+                    aria-selected={standingsView === k}
+                    className={`nx-seg-btn${standingsView === k ? ' is-on' : ''}`}
+                    onClick={() => setStandingsView(k)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            }
             centre={
               <InsightGraph
                 nodes={nodes}
@@ -3238,6 +3346,16 @@ export function InsightsView({
               </>
             }
             band={
+              standingsView === 'scores' ? (
+                <ScoresTable
+                  rows={scoreRows}
+                  activeNo={activeNo}
+                  personProps={personProps}
+                  showAll={capturing}
+                  nameOf={nameOf}
+                  funcOf={funcOf}
+                />
+              ) : (
               <DetailTable<DivergenceShare>
                 rows={shareRows}
                 rowKey={(r) => r.no}
@@ -3298,6 +3416,7 @@ export function InsightsView({
                   },
                 ]}
               />
+              )
             }
           />
         ) : null}
@@ -3548,6 +3667,121 @@ function shareMeta(
   return raters > 0 ? `${f} · ${Math.round((count / raters) * 100)}% of ${raters} raters` : f;
 }
 
+/**
+ * Guide §5.1 in its own terms: the ratings each person received, added up —
+ * per block first (the scores the guide names), then statement by statement —
+ * with the average under every sum. Averages equal the sums over the ratings
+ * behind them, which is also what the map's block means are.
+ */
+function ScoresTable({
+  rows,
+  activeNo,
+  personProps,
+  showAll,
+  nameOf,
+  funcOf,
+}: {
+  rows: readonly SocioMemberResult[];
+  activeNo: number | null;
+  personProps: PersonProps;
+  showAll: boolean;
+  nameOf: (no: number) => string;
+  funcOf: (no: number) => string;
+}) {
+  const sumCell = (sum: number, count: number, block = false) =>
+    count === 0 ? (
+      <span className="ins-dash">—</span>
+    ) : (
+      <span className={`ins-sum${block ? ' is-block' : ''}`}>
+        <b>{sum}</b>
+        <small>{(sum / count).toFixed(2)}</small>
+      </span>
+    );
+  const blockCol = (key: string, head: string, note: string): Column<SocioMemberResult> => ({
+    key: `b-${key}`,
+    head,
+    note,
+    right: true,
+    width: 96,
+    sort: (a, b) =>
+      (b.blocks.find((x) => x.blockKey === key)?.ratingSum ?? -1) -
+      (a.blocks.find((x) => x.blockKey === key)?.ratingSum ?? -1),
+    cell: (r) => {
+      const b = r.blocks.find((x) => x.blockKey === key);
+      return b ? sumCell(b.ratingSum ?? 0, b.ratingCount ?? 0, true) : <span className="ins-dash">—</span>;
+    },
+  });
+  const itemCol = (no: number): Column<SocioMemberResult> => {
+    const info = SOCIO_ITEMS.find((i) => i.no === no)!;
+    return {
+      key: `i-${no}`,
+      head: `${no}. ${info.short}`,
+      note: SOCIO_BLOCKS.find((b) => b.key === info.blockKey)?.short ?? 'Support gap',
+      right: true,
+      width: 104,
+      sort: (a, b) =>
+        (b.items.find((x) => x.itemNo === no)?.sum ?? -1) - (a.items.find((x) => x.itemNo === no)?.sum ?? -1),
+      cell: (r) => {
+        const it = r.items.find((x) => x.itemNo === no);
+        return it ? sumCell(it.sum ?? 0, it.n) : <span className="ins-dash">—</span>;
+      },
+    };
+  };
+  return (
+    <DetailTable<SocioMemberResult>
+      rows={rows}
+      rowKey={(r) => r.memberNo}
+      personNo={(r) => r.memberNo}
+      activeNo={activeNo}
+      personProps={personProps}
+      showAll={showAll}
+      wide
+      empty="Scores appear once enough colleagues have responded."
+      tip={(r) => ({
+        title: nameOf(r.memberNo),
+        sub: funcOf(r.memberNo),
+        rows: [
+          ['Rated by', String(r.coverage)],
+          ...r.blocks.map(
+            (b) =>
+              [b.short, b.ratingCount ? `${b.ratingSum} over ${b.ratingCount} ratings · avg ${(b.ratingSum / b.ratingCount).toFixed(2)}` : '—'] as [string, string],
+          ),
+        ],
+      })}
+      columns={[
+        {
+          key: 'name',
+          head: 'Person',
+          width: 170,
+          sort: (a, b) => nameOf(a.memberNo).localeCompare(nameOf(b.memberNo)),
+          cell: (r) => nameOf(r.memberNo),
+        },
+        {
+          key: 'func',
+          head: 'Function',
+          width: 120,
+          sort: (a, b) => funcOf(a.memberNo).localeCompare(funcOf(b.memberNo)),
+          cell: (r) => funcOf(r.memberNo),
+        },
+        {
+          key: 'cov',
+          head: 'Rated by',
+          note: 'colleagues',
+          right: true,
+          width: 84,
+          sort: (a, b) => b.coverage - a.coverage,
+          cell: (r) => r.coverage,
+        },
+        blockCol('power_to', 'Power to/with', 'items 1–4'),
+        blockCol('power_over', 'Power over', 'items 5–7'),
+        blockCol('trust', 'Trust', 'items 8–10'),
+        blockCol('ease', 'Ease', 'item 11'),
+        ...SOCIO_ITEMS.map((i) => itemCol(i.no)),
+      ]}
+    />
+  );
+}
+
 function RankList({
   entries,
   bold,
@@ -3573,7 +3807,8 @@ function RankList({
   coverageOf?: ReadonlyMap<number, number>;
 }) {
   if (entries.length === 0) return <p className="hint">Nobody has reached the tie line here yet.</p>;
-  const max = entries[0]!.count;
+  // Not entries[0]: a list ranked by rate can open on a smaller count.
+  const max = Math.max(...entries.map((e) => e.count));
   return (
     <>
       {entries.map((e, i) => (

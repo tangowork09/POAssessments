@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { groupPayload, memberPayload, memberScores, confidentialityNote } from '../src/worker/lib/cohort.js';
+import { toCohortPayload } from '../src/worker/lib/cohort-report-render.js';
 import { renderCohortReportPdf } from '../src/worker/pdf/socio-report.js';
 import { cellNo } from '../src/shared/socio.js';
 import { SOCIO_ITEMS, SOCIO_SUPPORT_GAP_ITEM } from '../src/shared/socio.js';
 import {
   memberResultFor,
+  memberStanding,
   scoreSocioCohort,
   type SocioGroupResult,
   type SocioMember,
@@ -315,5 +317,92 @@ describe('footer', () => {
       expect(line.endsWith('…')).toBe(true);
       expect(line).not.toContain('September 2026');
     }
+  });
+});
+
+describe('own quadrant in the member report — guide §6, coaching only', () => {
+  function memberWith(memberNo: number, shareReports: number) {
+    const p = memberPayload({
+      reportToken: 'tok_member',
+      cohort: { ...COHORT, share_reports: shareReports } as CohortRow,
+      round: { no: 1, label: '' },
+      assessmentName: 'Collaboration Sociometry',
+      generatedAt: '2026-08-24 10:00:00',
+      branding: BRANDING,
+      scores: memberScores(GROUP, memberResultFor(GROUP, memberNo)!),
+    });
+    if (p.kind !== 'socio_member') throw new Error('unreachable');
+    return p;
+  }
+
+  it('is always worked out and stored with the scores', () => {
+    const scores = memberScores(GROUP, memberResultFor(GROUP, 3)!);
+    expect(scores.standing?.quadrant).toBe('watch');
+  });
+
+  it('is withheld from the payload while sharing is off', () => {
+    const p = memberWith(3, 0);
+    expect(p.standing).toBeNull();
+    expect(drawnText(renderCohortReportPdf(p))).not.toContain('Power × Trust map');
+  });
+
+  it('names the corner and the kind of power once sharing is on', () => {
+    const risk = memberWith(3, 1);
+    expect(risk.standing?.quadrant).toBe('watch');
+    expect(risk.standing?.powerKind).toBe('bottleneck');
+    const text = drawnText(renderCohortReportPdf(risk));
+    expect(text).toContain('Risk Zone');
+    expect(text).toContain('Control, more than enablement');
+    expect(memberWith(1, 1).standing?.quadrant).toBe('anchor');
+  });
+
+  it('calls a trusted person with no power ties a Trusted Advisor, even when the power median is zero', () => {
+    // In this fixture only Leaders 1 and 3 carry power ties, so the power
+    // median is 0. Leader 5 is trusted by all and deferred to by nobody.
+    expect(memberStanding(GROUP, 5)?.medians.power).toBe(0);
+    expect(memberWith(5, 1).standing?.quadrant).toBe('underused');
+  });
+
+  it('never gives a suppressed member a corner, sharing or not', () => {
+    expect(memberWith(12, 1).standing).toBeNull();
+    expect(memberStanding(GROUP, 12)).toBeNull();
+  });
+
+  it('agrees with the admin map on every member', () => {
+    // Same inputs the admin map reads: trust and total-power ties over coverage,
+    // split at the roster medians, ties on the median counted high.
+    const rate = (no: number, key: string) => {
+      const m = memberResultFor(GROUP, no)!;
+      return m.coverage > 0 ? m.blocks.find((b) => b.blockKey === key)!.ties / m.coverage : 0;
+    };
+    for (const m of GROUP.members) {
+      const s = memberStanding(GROUP, m.memberNo);
+      if (!s) continue;
+      expect(s.trustRate).toBeCloseTo(rate(m.memberNo, 'trust'), 2);
+      expect(s.powerRate).toBeCloseTo(rate(m.memberNo, 'power_to') + rate(m.memberNo, 'power_over'), 2);
+    }
+  });
+});
+
+describe('own quadrant through the stored-report path', () => {
+  // The live report is rendered from a cohort_reports row, not from
+  // memberPayload directly. That row's cohort once hard-coded share_reports to
+  // 0, so the quadrant could never appear however the switch was set.
+  const scores = memberScores(GROUP, memberResultFor(GROUP, 3)!);
+  const row = (share: number) => ({
+    report_id: 'crpt_x', scope: 'member' as const, member_id: 'm3', member_name: 'Leader 03',
+    scores_json: JSON.stringify(scores), suppressed: 0, created_at: '2026-08-24 10:00:00',
+    round_no: 1, round_label: '', cohort_id: COHORT.id, cohort_name: COHORT.name,
+    organisation: COHORT.organisation, status: COHORT.status, min_raters: 3, tie_threshold: 4,
+    min_rated_targets: 1, share_reports: share, cohort_created_at: COHORT.created_at,
+    closed_at: COHORT.closed_at, assessment_id: COHORT.assessment_id, assessment_name: 'Collaboration Sociometry',
+  });
+
+  it('shows the corner when the cohort shares reports, and withholds it when not', () => {
+    const on = toCohortPayload(row(1), 'tok', BRANDING);
+    const off = toCohortPayload(row(0), 'tok', BRANDING);
+    if (on.kind !== 'socio_member' || off.kind !== 'socio_member') throw new Error('unreachable');
+    expect(on.standing?.quadrant).toBe('watch');
+    expect(off.standing).toBeNull();
   });
 });

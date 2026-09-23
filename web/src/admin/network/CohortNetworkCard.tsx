@@ -115,6 +115,9 @@ const LENSES: readonly { key: string; name: string; color: string; hint?: string
   ...SOCIO_BLOCKS.map((b) => ({ key: b.key, name: b.short, color: b.color, hint: b.gloss })),
   { key: 'reliability', name: 'Trust — reliability', color: '#0F7A63', hint: 'Delivers as promised' },
   { key: 'openness', name: 'Trust — openness', color: '#3FA08A', hint: 'Safe to admit mistakes' },
+  // The covert half of power-over (guide §5.4): agenda-setting and pre-wiring,
+  // which no structure chart shows. Read on the map, it names the holders.
+  { key: 'covert_power', name: 'Hidden power', color: '#7A4DB8', hint: 'Shapes issues before they reach the room' },
 ];
 
 /**
@@ -418,6 +421,7 @@ export function CohortNetworkCard({
    */
   const relDensity = useMemo(() => lensDensity(net?.edges ?? [], 'reliability', cut), [cut, net]);
   const openDensity = useMemo(() => lensDensity(net?.edges ?? [], 'openness', cut), [cut, net]);
+  const covertDensity = useMemo(() => lensDensity(net?.edges ?? [], 'covert_power', cut), [cut, net]);
 
   /** Most trusted and most influential — read under their own lenses, always. */
   const anchorLists = useMemo(
@@ -1446,7 +1450,13 @@ export function CohortNetworkCard({
                   lens={lens}
                   lensNet={lensNet ?? null}
                   lensFallbackDensity={
-                    lens === 'reliability' ? relDensity : lens === 'openness' ? openDensity : null
+                    lens === 'reliability'
+                      ? relDensity
+                      : lens === 'openness'
+                        ? openDensity
+                        : lens === 'covert_power'
+                          ? covertDensity
+                          : null
                   }
                   roleCounts={roleCounts}
                   groupColor={groupColor}

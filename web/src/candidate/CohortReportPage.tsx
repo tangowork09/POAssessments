@@ -13,6 +13,12 @@ import { ApiError, api } from '../lib/api.js';
 import { Centered, DEFAULT_BRANDING, LogoSlot, Shell, useAccent } from './Shell.js';
 import { ReportSkeleton } from './Skeleton.js';
 import { SOCIO_MAX_ANSWER } from '../../../src/shared/socio.js';
+import {
+  SOCIO_QUADRANT_FOR_MEMBER,
+  powerKindForMember,
+  type SocioQuadrant,
+  type SocioStanding,
+} from '../../../src/shared/socio-scoring.js';
 import type {
   CohortReportPayload,
   SocioGroupReportPayload,
@@ -311,6 +317,7 @@ function MemberBody({ report }: { report: SocioMemberReportPayload }) {
 
   return (
     <>
+      {report.standing ? <StandingCard standing={report.standing} /> : null}
       <section className="co-card">
         <h2>How colleagues describe working with you</h2>
         <p className="hint">
@@ -405,6 +412,51 @@ function MemberBody({ report }: { report: SocioMemberReportPayload }) {
 }
 
 // ------------------------------------------------------------------ pieces
+
+/** The map's four corners, laid out as the guide draws them: trust up, power right. */
+const QUADRANT_GRID: SocioQuadrant[] = ['underused', 'anchor', 'peripheral', 'watch'];
+
+/**
+ * Where the person sits on the Power × Trust map, for a coaching conversation.
+ * Only ever rendered when the facilitator has sharing on — the payload carries
+ * no standing otherwise.
+ */
+function StandingCard({ standing }: { standing: SocioStanding }) {
+  const mine = SOCIO_QUADRANT_FOR_MEMBER[standing.quadrant];
+  const kind = powerKindForMember(standing.powerKind);
+  return (
+    <section className="co-card">
+      <h2>Where you sit on the Power × Trust map</h2>
+      <p className="hint">
+        Trust counts the colleagues who rely on you; power counts those who seek you out or follow your lead.
+        Each is split at the middle of this group, so the corner describes you relative to these colleagues —
+        not against any fixed standard.
+      </p>
+      <div className="co-quad-wrap">
+        <div className="co-quad" role="img" aria-label={`Your corner: ${mine.name}`}>
+          <span className="co-quad-axis co-quad-y">More trusted →</span>
+          {QUADRANT_GRID.map((q) => (
+            <div key={q} className={`co-quad-cell${q === standing.quadrant ? ' is-mine' : ''}`}>
+              <b>{SOCIO_QUADRANT_FOR_MEMBER[q].name}</b>
+              <small>{SOCIO_QUADRANT_FOR_MEMBER[q].gloss}</small>
+            </div>
+          ))}
+          <span className="co-quad-axis co-quad-x">More influential →</span>
+        </div>
+        <div className="co-quad-text">
+          <p className="co-quad-name">
+            {mine.name}
+            <span>{mine.gloss}</span>
+          </p>
+          <p>{mine.reading}</p>
+          <p className="co-quad-kind">
+            <b>Kind of power: {kind.label}.</b> {kind.reading}
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function Stat({ label, value, note }: { label: string; value: string; note: string }) {
   return (

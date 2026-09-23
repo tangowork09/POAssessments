@@ -695,6 +695,16 @@ describe('quadrantOf', () => {
     expect(quadrantOf(point(6, 2, 1), m)).toBe('underused');
     expect(quadrantOf(point(7, 1, 2), m)).toBe('watch');
   });
+
+  it('never puts a zero on the high side, even when the median is zero', () => {
+    // Most of the group has no power ties, so the power median is 0. A person
+    // trusted by many with no power ties is a Trusted Advisor, not an Anchor.
+    const zero = { trust: 1, power: 0 };
+    expect(quadrantOf(point(8, 3, 0), zero)).toBe('underused');
+    expect(quadrantOf(point(9, 0, 0), zero)).toBe('peripheral');
+    expect(quadrantOf(point(10, 3, 1), zero)).toBe('anchor');
+    expect(quadrantOf(point(11, 0, 1), { trust: 0, power: 0 })).toBe('watch');
+  });
 });
 
 describe('watchLists', () => {

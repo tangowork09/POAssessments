@@ -431,6 +431,23 @@
 .co-card h2{ font-size:16px; font-weight:650; letter-spacing:-.012em; }
 .co-card h2 + .hint{ margin-top:8px; }
 .co-card p{ margin-top:12px; font-size:14px; line-height:1.62; color:var(--ink-2); }
+
+/* Power × Trust corner, member report (only when sharing is on). */
+.co-quad-wrap{ display:grid; grid-template-columns:minmax(0,260px) minmax(0,1fr); gap:20px; margin-top:16px; align-items:start; }
+@media (max-width:640px){ .co-quad-wrap{ grid-template-columns:minmax(0,1fr); } }
+.co-quad{ position:relative; display:grid; grid-template-columns:1fr 1fr; gap:4px; padding:0 0 20px 20px; }
+.co-quad-cell{ display:flex; flex-direction:column; gap:2px; min-height:72px; padding:8px 9px; border-radius:8px;
+  background:var(--surface-2, #F4F6F9); border:1px solid var(--line, #E3E7ED); color:var(--ink-3, #6B7280); }
+.co-quad-cell b{ font-size:12px; font-weight:650; line-height:1.25; }
+.co-quad-cell small{ font-size:11px; line-height:1.3; }
+.co-quad-cell.is-mine{ background:var(--accent, #2F6FB2); border-color:var(--accent, #2F6FB2); color:#fff; }
+.co-quad-axis{ position:absolute; font-size:10.5px; font-weight:600; color:var(--ink-3, #6B7280); letter-spacing:.02em; }
+.co-quad-x{ left:20px; right:0; bottom:0; text-align:center; }
+.co-quad-y{ left:0; top:0; bottom:20px; writing-mode:vertical-rl; transform:rotate(180deg); text-align:center; }
+.co-quad-text p:first-child{ margin-top:0; }
+.co-quad-name{ font-size:17px !important; font-weight:680; color:var(--ink, #111827) !important; }
+.co-quad-name span{ display:block; font-size:13px; font-weight:500; color:var(--ink-3, #6B7280); margin-top:2px; }
+.co-quad-kind b{ color:var(--ink, #111827); }
 .co-summary{ font-size:15px !important; line-height:1.68 !important; }
 .co-fine{ background:var(--surface-2); }
 .co-fine p{ font-size:13px; color:var(--ink-3); }

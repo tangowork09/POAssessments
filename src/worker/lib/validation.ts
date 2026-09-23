@@ -453,6 +453,22 @@ export const rosterMemberSchema = z.object({
 });
 
 /**
+ * An edit to one roster member: every field optional and none defaulted.
+ *
+ * Not `rosterMemberSchema.partial()`. zod 4 keeps a field's `.default()` under
+ * `.partial()`, so an omitted `func` or `email` came through as '' — a value,
+ * not an omission — and the handler's COALESCE wrote the blank over the stored
+ * one. A PATCH that set only a tenure band wiped the person's function and
+ * email, and with the email went their way into the exercise.
+ */
+export const rosterMemberPatchSchema = z.object({
+  name: trimmed(120).min(1, 'Name is required').optional(),
+  func: trimmed(120).optional(),
+  email: z.union([emailSchema, z.literal('')]).optional(),
+  ...memberAttributeFields,
+});
+
+/**
  * A roster workbook, uploaded rather than pasted. Base64 because the Worker
  * reads the bytes itself: the same three columns as the paste box, so a client
  * can hand over the spreadsheet the facilitator already has instead of

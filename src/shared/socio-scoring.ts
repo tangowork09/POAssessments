@@ -71,6 +71,8 @@ export interface SocioItemStat extends SocioStat {
   itemNo: number;
   short: string;
   blockKey: string;
+  /** Every rating received on this statement, added up (guide §5.1's raw score). */
+  sum: number;
 }
 
 export interface SocioBlockStat extends SocioStat {
@@ -86,6 +88,14 @@ export interface SocioBlockStat extends SocioStat {
   ties: number;
   /** ties as a share of `n`, to 2dp. null when n = 0. */
   tieRate: number | null;
+  /**
+   * Every rating received on the block's statements, added up, and how many
+   * ratings that is. The guide's §5.1 scores are these sums. Because a touched
+   * colleague must answer every statement, ratingSum / ratingCount equals
+   * `mean` whenever the matrix rule held.
+   */
+  ratingSum: number;
+  ratingCount: number;
 }
 
 export interface SocioMemberResult {
@@ -271,6 +281,124 @@ export function powerKindReading(kind: PowerKind): { label: string; fix: string 
   }
 }
 
+// ------------------------------------------------ where one person stands
+
+/** The guide's four archetypes (§5.2), keyed as the admin map keys them. */
+export type SocioQuadrant = 'anchor' | 'underused' | 'watch' | 'peripheral';
+
+export interface SocioStanding {
+  quadrant: SocioQuadrant;
+  /** Which half of power carries them; null when over the line on neither. */
+  powerKind: PowerKind | null;
+  /** Trust ties received per colleague who rated them. */
+  trustRate: number;
+  /** Power ties received (enabling + controlling) per colleague who rated them. */
+  powerRate: number;
+  /** The group medians the two rates were split on. */
+  medians: { trust: number; power: number };
+}
+
+/**
+ * Where one member sits on the Power × Trust map.
+ *
+ * The same reading the admin map makes, so a person told "Trusted Advisor" in
+ * a coaching session sits in that corner on the facilitator's screen too:
+ * total power (enabling + controlling ties) against trust ties, each divided
+ * by how many colleagues rated them, split at the group medians, with a
+ * person exactly on a median counted on the higher side unless it is zero. Everyone on the
+ * roster counts toward the medians — an unrated member is a zero, as it is on
+ * the map. null for a suppressed member: no reading below the rater floor.
+ */
+export function memberStanding(group: SocioGroupResult, memberNo: number): SocioStanding | null {
+  const rateOf = (m: SocioMemberResult, key: string) =>
+    m.coverage > 0 ? (m.blocks.find((b) => b.blockKey === key)?.ties ?? 0) / m.coverage : 0;
+  const points = group.members.map((m) => ({
+    m,
+    trust: rateOf(m, 'trust'),
+    power: rateOf(m, 'power_to') + rateOf(m, 'power_over'),
+  }));
+  const me = points.find((p) => p.m.memberNo === memberNo);
+  if (!me || me.m.suppressed) return null;
+  const median = (vs: number[]) => {
+    const s = [...vs].sort((a, b) => a - b);
+    const mid = s.length >> 1;
+    return s.length % 2 === 1 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2;
+  };
+  const medians = { trust: median(points.map((p) => p.trust)), power: median(points.map((p) => p.power)) };
+  // Zero is never the high side (see quadrantOf in the admin model): with a
+  // median of 0, "ties count high" would make everyone with none influential.
+  const trusted = me.trust > 0 && me.trust >= medians.trust;
+  const influential = me.power > 0 && me.power >= medians.power;
+  const quadrant: SocioQuadrant =
+    trusted && influential ? 'anchor' : influential ? 'watch' : trusted ? 'underused' : 'peripheral';
+  return {
+    quadrant,
+    powerKind: me.m.powerKind,
+    trustRate: round2(me.trust),
+    powerRate: round2(me.power),
+    medians: { trust: round2(medians.trust), power: round2(medians.power) },
+  };
+}
+
+/**
+ * The archetypes said to the person themselves, for a coaching conversation.
+ * Names are the guide's own, so the report, the console and the deck agree.
+ */
+export const SOCIO_QUADRANT_FOR_MEMBER: Record<SocioQuadrant, { name: string; gloss: string; reading: string }> = {
+  anchor: {
+    name: 'Collaborative Anchor',
+    gloss: 'Trusted and influential',
+    reading:
+      'Colleagues both rely on you and follow your lead. The guide sees people here as the coalition to lead change through — and names overload as the risk worth watching.',
+  },
+  underused: {
+    name: 'Trusted Advisor',
+    gloss: 'Trusted, with less say than that trust would suggest',
+    reading:
+      'Colleagues rely on you more than the say you are given reflects. The guide reads this corner as under-leveraged: a case for more scope and authority, and a common place to find the next stretch role.',
+  },
+  watch: {
+    name: 'Risk Zone',
+    gloss: 'Influential more than trusted',
+    reading:
+      'Colleagues follow your lead more readily than they rely on you. What helps depends on which kind of power is carrying that influence — see below — because the guide prescribes a different fix for each.',
+  },
+  peripheral: {
+    name: 'Peripheral',
+    gloss: 'Fewer ties on either side',
+    reading:
+      'Fewer colleagues put you over the line on trust or on influence than is typical in this group. That is most often about being new, or working apart from the rest of the group; the guide\u2019s response is to connect, not to correct.',
+  },
+};
+
+/** Which half of power carries them, said to the person. */
+export function powerKindForMember(kind: PowerKind | null): { label: string; reading: string } {
+  switch (kind) {
+    case 'bottleneck':
+      return {
+        label: 'Control, more than enablement',
+        reading:
+          'Your influence comes mostly from people deferring to you or having to go through you, rather than from seeking you out. Where trust is lower alongside it, the guide looks first at decision rights and process, not at the person.',
+      };
+    case 'capable_expert':
+      return {
+        label: 'Enablement, more than control',
+        reading:
+          'Your influence comes mostly from people seeking you out — your judgment, the resources you unlock, the people you bring together — rather than from control. Where trust is lower alongside it, the guide points to relationships as the thing to develop.',
+      };
+    case 'mixed':
+      return {
+        label: 'Both kinds, about evenly',
+        reading: 'Your influence comes about equally from enabling others and from control.',
+      };
+    default:
+      return {
+        label: 'Not enough to split',
+        reading: 'Too few colleagues put you over the line on either kind of power for this split to say anything.',
+      };
+  }
+}
+
 export function socioBandFor(mean: number): SocioBand {
   if (mean < 2.5) return 'Low';
   if (mean < 3.5) return 'Mixed';
@@ -380,13 +508,20 @@ export function scoreSocioCohort(
 
     const items: SocioItemStat[] = SOCIO_ITEMS.map((item) => {
       const values = received.map((c) => c.values.get(item.no)).filter(isNumber);
-      return { itemNo: item.no, short: item.short, blockKey: item.blockKey, ...stat(values) };
+      return {
+        itemNo: item.no,
+        short: item.short,
+        blockKey: item.blockKey,
+        ...stat(values),
+        sum: values.reduce((t, v) => t + v, 0),
+      };
     });
 
     const blocks: SocioBlockStat[] = SOCIO_BLOCKS.map((block) => {
       const perRater = received.map((c) => rowMean(c, block.items)).filter(isNumber);
       const s = stat(perRater);
       const ties = perRater.filter((v) => v >= tieThreshold).length;
+      const raw = received.flatMap((c) => block.items.map((no) => c.values.get(no)).filter(isNumber));
       return {
         blockKey: block.key,
         name: block.name,
@@ -396,6 +531,8 @@ export function scoreSocioCohort(
         band: s.mean === null ? null : socioBandFor(s.mean),
         ties,
         tieRate: perRater.length > 0 ? round2(ties / perRater.length) : null,
+        ratingSum: raw.reduce((t, v) => t + v, 0),
+        ratingCount: raw.length,
       };
     });
 
@@ -942,6 +1079,24 @@ export function signatures(group: SocioGroupResult): Record<SignatureKind, Signa
   };
   const blockMean = (m: SocioMemberResult, key: string) =>
     m.blocks.find((b) => b.blockKey === key)?.mean ?? null;
+  const itemMean = (m: SocioMemberResult, no: number) =>
+    m.items.find((i) => i.itemNo === no)?.mean ?? null;
+  const wantShare = (m: SocioMemberResult) => (m.coverage > 0 ? m.supportGap.wanters / m.coverage : 0);
+
+  // "High" and "low" in the guide are relative to the group, not fixed marks:
+  // a lenient group rates everyone 4+, a harsh one nobody. So the dominating
+  // signature is read against the people who can actually be judged — those
+  // above the rater floor with both bands answered.
+  const judged = group.members.filter(
+    (m) =>
+      m.coverage >= group.minRaters &&
+      !m.suppressed &&
+      blockMean(m, 'power_over') !== null &&
+      blockMean(m, 'trust') !== null,
+  );
+  const powerCut = topThirdCut(judged.map((m) => blockMean(m, 'power_over')!));
+  const trustCut = medianOfValues(judged.map((m) => blockMean(m, 'trust')!));
+  const wantCut = medianOfValues(judged.map(wantShare));
 
   for (const m of group.members) {
     // Disconnected is about reach, so it is the one signature that still
@@ -957,24 +1112,47 @@ export function signatures(group: SocioGroupResult): Record<SignatureKind, Signa
     }
     if (m.suppressed) continue;
 
+    // Dominating without trust: top third on power-over, bottom half on trust,
+    // and at least the group's usual share asking for more support. The last
+    // guard — power-over above their own trust — keeps a well-trusted person
+    // out of it in a group where even the bottom half is trusted.
     const power = blockMean(m, 'power_over');
     const trust = blockMean(m, 'trust');
-    if (power !== null && trust !== null && power > trust && m.supportGap.wanters > 0) {
+    const wanted = wantShare(m);
+    if (
+      power !== null &&
+      trust !== null &&
+      powerCut !== null &&
+      trustCut !== null &&
+      wantCut !== null &&
+      power >= powerCut &&
+      trust <= trustCut &&
+      power > trust &&
+      m.supportGap.wanters > 0 &&
+      wanted >= wantCut
+    ) {
       out.dominating.push({
         memberNo: m.memberNo,
         name: m.name,
         func: m.func,
-        why: `Power-over ${power.toFixed(2)} against trust ${trust.toFixed(2)}; ${m.supportGap.wanters} ${m.supportGap.wanters === 1 ? 'colleague wants' : 'colleagues want'} more.`,
+        why: `Power-over ${power.toFixed(2)} (top third) against trust ${trust.toFixed(2)} (bottom half); ${m.supportGap.wanters} of ${m.coverage} ${m.supportGap.wanters === 1 ? 'colleague wants' : 'colleagues want'} more.`,
       });
     }
 
-    const ease = blockMean(m, 'ease');
-    if (trust !== null && trust < SOCIO_MIXED_FLOOR && (ease === null || ease < SOCIO_MIXED_FLOOR)) {
+    // Quietly unreliable: the guide's three statements exactly — on time
+    // (item 8), keeps their word (10), easy to work with (11). Item 9, safe to
+    // be open, is left out: it is warmth, not dependability, and including it
+    // would flag somebody reliable but intimidating as unreliable. "Consistently
+    // low" means every one of them answered sits below the line, at least two.
+    const dependability = UNRELIABLE_ITEMS.map((no) => ({ no, mean: itemMean(m, no) })).filter(
+      (x): x is { no: number; mean: number } => x.mean !== null,
+    );
+    if (dependability.length >= 2 && dependability.every((x) => x.mean < UNRELIABLE_BELOW)) {
       out.unreliable.push({
         memberNo: m.memberNo,
         name: m.name,
         func: m.func,
-        why: `Trust ${trust.toFixed(2)}${ease !== null ? `, ease ${ease.toFixed(2)}` : ''}.`,
+        why: dependability.map((x) => `${UNRELIABLE_LABEL[x.no]} ${x.mean.toFixed(2)}`).join(', ') + '.',
       });
     }
   }
@@ -986,5 +1164,29 @@ export function signatures(group: SocioGroupResult): Record<SignatureKind, Signa
   return out;
 }
 
-/** Below this a band mean reads as "Mixed" rather than "Strong". */
-const SOCIO_MIXED_FLOOR = 3.5;
+
+/**
+ * "Low" for the unreliable signature: under the scale's neutral middle. 3 is
+ * "neither agree nor disagree", so a colleague answered with plain 3s is
+ * unremarkable, not unreliable — at 3.5 a sixth of a real group was flagged.
+ */
+const UNRELIABLE_BELOW = 3;
+
+/** The guide's "quietly unreliable" statements: on time, keeps their word, easy to work with. */
+const UNRELIABLE_ITEMS: readonly number[] = [SOCIO_RELIABILITY_ITEM, 10, 11];
+const UNRELIABLE_LABEL: Record<number, string> = { 8: 'on time', 10: 'keeps their word', 11: 'ease' };
+
+/** The value a member must reach to sit in the top third; null for an empty group. */
+function topThirdCut(values: readonly number[]): number | null {
+  if (values.length === 0) return null;
+  const desc = [...values].sort((a, b) => b - a);
+  return desc[Math.max(0, Math.ceil(desc.length / 3) - 1)]!;
+}
+
+/** The middle value, mean of the two middles on an even count; null when empty. */
+function medianOfValues(values: readonly number[]): number | null {
+  if (values.length === 0) return null;
+  const s = [...values].sort((a, b) => a - b);
+  const mid = s.length >> 1;
+  return s.length % 2 === 1 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2;
+}

@@ -15,7 +15,10 @@ import type { Env } from '../env.js';
 import { baseUrl } from '../env.js';
 import { requireAdmin, type AdminHono } from '../lib/auth.js';
 import { cellAt, readXlsx, sheetWidth, XlsxError, type XlsxSheet } from '../lib/xlsx-read.js';
-import { auditAll, recordBefore } from '../lib/audit.js';
+import { auditAll, recordBefore, writeAudit } from '../lib/audit.js';
+import { buildSocioWorkbook } from '../lib/socio-workbook.js';
+import { isFullAdmin } from '../../shared/roles.js';
+import { socioExportRows, type SocioExportResponse, type SocioExportScope } from '../../shared/socio-export.js';
 import { newId } from '../lib/ids.js';
 import { generateToken, hashToken } from '../lib/tokens.js';
 import { decodeImageDataUrl } from '../pdf/image.js';
@@ -31,6 +34,7 @@ import {
   fieldErrors,
   insightExportSchema,
   reportsToError,
+  rosterMemberPatchSchema,
   rosterMemberSchema,
   rosterPasteSchema,
   rosterSetSchema,
@@ -711,7 +715,7 @@ cohortRoutes.patch('/:id/members/:memberId', async (c) => {
   const id = c.req.param('id');
   const memberId = c.req.param('memberId');
 
-  const parsed = rosterMemberSchema.partial().safeParse(await c.req.json().catch(() => ({})));
+  const parsed = rosterMemberPatchSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) {
     return c.json({ error: 'Please check the highlighted fields.', details: fieldErrors(parsed.error) }, 400);
   }
@@ -1433,6 +1437,126 @@ cohortRoutes.get('/:id/network', async (c) => {
  * or below 2.0 or when the deficit item is loud. Computed live per round so a
  * round still open contributes what it has so far.
  */
+/**
+ * The round's raw ratings as a workbook — guide §6 step 4, the long table
+ * (rater, ratee, criterion, score) the analysis is computed from.
+ *
+ *   ?round=N                 defaults to the current round
+ *   ?scope=whole             every rating (default)
+ *   ?scope=department&dept=  ratings received by one function
+ *   ?scope=member&member=N   ratings received by one roster position
+ *
+ * Rater names go only to full administrators. The cohort-only account is one
+ * shared login whose password lives in the repository, so it gets raters as
+ * "Rater NN" — still groupable, never named. Every export is written to the
+ * activity log explicitly: the audit middleware skips GETs, and this is the
+ * most sensitive thing the console hands out.
+ */
+cohortRoutes.get('/:id/export', async (c) => {
+  const id = c.req.param('id');
+  const cohort = await loadCohort(c.env, id);
+  if (!cohort) return c.json({ error: 'Cohort not found' }, 404);
+
+  const askedRound = Number(c.req.query('round') ?? '');
+  const round = Number.isInteger(askedRound) && askedRound > 0
+    ? await roundByNo(c.env, id, askedRound)
+    : await currentRound(c.env, id);
+  if (!round) return c.json({ error: 'That round does not exist.' }, 404);
+
+  const scopeRaw = c.req.query('scope') ?? 'whole';
+  if (scopeRaw !== 'whole' && scopeRaw !== 'department' && scopeRaw !== 'member') {
+    return c.json({ error: 'scope must be whole, department or member.' }, 400);
+  }
+  const scope: SocioExportScope = scopeRaw;
+
+  const roster = await loadRoster(c.env, id);
+  let scopeLabel = 'Whole group';
+  let dept: string | undefined;
+  let memberNo: number | undefined;
+  let fileTag = 'whole';
+  if (scope === 'department') {
+    dept = (c.req.query('dept') ?? '').trim();
+    const match = roster.find((m) => m.function.trim().toLowerCase() === dept!.toLowerCase());
+    if (!dept || !match) return c.json({ error: 'No roster member has that function.' }, 400);
+    scopeLabel = `Department: ${match.function}`;
+    fileTag = `dept-${match.function}`;
+  } else if (scope === 'member') {
+    memberNo = Number(c.req.query('member') ?? '');
+    const member = roster.find((m) => m.no === memberNo);
+    if (!member) return c.json({ error: 'No active roster member has that number.' }, 400);
+    scopeLabel = `Person: ${member.name} (#${member.no})`;
+    fileTag = `person-${member.no}`;
+  }
+
+  const [respRows, answerRows] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT r.id AS response_id, m.no AS rater_no, r.completed_at
+         FROM responses r
+         JOIN cohort_members m ON m.id = r.rater_member_id
+        WHERE r.cohort_id = ?1 AND r.round_no = ?2 AND r.status = 'completed' AND m.active = 1`,
+    )
+      .bind(id, round.no)
+      .all<{ response_id: string; rater_no: number; completed_at: string | null }>(),
+    c.env.DB.prepare(
+      `SELECT a.response_id, a.no, a.value
+         FROM answers a
+         JOIN responses r ON r.id = a.response_id
+        WHERE r.cohort_id = ?1 AND r.round_no = ?2 AND r.status = 'completed'`,
+    )
+      .bind(id, round.no)
+      .all<{ response_id: string; no: number; value: number }>(),
+  ]);
+  const bags = new Map<string, Record<number, number>>();
+  for (const a of answerRows.results ?? []) {
+    const bag = bags.get(a.response_id) ?? {};
+    bag[a.no] = a.value;
+    bags.set(a.response_id, bag);
+  }
+  const responses: SocioExportResponse[] = (respRows.results ?? []).map((r) => ({
+    raterNo: r.rater_no,
+    submittedAt: r.completed_at,
+    answers: bags.get(r.response_id) ?? {},
+  }));
+
+  const admin = c.get('admin');
+  const namedRaters = isFullAdmin(admin.role);
+  const rows = socioExportRows(
+    roster.map((m) => ({ no: m.no, name: m.name, func: m.function })),
+    responses,
+    { round: round.no, scope, dept, memberNo, nameRaters: namedRaters },
+  );
+
+  const buffer = await buildSocioWorkbook({
+    cohortName: cohort.name,
+    organisation: cohort.organisation,
+    roundNo: round.no,
+    roundName: roundName(round),
+    scope,
+    scopeLabel,
+    tieThreshold: cohort.tie_threshold,
+    namedRaters,
+    rows,
+  });
+
+  await writeAudit(c.env, { id: admin.sub, email: admin.email }, c.req.raw, 200, {
+    action: 'cohort.export_raw',
+    entity: 'cohort',
+    entityId: id,
+    summary: `Exported raw ratings — ${scopeLabel}, round ${round.no}, ${rows.length} rows, raters ${namedRaters ? 'named' : 'pseudonymised'}`,
+    after: { round: round.no, scope, dept: dept ?? null, member: memberNo ?? null, rows: rows.length, namedRaters },
+  });
+
+  const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const name = `${slug(cohort.name) || 'cohort'}-round-${round.no}-${slug(fileTag)}-raw.xlsx`;
+  return new Response(buffer, {
+    headers: {
+      'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'content-disposition': `attachment; filename="${name}"`,
+      'cache-control': 'no-store',
+    },
+  });
+});
+
 cohortRoutes.get('/:id/member/:no/trend', async (c) => {
   const id = c.req.param('id');
   const cohort = await loadCohort(c.env, id);

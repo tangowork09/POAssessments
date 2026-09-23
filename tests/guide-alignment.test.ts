@@ -114,6 +114,71 @@ describe('the three signatures — guide §5.3', () => {
     expect(s.dominating.map((m) => m.name)).not.toContain('P1');
   });
 
+  it('does not call somebody reliable but intimidating unreliable', () => {
+    // On time, keeps their word and easy to work with are all strong; only
+    // "safe to be open" (item 9) is low. That is a warmth finding, not this one.
+    const responses = [2, 3, 4].map((r) =>
+      response(r, { 1: { 8: 5, 9: 1, 10: 5, [EASE]: 5 } }),
+    );
+    const s = signatures(scoreSocioCohort(MEMBERS, responses, { minRaters: 3, tieThreshold: 4 }));
+    expect(s.unreliable.map((m) => m.name)).not.toContain('P1');
+  });
+
+  it('reads unreliable off on time, keeps their word and ease, and names them', () => {
+    const responses = [2, 3, 4].map((r) =>
+      response(r, { 1: { 8: 2, 9: 5, 10: 2, [EASE]: 2 } }),
+    );
+    const s = signatures(scoreSocioCohort(MEMBERS, responses, { minRaters: 3, tieThreshold: 4 }));
+    const one = s.unreliable.find((m) => m.name === 'P1');
+    expect(one).toBeDefined();
+    expect(one!.why).toBe('on time 2.00, keeps their word 2.00, ease 2.00.');
+  });
+
+  it('does not call plain neutral 3s unreliable', () => {
+    const responses = [2, 3, 4].map((r) => response(r, { 1: { 8: 3, 9: 3, 10: 3, [EASE]: 3 } }));
+    const s = signatures(scoreSocioCohort(MEMBERS, responses, { minRaters: 3, tieThreshold: 4 }));
+    expect(s.unreliable.map((m) => m.name)).not.toContain('P1');
+  });
+
+  it('flags dominating only against the group: top third on power-over, bottom half on trust', () => {
+    // Everyone rates everyone. P1 is the controlling, untrusted one. P2 also
+    // has power-over above their own trust, but only middling power — under
+    // the old absolute rule that was enough to be flagged; it no longer is.
+    const profile: Record<number, Record<number, number>> = {
+      1: { ...all(CONTROLLING, 5), ...all(TRUST, 2), [SUPPORT]: 5 },
+      2: { ...all(CONTROLLING, 2), 8: 2, 9: 1, 10: 2, [SUPPORT]: 5 },
+      3: { ...all(CONTROLLING, 3), ...all(TRUST, 5), [SUPPORT]: 1 },
+      4: { ...all(CONTROLLING, 3), ...all(TRUST, 5), [SUPPORT]: 1 },
+      5: { ...all(CONTROLLING, 1), ...all(TRUST, 4), [SUPPORT]: 1 },
+      6: { ...all(CONTROLLING, 1), ...all(TRUST, 4), [SUPPORT]: 1 },
+    };
+    const responses = [1, 2, 3, 4, 5, 6].map((r) =>
+      response(
+        r,
+        Object.fromEntries(Object.entries(profile).filter(([t]) => Number(t) !== r)),
+      ),
+    );
+    const s = signatures(scoreSocioCohort(MEMBERS, responses, { minRaters: 3, tieThreshold: 4 }));
+    expect(s.dominating.map((m) => m.name)).toEqual(['P1']);
+    expect(s.dominating[0]!.why).toMatch(/top third.*bottom half/);
+  });
+
+  it('flags nobody as dominating when the powerful are also the trusted', () => {
+    const profile: Record<number, Record<number, number>> = {
+      1: { ...all(CONTROLLING, 5), ...all(TRUST, 5), [SUPPORT]: 5 },
+      2: { ...all(CONTROLLING, 4), 8: 5, 9: 4, 10: 5, [SUPPORT]: 5 },
+      3: { ...all(CONTROLLING, 2), ...all(TRUST, 3), [SUPPORT]: 1 },
+      4: { ...all(CONTROLLING, 2), ...all(TRUST, 3), [SUPPORT]: 1 },
+      5: { ...all(CONTROLLING, 1), ...all(TRUST, 3), [SUPPORT]: 1 },
+      6: { ...all(CONTROLLING, 1), ...all(TRUST, 3), [SUPPORT]: 1 },
+    };
+    const responses = [1, 2, 3, 4, 5, 6].map((r) =>
+      response(r, Object.fromEntries(Object.entries(profile).filter(([t]) => Number(t) !== r))),
+    );
+    const s = signatures(scoreSocioCohort(MEMBERS, responses, { minRaters: 3, tieThreshold: 4 }));
+    expect(s.dominating).toEqual([]);
+  });
+
   // "Not withholding — simply outside the network. Connect, don't correct."
   // The row carries the reach figure; the "connect, don't correct" framing is
   // the section's, so it is stated once rather than once per person.
@@ -245,5 +310,26 @@ describe('hidden power — guide §5.4', () => {
     const ins = socioInsights(MEMBERS, responses, { tieThreshold: 4 });
     expect(ins.covertPower.ties).toBe(0);
     expect(ins.covertPower.verdict).toMatch(/no hidden concentration/i);
+  });
+});
+
+describe('raw sums — guide §5.1 "add up the ratings they receive"', () => {
+  it('adds every rating per statement and per block, and the average matches the block mean', () => {
+    const responses = [
+      response(2, { 1: { 1: 5, 2: 4, 3: 3, 4: 2, 5: 1, 6: 2, 7: 3, 8: 4, 9: 5, 10: 4, 11: 3, 12: 2 } }),
+      response(3, { 1: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 4, 7: 3, 8: 2, 9: 1, 10: 2, 11: 3, 12: 4 } }),
+      response(4, { 1: { 1: 3, 2: 3, 3: 3, 4: 3, 5: 3, 6: 3, 7: 3, 8: 3, 9: 3, 10: 3, 11: 3, 12: 3 } }),
+    ];
+    const g = scoreSocioCohort(MEMBERS, responses, { minRaters: 3, tieThreshold: 4 });
+    const p1 = g.members.find((m) => m.memberNo === 1)!;
+    expect(p1.items.find((i) => i.itemNo === 1)!.sum).toBe(9);
+    expect(p1.items.find((i) => i.itemNo === 12)!.sum).toBe(9);
+    const trust = p1.blocks.find((b) => b.blockKey === 'trust')!;
+    expect(trust.ratingSum).toBe(4 + 5 + 4 + 2 + 1 + 2 + 3 + 3 + 3);
+    expect(trust.ratingCount).toBe(9);
+    expect(trust.ratingSum / trust.ratingCount).toBeCloseTo(trust.mean!, 2);
+    const powerTo = p1.blocks.find((b) => b.blockKey === 'power_to')!;
+    expect(powerTo.ratingSum).toBe(14 + 10 + 12);
+    expect(powerTo.ratingCount).toBe(12);
   });
 });

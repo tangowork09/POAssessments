@@ -22,6 +22,7 @@ import {
 } from '../../shared/socio.js';
 import {
   memberResultFor,
+  memberStanding,
   scoreSocioCohort,
   socioGroupSummary,
   socioMemberSummary,
@@ -29,6 +30,7 @@ import {
   type SocioMember,
   type SocioMemberResult,
   type SocioResponseInput,
+  type SocioStanding,
 } from '../../shared/socio-scoring.js';
 import { socioInsights } from '../../shared/socio-insights.js';
 import type {
@@ -407,6 +409,8 @@ export interface MemberScores {
   context: SocioMemberReportPayload['context'];
   groupContext: SocioMemberReportPayload['groupContext'];
   summary: string;
+  /** Absent on reports generated before quadrants were stored. */
+  standing?: SocioStanding | null;
 }
 
 export function memberScores(group: SocioGroupResult, member: SocioMemberResult): MemberScores {
@@ -444,6 +448,7 @@ export function memberScores(group: SocioGroupResult, member: SocioMemberResult)
       cohortMean: group.cohortMean,
     },
     summary: socioMemberSummary(member, group),
+    standing: memberStanding(group, member.memberNo),
   };
 }
 
@@ -467,6 +472,12 @@ export function memberPayload(input: PayloadBase & { scores: MemberScores }): So
     groupContext: input.scores.groupContext,
     items: SOCIO_ITEM_INFO,
     suppressed: input.scores.member.suppressed,
+    // Stored always, shown only while sharing is on: switching sharing off
+    // withdraws the quadrant from every report link at once, no regeneration.
+    standing:
+      input.cohort.share_reports === 1 && !input.scores.member.suppressed
+        ? (input.scores.standing ?? null)
+        : null,
   };
 }
 

@@ -723,13 +723,17 @@ export function divergenceMedians(points: readonly DivergencePoint[]): Medians {
 
 /**
  * Which quadrant a person sits in. Sitting exactly on a median counts as the
- * higher side of it: the split is a reading aid, and pushing a person at the
+ * higher side of it — unless that median is zero, since nobody with no ties
+ * at all is high on anything: the split is a reading aid, and pushing a person at the
  * middle of the group down into "peripheral" is a harder claim than a median
  * can carry.
  */
 export function quadrantOf(p: DivergencePoint, m: Medians): Quadrant {
-  const trusted = p.trust >= m.trust;
-  const influential = p.power >= m.power;
+  // Zero is never the high side. Where most of a group has no power ties the
+  // median is 0, and "on the median counts high" would then call everyone with
+  // none "influential" — a Trusted Advisor drawn as a Collaborative Anchor.
+  const trusted = p.trust > 0 && p.trust >= m.trust;
+  const influential = p.power > 0 && p.power >= m.power;
   if (trusted && influential) return 'anchor';
   if (influential) return 'watch';
   if (trusted) return 'underused';
@@ -2306,6 +2310,7 @@ export function comparePeople(
   const power = degrees([...all], list, 'power_over', tieThreshold);
   const rel = degrees([...all], list, 'reliability', tieThreshold);
   const open = degrees([...all], list, 'openness', tieThreshold);
+  const covert = degrees([...all], list, 'covert_power', tieThreshold);
   const bridge = betweenness(
     all,
     list.filter((e) => edgePolarity(e, 'trust', tieThreshold) === 'positive').map((e) => ({ from: e.from, to: e.to })),
@@ -2349,6 +2354,7 @@ export function comparePeople(
     metric('bridge', 'Bridge score', 'Bridge', 'none', 'Shortest trust paths running through them. A structural fact, not a merit.', (no) => bridge.get(no) ?? 0, two),
     metric('reliability', 'Reliability', 'Reliable', 'high', 'Colleagues who say they deliver what they said they would.', (no) => rel.get(no)?.posIn ?? 0, int),
     metric('openness', 'Openness', 'Open', 'high', 'Colleagues who say they can tell this person what they actually think.', (no) => open.get(no)?.posIn ?? 0, int),
+    metric('covert', 'Hidden power received', 'Hidden', 'none', 'Colleagues who say they shape issues before they reach the room. Influence, not merit.', (no) => covert.get(no)?.posIn ?? 0, int),
     metric('coverage', 'Rated by', 'Rated by', 'none', 'How many colleagues had a basis to judge. Context for every row above.', (no) => coverage?.get(no) ?? null, int),
   ];
 }
