@@ -819,6 +819,9 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
 .ins-signature{ display:flex; flex-direction:column; gap:3px; margin-bottom:12px; }
 .ins-signature > b{ font-size:12.5px; color:var(--ink); }
 .ins-signature > span{ font-size:11px; color:var(--ink-3); margin-bottom:4px; }
+/* A signature's "why" is the evidence — the figures behind the flag — so it
+   wraps rather than being cut to "trust 2.0…" like an ordinary meta line. */
+.ins-signature .insights-row-meta{ flex:1 1 100%; white-space:normal; overflow:visible; text-overflow:clip; line-height:1.4; text-align:left; }
 
 .ins-isolate{
   border:1px solid var(--line-2); background:var(--surface); color:var(--ink-2);
@@ -1919,6 +1922,8 @@ textarea.control{ height:auto; padding:10px 12px; font-family:var(--mono); font-
   pointer-events:none;
 }
 .ins-legend-float .ins-key.is-toggle{ pointer-events:auto; }
+/* Room for the legend under the picture, so no name is drawn beneath it. */
+.ins-stage-body.has-legend{ padding-bottom:calc(var(--legend-h, 36px) + 14px); }
 .ins-legend-float .ins-legend-row{ row-gap:4px; }
 /* The picture is a flex item, not a percentage-height block: a percentage
    against a flex parent with no stated height is the one way an SVG in this

@@ -254,6 +254,25 @@ export function Workspace({
   finding?: string | null;
 }) {
   const zoom = useZoomPane();
+  /**
+   * The legend floats on the picture, so its height is reserved at the foot
+   * of the stage: without that the lowest names were drawn underneath it.
+   * Measured rather than guessed, because a long legend wraps to two lines.
+   */
+  const legendRef = useRef<HTMLDivElement | null>(null);
+  const [legendH, setLegendH] = useState(0);
+  useLayoutEffect(() => {
+    const el = legendRef.current;
+    if (!el) {
+      setLegendH(0);
+      return;
+    }
+    const measure = () => setLegendH(Math.ceil(el.getBoundingClientRect().height));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [Boolean(legend)]);
   return (
     <div
       className={`ins-ws${bandTall ? ' is-band-tall' : ''}${plain ? ' is-plain-stage' : ''}`}
@@ -297,7 +316,10 @@ export function Workspace({
             ) : null}
           </div>
         </header>
-        <div className={`ins-stage-body${plain ? ' is-plain' : ''}`}>
+        <div
+          className={`ins-stage-body${plain ? ' is-plain' : ''}${legend ? ' has-legend' : ''}`}
+          style={legend ? ({ '--legend-h': `${legendH}px` } as React.CSSProperties) : undefined}
+        >
           {plain ? (
             centre
           ) : (
@@ -307,7 +329,11 @@ export function Workspace({
               </div>
             </div>
           )}
-          {legend ? <div className="ins-legend-float">{legend}</div> : null}
+          {legend ? (
+            <div className="ins-legend-float" ref={legendRef}>
+              {legend}
+            </div>
+          ) : null}
           {centreAside ? <div className="ins-stage-float">{centreAside}</div> : null}
         </div>
       </section>

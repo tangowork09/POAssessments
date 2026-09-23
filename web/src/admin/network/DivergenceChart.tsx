@@ -140,21 +140,29 @@ export function DivergenceChart({
       { q: 'peripheral', text: QUADRANT_NAME.peripheral, cx: left, cy: bottom + 24, anchor: 'start' },
       { q: 'watch', text: `${QUADRANT_NAME.watch} — watch list`, cx: right, cy: bottom + 24, anchor: 'end' },
     ];
-    const cornerPills = corners.map((c) => ({ ...c, box: textBox(c.text, c.cx, c.cy, 19.5, c.anchor, { x: 0, y: 0 }) }));
-    // "median" under the vertical median on the x axis, beside the horizontal
-    // one on the y axis. The x one dodges the bottom captions: if it would
-    // land on either, it goes to the top edge instead.
+    const pill = (c: (typeof corners)[number]) => ({
+      ...c,
+      box: textBox(c.text, c.cx, c.cy, 19.5, c.anchor, { x: 0, y: 0 }),
+    });
     const overlaps = (a: LabelBox, b: LabelBox) =>
       a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-    const medianSeats = [
-      { cx: mx, cy: bottom + 24, anchor: 'middle' as const },
-      { cx: mx, cy: top - 14, anchor: 'middle' as const },
-    ];
-    const medianX =
-      medianSeats.find((seat) => {
-        const b = textBox('median', seat.cx, seat.cy, 15, seat.anchor, { x: 4, y: 0 });
-        return !cornerPills.some((c) => overlaps(b, c.box));
-      }) ?? medianSeats[0]!;
+    // "median" sits under the vertical median on the x axis, beside the
+    // horizontal one on the y axis. The x label stays under its tick — a
+    // label anywhere else reads as pointing at a different line — so when it
+    // lands on a bottom caption, the caption steps aside instead: a median of
+    // zero (common when most people hold no power ties) puts it exactly on
+    // "Peripheral", and the top edge is no better, with its own caption there.
+    const medianX = { cx: mx, cy: bottom + 24, anchor: 'middle' as const };
+    const medianBox = textBox('median', medianX.cx, medianX.cy, 15, 'middle', { x: 4, y: 0 });
+    const STEP = 12;
+    const cornerPills = corners.map((c) => {
+      const p = pill(c);
+      if (c.cy !== medianX.cy || !overlaps(medianBox, p.box)) return p;
+      return pill({
+        ...c,
+        cx: c.anchor === 'start' ? medianBox.x + medianBox.w + STEP : medianBox.x - STEP,
+      });
+    });
     const guides = [
       { text: 'median', cx: medianX.cx, cy: medianX.cy, anchor: medianX.anchor, tick: { x1: mx, y1: medianX.cy > my ? bottom : top, x2: mx, y2: medianX.cy > my ? bottom + 8 : top - 8 } },
       { text: 'median', cx: left - 10, cy: my + 5, anchor: 'end' as const, tick: { x1: left - 8, y1: my, x2: left, y2: my } },
