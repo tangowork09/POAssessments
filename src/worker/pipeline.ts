@@ -525,7 +525,7 @@ export async function ensureCandidateAndLink(
      VALUES (?1, ?2, ?3, 'invited')
      -- Names idx_responses_identity in full. A partial target does not match
      -- the index and SQLite refuses the statement outright.
-     ON CONFLICT (assessment_id, candidate_id, COALESCE(cohort_id, ''), round_no) DO NOTHING`,
+     ON CONFLICT (assessment_id, candidate_id, COALESCE(cohort_id, ''), round_no) WHERE anonymous = 0 DO NOTHING`,
   )
     .bind(newId('resp'), input.assessmentId, candidate.id)
     .run();

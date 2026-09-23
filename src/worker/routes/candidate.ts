@@ -534,8 +534,10 @@ candidateRoutes.post('/start/:token', async (c) => {
      -- The conflict target must name the unique index exactly, and that index
      -- gained round_no when cohorts learned to run in rounds. A self-rating
      -- has no round, so it lands on the default of 1 and collides with itself
-     -- the way it always did.
-     ON CONFLICT (assessment_id, candidate_id, COALESCE(cohort_id, ''), round_no) DO UPDATE
+     -- the way it always did. The index is partial (anonymous = 0, since
+     -- migration 0022), and SQLite only matches a partial index when the
+     -- target repeats its WHERE — without it every start is a 500.
+     ON CONFLICT (assessment_id, candidate_id, COALESCE(cohort_id, ''), round_no) WHERE anonymous = 0 DO UPDATE
         SET status     = CASE WHEN responses.status = 'completed' THEN 'completed' ELSE 'in_progress' END,
             started_at = COALESCE(responses.started_at, datetime('now'))`,
   )
@@ -607,7 +609,35 @@ async function startCohortResponse(c: Context<{ Bindings: Env }>, link: LinkRow)
     return c.json({ error: LINK_ONLY_REFUSAL, linkOnly: true }, 403);
   }
 
-  const parsed = cohortIdentitySchema.safeParse(await c.req.json().catch(() => ({})));
+  // A personal link was bound to one person when it was issued, so the link —
+  // not whatever is typed on the page — says who this is. Without this the
+  // email box decided identity on a personal link too: the holder of one
+  // member's link could type a colleague's address and rate as them, which
+  // defeated "Personal links only" entirely. A typed email is now optional
+  // here and must match; the bound one is used either way.
+  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  let boundEmail: string | null = null;
+  if (link.kind === 'personal' && link.candidate_id) {
+    const bound = await c.env.DB.prepare('SELECT email FROM candidates WHERE id = ?1')
+      .bind(link.candidate_id)
+      .first<{ email: string }>();
+    boundEmail = bound?.email?.trim().toLowerCase() || null;
+  }
+  if (boundEmail) {
+    const typed = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+    if (typed && typed !== boundEmail) {
+      return c.json(
+        {
+          error: 'This link was issued to someone else. Open the link that was sent to your own work email.',
+          details: { email: 'This link belongs to another participant' },
+        },
+        403,
+      );
+    }
+    body.email = boundEmail;
+  }
+
+  const parsed = cohortIdentitySchema.safeParse(body);
   if (!parsed.success) {
     return c.json({ error: 'Please check the highlighted fields.', details: fieldErrors(parsed.error) }, 400);
   }
@@ -714,7 +744,7 @@ async function startCohortResponse(c: Context<{ Bindings: Env }>, link: LinkRow)
   await c.env.DB.prepare(
     `INSERT INTO responses (id, assessment_id, candidate_id, link_id, cohort_id, round_no, rater_member_id, status, started_at)
      VALUES (?1, ?2, ?3, ?4, ?5, ?7, ?6, 'in_progress', datetime('now'))
-     ON CONFLICT (assessment_id, candidate_id, COALESCE(cohort_id, ''), round_no) DO UPDATE
+     ON CONFLICT (assessment_id, candidate_id, COALESCE(cohort_id, ''), round_no) WHERE anonymous = 0 DO UPDATE
         SET status          = CASE WHEN responses.status = 'completed' THEN 'completed' ELSE 'in_progress' END,
             rater_member_id = excluded.rater_member_id,
             started_at      = COALESCE(responses.started_at, datetime('now'))`,
